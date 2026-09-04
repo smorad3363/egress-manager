@@ -73,3 +73,7 @@ Route traffic selected by ingress interface or source subnet through an enabled 
 - Read-only inventory now includes bounded, typed Linux policy rules for foreign-priority preservation.
 - Deterministic safety planner resolves subnet ingress interfaces, rejects selector overlap and protected-management capture, requires enabled compatible outbounds, bounds hostname resolution, reserves foreign route tables and rule priorities, and emits explicit endpoint bypasses.
 - Project-owned routing candidates and public plans use stable hashes, dedicated TUN names, bounded policy slots, and no secret material.
+- Follow-outbound DNS requires explicit bounded resolvers; unsafe, mapped, link-local, duplicate, or implicit resolver state is rejected.
+- sing-box composition now emits dedicated non-auto-route TUN inbounds, detoured DNS servers, explicit IPv4/IPv6 actions, and direct output only for explicitly selected policies; the pinned native binary validates the generated configuration.
+- Native routing plans render only the `inet egm_egress` nftables table and protocol-`242` IPv4/IPv6 policy batches, including endpoint blocking inside selected tables, MTU/MSS controls, DNS input protection, and family-specific kill switches.
+- Replanning preserves verified project-owned tables, priorities, and TUN prefixes while continuing to reject foreign collisions; disposable native tests validate nftables syntax and execute both iproute2 batches twice.

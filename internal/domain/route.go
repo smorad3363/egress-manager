@@ -132,6 +132,7 @@ type Route struct {
 	FallbackOutboundID ID            `json:"fallback_outbound_id,omitempty"`
 	FailurePolicy      FailurePolicy `json:"failure_policy"`
 	DNSPolicy          DNSPolicy     `json:"dns_policy"`
+	DNSServers         []netip.Addr  `json:"dns_servers,omitempty"`
 	IPv4Policy         IPv4Policy    `json:"ipv4_policy"`
 	IPv6Policy         IPv6Policy    `json:"ipv6_policy"`
 	KillSwitch         bool          `json:"kill_switch"`
@@ -170,6 +171,28 @@ func (route Route) Validate() error {
 	if (route.FailurePolicy == FailureBlock || route.FailurePolicy == FailureFailover) && !route.KillSwitch {
 		killSwitchError = fmt.Errorf("block and failover policies require the kill switch")
 	}
+	var dnsServersError error
+	if route.DNSPolicy == DNSFollowOutbound {
+		if len(route.DNSServers) < 1 || len(route.DNSServers) > 4 {
+			dnsServersError = fmt.Errorf("follow-outbound DNS policy requires between 1 and 4 explicit DNS servers")
+		} else {
+			seen := make(map[netip.Addr]struct{}, len(route.DNSServers))
+			for _, address := range route.DNSServers {
+				canonical := address.Unmap()
+				if !address.IsValid() || address != canonical || address.IsUnspecified() || address.IsLoopback() || address.IsMulticast() || address.IsLinkLocalUnicast() {
+					dnsServersError = fmt.Errorf("DNS servers must be canonical unicast addresses")
+					break
+				}
+				if _, exists := seen[address]; exists {
+					dnsServersError = fmt.Errorf("DNS servers must not contain duplicates")
+					break
+				}
+				seen[address] = struct{}{}
+			}
+		}
+	} else if len(route.DNSServers) != 0 {
+		dnsServersError = fmt.Errorf("explicit DNS servers are allowed only with follow-outbound DNS policy")
+	}
 	return joinErrors(
 		route.ID.Validate("route id"),
 		validateDisplayName("route name", route.Name),
@@ -178,6 +201,7 @@ func (route Route) Validate() error {
 		route.FailurePolicy.Validate(),
 		fallbackError,
 		route.DNSPolicy.Validate(),
+		dnsServersError,
 		route.IPv4Policy.Validate(),
 		route.IPv6Policy.Validate(),
 		mtuError,

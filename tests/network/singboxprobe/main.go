@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sort"
@@ -15,6 +16,8 @@ import (
 	"time"
 
 	"github.com/egress-manager/egress-manager/internal/domain"
+	"github.com/egress-manager/egress-manager/internal/inventory"
+	"github.com/egress-manager/egress-manager/internal/routing"
 	managed "github.com/egress-manager/egress-manager/internal/singbox"
 	"github.com/egress-manager/egress-manager/internal/system"
 )
@@ -65,7 +68,114 @@ func main() {
 		fail(fmt.Sprintf("validated %d candidates, want 10", validated))
 	}
 	fmt.Println("PASS: sing-box fixture imports pass native validation")
+	validateRoutedCandidate(os.Args[1])
 	probeConnectivity()
+}
+
+func validateRoutedCandidate(fixtureDirectory string) {
+	input, err := os.ReadFile(filepath.Join(fixtureDirectory, "vless.uri"))
+	if err != nil {
+		fail("read routed validation fixture")
+	}
+	imports, err := managed.ParseImport(strings.TrimSpace(string(input)))
+	if err != nil || len(imports) != 1 {
+		fail("parse routed validation fixture")
+	}
+	imported := imports[0]
+	route := domain.Route{
+		ID: "lab_route", Name: "Lab route", Source: domain.RouteSource{Kind: domain.RouteSourceInterface, Interface: "lab0"},
+		OutboundID: imported.Outbound.ID, FailurePolicy: domain.FailureBlock, DNSPolicy: domain.DNSFollowOutbound,
+		DNSServers: []netip.Addr{netip.MustParseAddr("1.1.1.1")}, IPv4Policy: domain.IPv4FollowOutbound,
+		IPv6Policy: domain.IPv6Block, KillSwitch: true, MTU: 1400, TCPMSS: 1360, Enabled: true,
+	}
+	host := inventory.Inventory{Interfaces: []inventory.Interface{
+		{Name: "lo", State: "unknown", MTU: 65536, Addresses: []inventory.Address{{Family: "inet", CIDR: "127.0.0.1/8", Scope: "host"}}},
+		{Name: "eth0", State: "up", MTU: 1500, Addresses: []inventory.Address{{Family: "inet", CIDR: "192.0.2.9/24", Scope: "global"}}},
+		{Name: "lab0", State: "up", MTU: 1500, Addresses: []inventory.Address{{Family: "inet", CIDR: "10.250.0.1/24", Scope: "global"}}},
+	}}
+	routingState, _ := routing.ParseState(nil, false)
+	desired, err := routing.BuildPlan(
+		routing.Settings{TableBase: 20000, RulePriorityBase: 21000, ProtectedLocalPrefixes: []netip.Prefix{netip.MustParsePrefix("192.0.2.0/24")}},
+		[]domain.Route{route}, []domain.Outbound{imported.Outbound}, host,
+		routing.ResolvedEndpoints{imported.Outbound.ID: []netip.Addr{netip.MustParseAddr("198.51.100.20")}}, routingState,
+	)
+	if err != nil {
+		fail("build native routing desired state")
+	}
+	parsedDesired, err := routing.ParseState(desired.Candidate(), true)
+	if err != nil {
+		fail("parse native routing desired state")
+	}
+	state, _ := managed.ParseState(nil, false)
+	plan, err := managed.BuildRoutedPlan([]domain.Outbound{imported.Outbound}, map[domain.ID][]byte{imported.Outbound.ID: imported.CredentialDocument}, parsedDesired.Routes, state)
+	if err != nil {
+		fail("build routed sing-box candidate")
+	}
+	path := filepath.Join(os.TempDir(), "egress-sing-box-routed-check.json")
+	if err := os.WriteFile(path, plan.Candidate(), 0o600); err != nil {
+		fail("write routed candidate")
+	}
+	defer os.Remove(path)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	result, runErr := (system.ExecRunner{}).Run(ctx, system.Command{Name: "sing-box", Args: []string{"check", "-c", path}})
+	if runErr != nil || result.ExitCode != 0 {
+		fail("native validation failed for routed sing-box candidate")
+	}
+	validateNativeRouting(ctx, desired, parsedDesired.Routes[0])
+	fmt.Println("PASS: routed sing-box, nftables, and iproute2 candidates pass native validation")
+}
+
+func validateNativeRouting(ctx context.Context, desired routing.ExecutionPlan, intent routing.RouteIntent) {
+	plan, err := routing.BuildNativePlan(desired, false)
+	if err != nil {
+		fail("build nftables and iproute2 candidates")
+	}
+	directory, err := os.MkdirTemp("", "egress-routing-check-")
+	if err != nil {
+		fail("create native routing validation directory")
+	}
+	defer os.RemoveAll(directory)
+	nftPath := filepath.Join(directory, "routing.nft")
+	ipv4Path := filepath.Join(directory, "routing-v4.batch")
+	ipv6Path := filepath.Join(directory, "routing-v6.batch")
+	for path, content := range map[string][]byte{nftPath: plan.NFTCandidate(), ipv4Path: plan.IPv4Batch(), ipv6Path: plan.IPv6Batch()} {
+		if err := os.WriteFile(path, content, 0o600); err != nil {
+			fail("write native routing candidate")
+		}
+	}
+	runner := system.ExecRunner{}
+	run := func(command system.Command) system.Result {
+		result, runErr := runner.Run(ctx, command)
+		if runErr != nil || result.ExitCode != 0 {
+			fail(fmt.Sprintf("execute native routing validation command %s %s: %s", command.Name, strings.Join(command.Args, " "), strings.TrimSpace(string(result.Stderr))))
+		}
+		return result
+	}
+	run(system.Command{Name: "nft", Args: []string{"--check", "--file", nftPath}})
+	run(system.Command{Name: "ip", Args: []string{"link", "add", "lab0", "type", "dummy"}})
+	defer func() {
+		_, _ = runner.Run(context.Background(), system.Command{Name: "ip", Args: []string{"link", "delete", "lab0"}})
+	}()
+	run(system.Command{Name: "ip", Args: []string{"link", "set", "lab0", "up"}})
+	run(system.Command{Name: "ip", Args: []string{"link", "add", intent.TunnelInterface, "type", "dummy"}})
+	defer func() {
+		_, _ = runner.Run(context.Background(), system.Command{Name: "ip", Args: []string{"link", "delete", intent.TunnelInterface}})
+	}()
+	run(system.Command{Name: "ip", Args: []string{"link", "set", intent.TunnelInterface, "up"}})
+	run(system.Command{Name: "ip", Args: []string{"-4", "-batch", ipv4Path}})
+	run(system.Command{Name: "ip", Args: []string{"-6", "-batch", ipv6Path}})
+	defer func() {
+		for _, family := range []string{"-4", "-6"} {
+			_, _ = runner.Run(context.Background(), system.Command{Name: "ip", Args: []string{family, "rule", "delete", "priority", fmt.Sprint(intent.RulePriority), "protocol", routing.OwnedRouteProtocol}})
+			_, _ = runner.Run(context.Background(), system.Command{Name: "ip", Args: []string{family, "route", "flush", "table", fmt.Sprint(intent.RoutingTable), "proto", routing.OwnedRouteProtocol}})
+		}
+	}()
+	rules := run(system.Command{Name: "ip", Args: []string{"-j", "rule", "show"}})
+	routes := run(system.Command{Name: "ip", Args: []string{"-j", "-4", "route", "show", "table", fmt.Sprint(intent.RoutingTable)}})
+	if !strings.Contains(string(rules.Stdout), `"protocol":"242"`) || !strings.Contains(string(routes.Stdout), `"protocol":"242"`) {
+		fail("native iproute2 candidates omitted the owned protocol marker")
+	}
 }
 
 func probeConnectivity() {

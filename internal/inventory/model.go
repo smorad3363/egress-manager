@@ -48,6 +48,7 @@ type Route struct {
 
 type PolicyRule struct {
 	Priority    int    `json:"priority"`
+	Protocol    string `json:"protocol,omitempty"`
 	Source      string `json:"source"`
 	Destination string `json:"destination,omitempty"`
 	Table       string `json:"table"`

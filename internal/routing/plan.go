@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
+	"regexp"
 	"sort"
 	"strconv"
 
@@ -23,6 +24,8 @@ const (
 	ownedSchema           = "egress-manager/routing/v1"
 )
 
+var linuxInterfacePattern = regexp.MustCompile(`^[a-zA-Z0-9_.-]{1,15}$`)
+
 type Settings struct {
 	TableBase              uint32
 	RulePriorityBase       uint32
@@ -32,8 +35,9 @@ type Settings struct {
 type ResolvedEndpoints map[domain.ID][]netip.Addr
 
 type State struct {
-	Exists bool   `json:"exists"`
-	Hash   string `json:"hash"`
+	Exists bool          `json:"exists"`
+	Hash   string        `json:"hash"`
+	Routes []RouteIntent `json:"-"`
 }
 
 type Action struct {
@@ -72,14 +76,78 @@ type RouteIntent struct {
 	OutboundID         domain.ID              `json:"outbound_id"`
 	OutboundAdapter    domain.OutboundAdapter `json:"outbound_adapter"`
 	FallbackOutboundID domain.ID              `json:"fallback_outbound_id,omitempty"`
+	SelectedOutboundID domain.ID              `json:"selected_outbound_id,omitempty"`
+	UseDirect          bool                   `json:"use_direct,omitempty"`
 	FailurePolicy      domain.FailurePolicy   `json:"failure_policy"`
 	DNSPolicy          domain.DNSPolicy       `json:"dns_policy"`
+	DNSServers         []netip.Addr           `json:"dns_servers,omitempty"`
 	IPv4Policy         domain.IPv4Policy      `json:"ipv4_policy"`
 	IPv6Policy         domain.IPv6Policy      `json:"ipv6_policy"`
 	KillSwitch         bool                   `json:"kill_switch"`
 	MTU                uint16                 `json:"mtu,omitempty"`
 	TCPMSS             uint16                 `json:"tcp_mss,omitempty"`
 	BypassAddresses    []netip.Addr           `json:"bypass_addresses"`
+	TunnelAddresses    []netip.Prefix         `json:"tunnel_addresses,omitempty"`
+}
+
+func (intent RouteIntent) Validate() error {
+	if err := intent.ID.Validate("owned route id"); err != nil || intent.TunnelInterface != tunnelName(intent.ID) || !linuxInterfacePattern.MatchString(intent.IngressInterface) || intent.RoutingTable == 0 || intent.RulePriority == 0 {
+		return fmt.Errorf("owned routing state contains an invalid route identity or resource")
+	}
+	if intent.OutboundAdapter != domain.OutboundAdapterSingBox {
+		return fmt.Errorf("owned route does not use the sing-box adapter")
+	}
+	if intent.UseDirect {
+		if intent.FailurePolicy != domain.FailureDirect || intent.SelectedOutboundID != "" {
+			return fmt.Errorf("owned route contains an invalid direct selection")
+		}
+	} else {
+		if err := intent.SelectedOutboundID.Validate("selected outbound id"); err != nil {
+			return err
+		}
+		if intent.SelectedOutboundID != intent.OutboundID && (intent.FailurePolicy != domain.FailureFailover || intent.SelectedOutboundID != intent.FallbackOutboundID) {
+			return fmt.Errorf("owned route selected an undeclared outbound")
+		}
+	}
+	route := domain.Route{
+		ID: intent.ID, Name: string(intent.ID), Source: intent.Source, OutboundID: intent.OutboundID,
+		FallbackOutboundID: intent.FallbackOutboundID, FailurePolicy: intent.FailurePolicy, DNSPolicy: intent.DNSPolicy,
+		DNSServers: intent.DNSServers, IPv4Policy: intent.IPv4Policy, IPv6Policy: intent.IPv6Policy,
+		KillSwitch: intent.KillSwitch, MTU: intent.MTU, TCPMSS: intent.TCPMSS, Enabled: true,
+	}
+	if err := route.Validate(); err != nil {
+		return fmt.Errorf("owned route policy is invalid: %w", err)
+	}
+	if intent.Source.Kind == domain.RouteSourceInterface && intent.Source.Interface != intent.IngressInterface {
+		return fmt.Errorf("owned route ingress does not match its interface source")
+	}
+	if len(intent.TunnelAddresses) != 2 || !validTunnelAddress(intent.TunnelAddresses[0], true) || !validTunnelAddress(intent.TunnelAddresses[1], false) {
+		return fmt.Errorf("owned route contains invalid tunnel addresses")
+	}
+	if len(intent.BypassAddresses) < 1 || len(intent.BypassAddresses) > 32 {
+		return fmt.Errorf("owned route contains an invalid outbound bypass set")
+	}
+	seen := make(map[netip.Addr]struct{}, len(intent.BypassAddresses))
+	for _, address := range intent.BypassAddresses {
+		if !address.IsValid() || address != address.Unmap() || address.IsUnspecified() || address.IsLoopback() || address.IsMulticast() {
+			return fmt.Errorf("owned route contains an unsafe outbound bypass address")
+		}
+		if _, exists := seen[address]; exists {
+			return fmt.Errorf("owned route contains duplicate outbound bypass addresses")
+		}
+		seen[address] = struct{}{}
+	}
+	return nil
+}
+
+func validTunnelAddress(prefix netip.Prefix, ipv4 bool) bool {
+	if !prefix.IsValid() || prefix.Addr().Is4() != ipv4 || prefix.Addr().IsUnspecified() || prefix.Addr().IsMulticast() {
+		return false
+	}
+	if ipv4 {
+		return prefix.Bits() == 30 && netip.MustParsePrefix("198.18.0.0/15").Contains(prefix.Addr())
+	}
+	return prefix.Bits() == 126 && netip.MustParsePrefix("fd45:474d::/32").Contains(prefix.Addr())
 }
 
 func BuildPlan(settings Settings, routes []domain.Route, outbounds []domain.Outbound, host inventory.Inventory, resolved ResolvedEndpoints, state State) (ExecutionPlan, error) {
@@ -102,6 +170,8 @@ func BuildPlan(settings Settings, routes []domain.Route, outbounds []domain.Outb
 	}
 	usedTables := existingNumericTables(host.Routes)
 	usedPriorities := existingPriorities(host.PolicyRules)
+	usedPrefixes := existingPrefixes(host)
+	releaseOwnedResources(state.Routes, host, usedTables, usedPriorities, &usedPrefixes)
 	normalized := append([]domain.Route{}, routes...)
 	sort.Slice(normalized, func(i, j int) bool { return normalized[i].ID < normalized[j].ID })
 	seenIDs := map[domain.ID]struct{}{}
@@ -163,15 +233,29 @@ func BuildPlan(settings Settings, routes []domain.Route, outbounds []domain.Outb
 			bypass = append(bypass, fallbackAddresses...)
 		}
 		bypass = normalizeAddresses(bypass)
-		table, priority, err := allocatePolicySlot(route.ID, settings, usedTables, usedPriorities)
+		table, priority, slot, err := allocatePolicySlot(route.ID, settings, usedTables, usedPriorities, usedPrefixes)
 		if err != nil {
 			return ExecutionPlan{}, err
 		}
+		selected := primary.ID
+		useDirect := false
+		if primary.Health.Status == domain.HealthUnhealthy {
+			switch route.FailurePolicy {
+			case domain.FailureFailover:
+				fallback := outboundByID[route.FallbackOutboundID]
+				if fallback.Health.Status != domain.HealthUnhealthy && fallback.Health.Status != domain.HealthDisabled {
+					selected = fallback.ID
+				}
+			case domain.FailureDirect:
+				selected = ""
+				useDirect = true
+			}
+		}
 		intent := RouteIntent{
 			ID: route.ID, Source: route.Source, IngressInterface: ingress, TunnelInterface: tunnelName(route.ID), RoutingTable: table, RulePriority: priority,
-			OutboundID: route.OutboundID, OutboundAdapter: primary.Adapter, FallbackOutboundID: route.FallbackOutboundID,
-			FailurePolicy: route.FailurePolicy, DNSPolicy: route.DNSPolicy, IPv4Policy: route.IPv4Policy, IPv6Policy: route.IPv6Policy,
-			KillSwitch: route.KillSwitch, MTU: route.MTU, TCPMSS: route.TCPMSS, BypassAddresses: bypass,
+			OutboundID: route.OutboundID, OutboundAdapter: primary.Adapter, FallbackOutboundID: route.FallbackOutboundID, SelectedOutboundID: selected, UseDirect: useDirect,
+			FailurePolicy: route.FailurePolicy, DNSPolicy: route.DNSPolicy, DNSServers: append([]netip.Addr{}, route.DNSServers...), IPv4Policy: route.IPv4Policy, IPv6Policy: route.IPv6Policy,
+			KillSwitch: route.KillSwitch, MTU: route.MTU, TCPMSS: route.TCPMSS, BypassAddresses: bypass, TunnelAddresses: slotTunnelAddresses(slot),
 		}
 		candidate.Routes = append(candidate.Routes, intent)
 		public.EnabledRoutes++
@@ -220,15 +304,15 @@ func ParseState(content []byte, exists bool) (State, error) {
 	}
 	seen := map[domain.ID]struct{}{}
 	for _, intent := range candidate.Routes {
-		if err := intent.ID.Validate("owned route id"); err != nil || intent.TunnelInterface != tunnelName(intent.ID) || intent.RoutingTable == 0 || intent.RulePriority == 0 {
-			return State{}, fmt.Errorf("owned routing state contains an invalid route")
+		if err := intent.Validate(); err != nil {
+			return State{}, fmt.Errorf("owned routing state contains an invalid route: %w", err)
 		}
 		if _, exists := seen[intent.ID]; exists {
 			return State{}, fmt.Errorf("owned routing state contains duplicate routes")
 		}
 		seen[intent.ID] = struct{}{}
 	}
-	return State{Exists: true, Hash: stateHash(content, true)}, nil
+	return State{Exists: true, Hash: stateHash(content, true), Routes: append([]RouteIntent{}, candidate.Routes...)}, nil
 }
 
 type routeSelector struct {
@@ -400,7 +484,67 @@ func existingPriorities(rules []inventory.PolicyRule) map[uint32]struct{} {
 	return result
 }
 
-func allocatePolicySlot(id domain.ID, settings Settings, usedTables, usedPriorities map[uint32]struct{}) (uint32, uint32, error) {
+func releaseOwnedResources(previous []RouteIntent, host inventory.Inventory, tables, priorities map[uint32]struct{}, prefixes *[]netip.Prefix) {
+	ownedInterfaces := make(map[string]struct{}, len(previous))
+	for _, intent := range previous {
+		table := strconv.FormatUint(uint64(intent.RoutingTable), 10)
+		foreignTable := false
+		for _, route := range host.Routes {
+			if route.Table == table && route.Protocol != OwnedRouteProtocol {
+				foreignTable = true
+				break
+			}
+		}
+		if !foreignTable {
+			delete(tables, intent.RoutingTable)
+		}
+		foreignPriority := false
+		for _, rule := range host.PolicyRules {
+			if rule.Priority == int(intent.RulePriority) && rule.Protocol != OwnedRouteProtocol {
+				foreignPriority = true
+				break
+			}
+		}
+		if !foreignPriority {
+			delete(priorities, intent.RulePriority)
+		}
+		ownedInterfaces[intent.TunnelInterface] = struct{}{}
+	}
+	filtered := (*prefixes)[:0]
+	for _, prefix := range *prefixes {
+		owned := false
+		for _, item := range host.Interfaces {
+			if _, exists := ownedInterfaces[item.Name]; !exists {
+				continue
+			}
+			for _, address := range interfacePrefixes(item) {
+				if address == prefix {
+					owned = true
+					break
+				}
+			}
+		}
+		if !owned {
+			filtered = append(filtered, prefix)
+		}
+	}
+	*prefixes = filtered
+}
+
+func existingPrefixes(host inventory.Inventory) []netip.Prefix {
+	result := []netip.Prefix{}
+	for _, item := range host.Interfaces {
+		result = append(result, interfacePrefixes(item)...)
+	}
+	for _, route := range host.Routes {
+		if prefix, err := netip.ParsePrefix(route.Destination); err == nil {
+			result = append(result, prefix.Masked())
+		}
+	}
+	return result
+}
+
+func allocatePolicySlot(id domain.ID, settings Settings, usedTables, usedPriorities map[uint32]struct{}, usedPrefixes []netip.Prefix) (uint32, uint32, uint32, error) {
 	digest := sha256.Sum256([]byte(id))
 	start := uint32(digest[0])<<8 | uint32(digest[1])
 	for offset := uint32(0); offset < MaximumRoutes; offset++ {
@@ -413,11 +557,21 @@ func allocatePolicySlot(id domain.ID, settings Settings, usedTables, usedPriorit
 		if _, exists := usedPriorities[priority]; exists {
 			continue
 		}
+		addresses := slotTunnelAddresses(slot)
+		if overlapsAny(addresses[0], usedPrefixes) || overlapsAny(addresses[1], usedPrefixes) {
+			continue
+		}
 		usedTables[table] = struct{}{}
 		usedPriorities[priority] = struct{}{}
-		return table, priority, nil
+		return table, priority, slot, nil
 	}
-	return 0, 0, fmt.Errorf("no free project-owned routing policy slot remains")
+	return 0, 0, 0, fmt.Errorf("no free project-owned routing policy slot remains")
+}
+
+func slotTunnelAddresses(slot uint32) []netip.Prefix {
+	ipv4 := netip.AddrFrom4([4]byte{198, 18, byte(slot / 64), byte(slot%64*4 + 1)})
+	ipv6 := netip.AddrFrom16([16]byte{0xfd, 0x45, 0x47, 0x4d, byte(slot >> 8), byte(slot), 0, 0, 0, 0, 0, 0, 0, 0, 0, 1})
+	return []netip.Prefix{netip.PrefixFrom(ipv4, 30), netip.PrefixFrom(ipv6, 126)}
 }
 
 func tunnelName(id domain.ID) string {

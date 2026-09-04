@@ -31,6 +31,7 @@ func testRoute() domain.Route {
 	return domain.Route{
 		ID: "vpn_clients", Name: "VPN clients", Source: domain.RouteSource{Kind: domain.RouteSourceSubnet, Subnet: netip.MustParsePrefix("10.8.0.0/24")},
 		OutboundID: "primary", FailurePolicy: domain.FailureBlock, DNSPolicy: domain.DNSFollowOutbound,
+		DNSServers: []netip.Addr{netip.MustParseAddr("1.1.1.1")},
 		IPv4Policy: domain.IPv4FollowOutbound, IPv6Policy: domain.IPv6Block, KillSwitch: true, MTU: 1400, TCPMSS: 1360, Enabled: true,
 	}
 }

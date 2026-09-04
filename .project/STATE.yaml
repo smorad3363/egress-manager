@@ -6,12 +6,12 @@ phase: 8
 phase_name: interface-subnet-egress-routing
 
 active_spec: specs/008-interface-subnet-egress-routing/spec.md
-active_task: route-native-candidates-and-singbox-tun-composition
+active_task: route-coordinated-transaction-and-recovery
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: render and natively validate owned nftables and iproute2 candidates, compose dedicated sing-box TUN inbounds and route rules, then add transactional apply and rollback
+next_action: add one journaled coordinator for sing-box, nftables, iproute2, owned-state commit, verification, rollback, and interrupted recovery
 
 dirty_work_expected: false
 
@@ -65,8 +65,11 @@ recent_decisions:
   - Enabled routes use a partial unique source index; primary and fallback outbound foreign keys are separately indexed and restrictive.
   - IPv4 subnet selectors resolve to exactly one active ingress interface so opposite-family blocking can be enforced without ambiguous client identity.
   - Route tables and rule priorities are deterministic per route but skip all foreign numeric tables and priorities discovered by inventory.
+  - Follow-outbound DNS requires one to four explicit safe resolver addresses and never inherits host DNS implicitly.
+  - Routed sing-box uses dedicated project-owned TUN inbounds with auto_route disabled; Egress Manager remains the sole owner of kernel routes and leak-control rules.
+  - Policy routes and rules use protocol 242 as an ownership marker; verified prior owned resources are reusable, while foreign collisions force a different bounded slot.
+  - The only routing firewall table is inet egm_egress; native candidates are validated and exercised inside the disposable privileged network lab.
 
 touched_areas:
-  - native policy-routing and kill-switch candidates
-  - sing-box TUN composition
   - routing transaction executor
+  - route API and operations UI

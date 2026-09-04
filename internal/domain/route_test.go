@@ -21,6 +21,7 @@ func TestRouteRequiresExplicitPolicies(t *testing.T) {
 
 	route.FailurePolicy = FailureBlock
 	route.DNSPolicy = DNSFollowOutbound
+	route.DNSServers = []netip.Addr{netip.MustParseAddr("1.1.1.1")}
 	route.IPv4Policy = IPv4FollowOutbound
 	route.IPv6Policy = IPv6Block
 	route.KillSwitch = true
@@ -35,6 +36,7 @@ func TestRouteRequiresExplicitDistinctFallbackAndSafeMTU(t *testing.T) {
 	route := Route{
 		ID: "vpn-clients", Name: "VPN Clients", Source: RouteSource{Kind: RouteSourceInterface, Interface: "tun0"},
 		OutboundID: "vless-de", FailurePolicy: FailureFailover, DNSPolicy: DNSFollowOutbound,
+		DNSServers: []netip.Addr{netip.MustParseAddr("1.1.1.1")},
 		IPv4Policy: IPv4FollowOutbound, IPv6Policy: IPv6Block, KillSwitch: true, MTU: 1400, TCPMSS: 1360, Enabled: true,
 	}
 	if err := route.Validate(); err == nil {
@@ -80,11 +82,37 @@ func TestRouteRejectsNonCanonicalSubnet(t *testing.T) {
 		OutboundID:    "vless-de",
 		FailurePolicy: FailureBlock,
 		DNSPolicy:     DNSFollowOutbound,
+		DNSServers:    []netip.Addr{netip.MustParseAddr("1.1.1.1")},
 		IPv4Policy:    IPv4FollowOutbound,
 		IPv6Policy:    IPv6Block,
 	}
 	if err := route.Validate(); err == nil {
 		t.Fatal("Validate() accepted a non-canonical subnet")
+	}
+}
+
+func TestRouteRequiresSafeExplicitDNSResolvers(t *testing.T) {
+	t.Parallel()
+
+	route := Route{
+		ID: "vpn-clients", Name: "VPN Clients", Source: RouteSource{Kind: RouteSourceInterface, Interface: "tun0"},
+		OutboundID: "vless-de", FailurePolicy: FailureBlock, DNSPolicy: DNSFollowOutbound,
+		IPv4Policy: IPv4FollowOutbound, IPv6Policy: IPv6Block, KillSwitch: true, Enabled: true,
+	}
+	if err := route.Validate(); err == nil {
+		t.Fatal("Validate() accepted follow-outbound DNS without an explicit resolver")
+	}
+	route.DNSServers = []netip.Addr{netip.MustParseAddr("127.0.0.1")}
+	if err := route.Validate(); err == nil {
+		t.Fatal("Validate() accepted an unsafe DNS resolver")
+	}
+	route.DNSServers = []netip.Addr{netip.MustParseAddr("1.1.1.1"), netip.MustParseAddr("1.1.1.1")}
+	if err := route.Validate(); err == nil {
+		t.Fatal("Validate() accepted duplicate DNS resolvers")
+	}
+	route.DNSPolicy = DNSSystem
+	if err := route.Validate(); err == nil {
+		t.Fatal("Validate() accepted explicit resolvers for system DNS")
 	}
 }
 

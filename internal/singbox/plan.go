@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"github.com/egress-manager/egress-manager/internal/domain"
+	"github.com/egress-manager/egress-manager/internal/routing"
 	"github.com/egress-manager/egress-manager/internal/secrets"
 )
 
@@ -23,6 +24,9 @@ const (
 	MaximumOutbounds = 128
 	maximumCandidate = secrets.MaximumDocumentBytes
 	ownedTagPrefix   = "egm_out_"
+	ownedRoutePrefix = "egm_route_"
+	ownedDNSPrefix   = "egm_dns_"
+	directRouteTag   = "egm_direct_fallback"
 	ownedSchema      = "https://sing-box.sagernet.org/schema.json#egress-manager-owned"
 )
 
@@ -42,6 +46,7 @@ type Plan struct {
 	StateHash        string   `json:"state_hash"`
 	CandidateHash    string   `json:"candidate_hash"`
 	EnabledOutbounds int      `json:"enabled_outbounds"`
+	RoutedRoutes     int      `json:"routed_routes,omitempty"`
 	Actions          []Action `json:"actions"`
 }
 
@@ -57,8 +62,11 @@ func (plan ExecutionPlan) Candidate() []byte {
 type generatedConfiguration struct {
 	Schema    string           `json:"$schema"`
 	Log       generatedLog     `json:"log"`
+	Inbounds  []map[string]any `json:"inbounds,omitempty"`
 	Endpoints []map[string]any `json:"endpoints,omitempty"`
 	Outbounds []map[string]any `json:"outbounds"`
+	DNS       map[string]any   `json:"dns,omitempty"`
+	Route     map[string]any   `json:"route,omitempty"`
 }
 
 type generatedLog struct {
@@ -144,6 +152,126 @@ func BuildPlan(outbounds []domain.Outbound, credentials map[domain.ID][]byte, st
 	return ExecutionPlan{Plan: public, candidate: candidate}, nil
 }
 
+// BuildRoutedPlan composes project-owned TUN inbounds and explicit route policy
+// with the same authenticated outbound desired state used by BuildPlan.
+func BuildRoutedPlan(outbounds []domain.Outbound, credentials map[domain.ID][]byte, intents []routing.RouteIntent, state State) (ExecutionPlan, error) {
+	base, err := BuildPlan(outbounds, credentials, state)
+	if err != nil {
+		return ExecutionPlan{}, err
+	}
+	if len(intents) > routing.MaximumRoutes {
+		return ExecutionPlan{}, fmt.Errorf("sing-box routed state exceeds %d routes", routing.MaximumRoutes)
+	}
+	var configuration generatedConfiguration
+	if err := json.Unmarshal(base.candidate, &configuration); err != nil {
+		return ExecutionPlan{}, fmt.Errorf("decode generated sing-box candidate: %w", err)
+	}
+	available := make(map[string]struct{}, len(configuration.Outbounds)+len(configuration.Endpoints))
+	for _, item := range append(append([]map[string]any{}, configuration.Outbounds...), configuration.Endpoints...) {
+		if tag, ok := item["tag"].(string); ok {
+			available[tag] = struct{}{}
+		}
+	}
+	normalized := append([]routing.RouteIntent{}, intents...)
+	sort.Slice(normalized, func(i, j int) bool { return normalized[i].ID < normalized[j].ID })
+	seenRoutes := make(map[domain.ID]struct{}, len(normalized))
+	rules := []map[string]any{}
+	dnsServers := []map[string]any{}
+	dnsRules := []map[string]any{}
+	directRequired := false
+	for _, intent := range normalized {
+		if err := intent.Validate(); err != nil {
+			return ExecutionPlan{}, fmt.Errorf("validate routed intent %q: %w", intent.ID, err)
+		}
+		if _, exists := seenRoutes[intent.ID]; exists {
+			return ExecutionPlan{}, fmt.Errorf("duplicate routed intent %q", intent.ID)
+		}
+		seenRoutes[intent.ID] = struct{}{}
+		target := ownedTagPrefix + string(intent.SelectedOutboundID)
+		if intent.UseDirect {
+			target = directRouteTag
+			directRequired = true
+		} else if _, exists := available[target]; !exists {
+			return ExecutionPlan{}, fmt.Errorf("routed intent %q selected an unavailable outbound", intent.ID)
+		}
+		inboundTag := ownedRoutePrefix + string(intent.ID)
+		addresses := make([]string, len(intent.TunnelAddresses))
+		for index, address := range intent.TunnelAddresses {
+			addresses[index] = address.String()
+		}
+		mtu := intent.MTU
+		if mtu == 0 {
+			mtu = 1500
+		}
+		configuration.Inbounds = append(configuration.Inbounds, map[string]any{
+			"type": "tun", "tag": inboundTag, "interface_name": intent.TunnelInterface,
+			"address": addresses, "mtu": mtu, "auto_route": false, "stack": "system",
+		})
+		switch intent.DNSPolicy {
+		case domain.DNSFollowOutbound:
+			for index, address := range intent.DNSServers {
+				serverTag := fmt.Sprintf("%s%s_%d", ownedDNSPrefix, intent.ID, index)
+				dnsServers = append(dnsServers, map[string]any{
+					"type": "udp", "tag": serverTag, "server": address.String(), "server_port": 53, "detour": target,
+				})
+				if index == 0 {
+					dnsRules = append(dnsRules, map[string]any{"inbound": []string{inboundTag}, "action": "route", "server": serverTag})
+				}
+			}
+			rules = append(rules, map[string]any{"inbound": []string{inboundTag}, "port": []uint16{53}, "action": "hijack-dns"})
+		case domain.DNSBlock:
+			rules = append(rules, map[string]any{"inbound": []string{inboundTag}, "port": []uint16{53, 853}, "action": "reject", "method": "drop"})
+		case domain.DNSSystem:
+			directRequired = true
+			rules = append(rules, map[string]any{"inbound": []string{inboundTag}, "port": []uint16{53, 853}, "action": "route", "outbound": directRouteTag})
+		}
+		rules = append(rules,
+			familyRule(inboundTag, 4, intent.IPv4Policy == domain.IPv4Block, intent.IPv4Policy == domain.IPv4Direct, target),
+			familyRule(inboundTag, 6, intent.IPv6Policy == domain.IPv6Block, intent.IPv6Policy == domain.IPv6Direct, target),
+		)
+		if intent.IPv4Policy == domain.IPv4Direct || intent.IPv6Policy == domain.IPv6Direct {
+			directRequired = true
+		}
+		base.Plan.RoutedRoutes++
+		base.Plan.Actions = append(base.Plan.Actions, Action{Kind: "route", Resource: string(intent.ID), Summary: "Configure a dedicated TUN with explicit DNS and IP-family policy."})
+	}
+	if directRequired {
+		configuration.Outbounds = append(configuration.Outbounds, map[string]any{"type": "direct", "tag": directRouteTag})
+	}
+	if len(dnsServers) != 0 {
+		configuration.DNS = map[string]any{"servers": dnsServers, "rules": dnsRules}
+	}
+	if len(rules) != 0 {
+		configuration.Route = map[string]any{"auto_detect_interface": true, "rules": rules}
+	}
+	candidate, err := json.MarshalIndent(configuration, "", "  ")
+	if err != nil {
+		return ExecutionPlan{}, fmt.Errorf("encode routed sing-box candidate: %w", err)
+	}
+	candidate = append(candidate, '\n')
+	if len(candidate) > maximumCandidate {
+		return ExecutionPlan{}, fmt.Errorf("sing-box candidate exceeds %d bytes", maximumCandidate)
+	}
+	base.candidate = candidate
+	base.Plan.CandidateHash = hashBytes(candidate)
+	return base, nil
+}
+
+func familyRule(inboundTag string, version int, block, direct bool, target string) map[string]any {
+	rule := map[string]any{"inbound": []string{inboundTag}, "ip_version": version}
+	if block {
+		rule["action"] = "reject"
+		rule["method"] = "drop"
+		return rule
+	}
+	if direct {
+		target = directRouteTag
+	}
+	rule["action"] = "route"
+	rule["outbound"] = target
+	return rule
+}
+
 func ParseState(content []byte, exists bool) (State, error) {
 	if !exists {
 		if len(content) != 0 {
@@ -164,19 +292,40 @@ func ParseState(content []byte, exists bool) (State, error) {
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return State{}, fmt.Errorf("owned sing-box configuration has trailing data")
 	}
-	if configuration.Schema != ownedSchema || !configuration.Log.Disabled || len(configuration.Outbounds)+len(configuration.Endpoints) > MaximumOutbounds {
+	if configuration.Schema != ownedSchema || !configuration.Log.Disabled || len(configuration.Outbounds)+len(configuration.Endpoints) > MaximumOutbounds+1 || len(configuration.Inbounds) > routing.MaximumRoutes {
 		return State{}, fmt.Errorf("sing-box configuration is not project-owned")
 	}
 	seenTags := map[string]struct{}{}
 	ownedItems := append(append([]map[string]any{}, configuration.Outbounds...), configuration.Endpoints...)
 	for _, outbound := range ownedItems {
 		tag, ok := outbound["tag"].(string)
-		if !ok || !strings.HasPrefix(tag, ownedTagPrefix) {
+		if !ok || (!strings.HasPrefix(tag, ownedTagPrefix) && tag != directRouteTag) {
 			return State{}, fmt.Errorf("sing-box configuration contains a foreign outbound")
 		}
-		id := domain.ID(strings.TrimPrefix(tag, ownedTagPrefix))
-		if err := id.Validate("owned outbound id"); err != nil {
-			return State{}, fmt.Errorf("sing-box configuration contains an invalid owned outbound")
+		if tag == directRouteTag {
+			if kind, _ := outbound["type"].(string); kind != "direct" {
+				return State{}, fmt.Errorf("sing-box configuration contains an invalid owned direct outbound")
+			}
+		} else {
+			id := domain.ID(strings.TrimPrefix(tag, ownedTagPrefix))
+			if err := id.Validate("owned outbound id"); err != nil {
+				return State{}, fmt.Errorf("sing-box configuration contains an invalid owned outbound")
+			}
+		}
+		if _, exists := seenTags[tag]; exists {
+			return State{}, fmt.Errorf("sing-box configuration contains duplicate tags")
+		}
+		seenTags[tag] = struct{}{}
+	}
+	for _, inbound := range configuration.Inbounds {
+		tag, ok := inbound["tag"].(string)
+		kind, _ := inbound["type"].(string)
+		if !ok || kind != "tun" || !strings.HasPrefix(tag, ownedRoutePrefix) {
+			return State{}, fmt.Errorf("sing-box configuration contains a foreign inbound")
+		}
+		id := domain.ID(strings.TrimPrefix(tag, ownedRoutePrefix))
+		if err := id.Validate("owned route id"); err != nil {
+			return State{}, fmt.Errorf("sing-box configuration contains an invalid owned route inbound")
 		}
 		if _, exists := seenTags[tag]; exists {
 			return State{}, fmt.Errorf("sing-box configuration contains duplicate tags")

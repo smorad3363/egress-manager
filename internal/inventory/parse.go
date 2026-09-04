@@ -96,6 +96,7 @@ func parseRoutes(data []byte) ([]Route, error) {
 
 type ipRuleDocument struct {
 	Priority    int             `json:"priority"`
+	Protocol    json.RawMessage `json:"protocol"`
 	Source      string          `json:"src"`
 	Destination string          `json:"dst"`
 	Table       json.RawMessage `json:"table"`
@@ -121,7 +122,7 @@ func parsePolicyRules(data []byte) ([]PolicyRule, error) {
 		if source == "" {
 			source = "all"
 		}
-		rules = append(rules, PolicyRule{Priority: document.Priority, Source: source, Destination: document.Destination, Table: rawScalar(document.Table), FWMark: document.FWMark, Input: document.Input, Output: document.Output})
+		rules = append(rules, PolicyRule{Priority: document.Priority, Protocol: rawScalar(document.Protocol), Source: source, Destination: document.Destination, Table: rawScalar(document.Table), FWMark: document.FWMark, Input: document.Input, Output: document.Output})
 	}
 	sort.Slice(rules, func(i, j int) bool { return rules[i].Priority < rules[j].Priority })
 	return rules, nil

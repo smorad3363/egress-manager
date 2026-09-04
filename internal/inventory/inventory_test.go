@@ -39,11 +39,11 @@ func TestParsersProduceTypedCanonicalInventory(t *testing.T) {
 		t.Fatalf("routes = %#v", routes)
 	}
 
-	rules, err := parsePolicyRules([]byte(`[{"priority":32766,"src":"all","table":"main"},{"priority":12000,"src":"10.8.0.0/24","table":20001,"iif":"tun0","fwmark":"0x1"}]`))
+	rules, err := parsePolicyRules([]byte(`[{"priority":32766,"src":"all","table":"main"},{"priority":12000,"protocol":242,"src":"10.8.0.0/24","table":20001,"iif":"tun0","fwmark":"0x1"}]`))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(rules) != 2 || rules[0].Priority != 12000 || rules[0].Table != "20001" || rules[0].Input != "tun0" {
+	if len(rules) != 2 || rules[0].Priority != 12000 || rules[0].Protocol != "242" || rules[0].Table != "20001" || rules[0].Input != "tun0" {
 		t.Fatalf("policy rules = %#v", rules)
 	}
 
