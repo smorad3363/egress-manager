@@ -69,6 +69,41 @@ type protectedSnapshot struct {
 	NFT     secrets.Envelope `json:"nft"`
 }
 
+// VerifyRuntime is read-only. Persisted file hashes alone cannot establish
+// convergence after a reboot because kernel routes and nftables are volatile.
+func (executor Executor) VerifyRuntime(ctx context.Context, plan Plan) error {
+	if err := executor.validate(); err != nil {
+		return err
+	}
+	currentRoutes, err := routing.InspectState(executor.RoutingStatePath)
+	if err != nil {
+		return err
+	}
+	currentSingBox, err := singbox.InspectState(executor.SingBoxConfigPath)
+	if err != nil {
+		return err
+	}
+	currentInterfaces, err := managedInterface.InspectState(executor.InterfaceStatePath, executor.InterfaceRuntimeDirectory)
+	if err != nil {
+		return err
+	}
+	if currentRoutes.Hash != plan.Review.RoutingCandidateHash || currentSingBox.Hash != plan.Review.SingBoxCandidateHash || currentInterfaces.Hash != plan.Review.InterfaceStateHash {
+		return ErrStateChanged
+	}
+	if err := executor.verify(ctx, plan); err != nil {
+		return err
+	}
+	state, err := routing.ParseState(plan.routing.Candidate(), true)
+	if err != nil {
+		return err
+	}
+	nft, err := executor.output(ctx, system.Command{Name: "nft", Args: []string{"-j", "list", "table", routing.OwnedNFTFamily, routing.OwnedNFTTable}})
+	if err != nil {
+		return err
+	}
+	return routing.VerifyNFTRuntime(state.Routes, nft)
+}
+
 func (executor Executor) Execute(ctx context.Context, id domain.ID, plan Plan) (ApplyResponse, error) {
 	if err := executor.validate(); err != nil {
 		return ApplyResponse{}, err
@@ -440,14 +475,15 @@ func (executor Executor) verify(ctx context.Context, plan Plan) error {
 		}
 		for _, family := range []string{"-4", "-6"} {
 			rules, err := executor.output(ctx, system.Command{Name: "ip", Args: []string{"-j", family, "rule", "show", "priority", strconv.FormatUint(uint64(intent.RulePriority), 10)}})
-			ownedRules, rulesErr := inspectOwnedProtocol(rules)
-			if err != nil || rulesErr != nil || !ownedRules {
+			if err != nil {
 				return fmt.Errorf("owned %s policy rule for route %q is missing", family, intent.ID)
 			}
 			routes, err := executor.output(ctx, system.Command{Name: "ip", Args: []string{"-j", family, "route", "show", "table", strconv.FormatUint(uint64(intent.RoutingTable), 10)}})
-			ownedRoutes, routesErr := inspectOwnedProtocol(routes)
-			if err != nil || routesErr != nil || !ownedRoutes {
+			if err != nil {
 				return fmt.Errorf("owned %s route table for route %q is missing", family, intent.ID)
+			}
+			if err := routing.VerifyPolicyRuntime(intent, family == "-4", rules, routes); err != nil {
+				return fmt.Errorf("owned %s policy runtime for route %q differs: %w", family, intent.ID, err)
 			}
 		}
 	}

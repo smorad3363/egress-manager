@@ -246,6 +246,7 @@ ip netns exec "$router_ns" nft --check --file "$route_candidate_dir/routing.nft"
 ip netns exec "$router_ns" nft --file "$route_candidate_dir/routing.nft"
 ip netns exec "$router_ns" ip -4 -batch "$route_candidate_dir/routing-v4.batch"
 ip netns exec "$router_ns" ip -6 -batch "$route_candidate_dir/routing-v6.batch"
+ip netns exec "$router_ns" "$routing_probe" --verify-runtime "$route_candidate_dir"
 ip netns exec "$router_ns" ip -j -4 rule show priority "$route_priority" | grep -Fq '"protocol":"242"' || fail "owned IPv4 route rule marker missing"
 ip netns exec "$router_ns" ip -j -6 rule show priority "$route_priority" | grep -Fq '"protocol":"242"' || fail "owned IPv6 route rule marker missing"
 
@@ -320,6 +321,7 @@ ip netns exec "$router_ns" nft --check --file "$wireguard_candidate_dir/routing.
 ip netns exec "$router_ns" nft --file "$wireguard_candidate_dir/routing.nft"
 ip netns exec "$router_ns" ip -4 -batch "$wireguard_candidate_dir/routing-v4.batch"
 ip netns exec "$router_ns" ip -6 -batch "$wireguard_candidate_dir/routing-v6.batch"
+ip netns exec "$router_ns" "$routing_probe" --verify-runtime "$wireguard_candidate_dir"
 if ! ip netns exec "$client_ns" timeout 5 ping -c 1 -W 3 10.210.0.2 >/dev/null; then
     ip netns exec "$router_ns" wg show >&2 || true
     ip netns exec "$router_ns" ip -4 rule show >&2 || true
@@ -423,6 +425,7 @@ ip netns exec "$router_ns" nft --check --file "$openvpn_candidate_dir/routing.nf
 ip netns exec "$router_ns" nft --file "$openvpn_candidate_dir/routing.nft"
 ip netns exec "$router_ns" ip -4 -batch "$openvpn_candidate_dir/routing-v4.batch"
 ip netns exec "$router_ns" ip -6 -batch "$openvpn_candidate_dir/routing-v6.batch"
+ip netns exec "$router_ns" "$routing_probe" --verify-runtime "$openvpn_candidate_dir"
 if ! ip netns exec "$client_ns" timeout 5 ping -c 1 -W 3 10.220.0.1 >/dev/null; then
     ip netns exec "$router_ns" ip -4 rule show >&2 || true
     ip netns exec "$router_ns" ip -4 route show table "$openvpn_table" >&2 || true

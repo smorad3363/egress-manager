@@ -11,7 +11,7 @@ status: in_progress
 
 last_green_ref: HEAD
 
-next_action: add exact route/rule and nftables runtime comparison before wiring ownership-safe route reconciliation into shared recovery; JSON inventory parsing is hardened, but protocol presence alone is not convergence proof
+next_action: wire exact route runtime verification into recovery with degraded daemon availability and journal-gated mutations; then implement restart reconciliation without silently activating unreviewed desired changes
 
 dirty_work_expected: false
 

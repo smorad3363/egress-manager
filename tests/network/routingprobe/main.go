@@ -1,17 +1,25 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strconv"
+	"time"
 
 	"github.com/egress-manager/egress-manager/internal/domain"
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/routing"
+	"github.com/egress-manager/egress-manager/internal/system"
 )
 
 func main() {
+	if len(os.Args) == 3 && os.Args[1] == "--verify-runtime" {
+		verifyRuntime(os.Args[2])
+		return
+	}
 	if len(os.Args) != 2 {
 		fail("usage: egress-routing-probe OUTPUT_DIRECTORY")
 	}
@@ -73,12 +81,49 @@ func main() {
 	}
 	intent := parsed.Routes[0]
 	files := map[string][]byte{
-		"routing.nft": native.NFTCandidate(), "routing-v4.batch": native.IPv4Batch(), "routing-v6.batch": native.IPv6Batch(),
+		"routing-state.json": desired.Candidate(),
+		"routing.nft":        native.NFTCandidate(), "routing-v4.batch": native.IPv4Batch(), "routing-v6.batch": native.IPv6Batch(),
 		"tun-name": []byte(intent.TunnelInterface + "\n"), "table": []byte(fmt.Sprintf("%d\n", intent.RoutingTable)), "priority": []byte(fmt.Sprintf("%d\n", intent.RulePriority)),
 	}
 	for name, content := range files {
 		if err := os.WriteFile(filepath.Join(os.Args[1], name), content, 0o600); err != nil {
 			fail("write routing candidate")
+		}
+	}
+}
+
+func verifyRuntime(directory string) {
+	content, err := os.ReadFile(filepath.Join(directory, "routing-state.json"))
+	if err != nil {
+		fail("read routing state")
+	}
+	state, err := routing.ParseState(content, true)
+	if err != nil {
+		fail("parse routing state")
+	}
+	runner := system.ExecRunner{}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	nft, err := runner.Run(ctx, system.Command{Name: "nft", Args: []string{"-j", "list", "table", routing.OwnedNFTFamily, routing.OwnedNFTTable}})
+	if err != nil || nft.ExitCode != 0 {
+		fail("inspect runtime nftables")
+	}
+	if err := routing.VerifyNFTRuntime(state.Routes, nft.Stdout); err != nil {
+		fail(err.Error())
+	}
+	for _, intent := range state.Routes {
+		for _, family := range []string{"-4", "-6"} {
+			rules, err := runner.Run(ctx, system.Command{Name: "ip", Args: []string{"-j", family, "rule", "show", "priority", strconv.FormatUint(uint64(intent.RulePriority), 10)}})
+			if err != nil || rules.ExitCode != 0 {
+				fail("inspect runtime rules")
+			}
+			routes, err := runner.Run(ctx, system.Command{Name: "ip", Args: []string{"-j", family, "route", "show", "table", strconv.FormatUint(uint64(intent.RoutingTable), 10)}})
+			if err != nil || routes.ExitCode != 0 {
+				fail("inspect runtime routes")
+			}
+			if err := routing.VerifyPolicyRuntime(intent, family == "-4", rules.Stdout, routes.Stdout); err != nil {
+				fail(err.Error())
+			}
 		}
 	}
 }

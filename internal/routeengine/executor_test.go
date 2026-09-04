@@ -28,6 +28,8 @@ type routeEngineRunner struct {
 	ipv6Installed  bool
 	failValidation bool
 	failIPv6       bool
+	ipv4Batch      string
+	ipv6Batch      string
 }
 
 func (runner *routeEngineRunner) Run(_ context.Context, command system.Command) (system.Result, error) {
@@ -60,6 +62,7 @@ func (runner *routeEngineRunner) Run(_ context.Context, command system.Command) 
 		return system.Result{Stdout: []byte(`[{"ifname":"` + name + `"}]`), ExitCode: 0}, nil
 	case joined == "ip -4 -batch -":
 		runner.ipv4Installed = true
+		runner.ipv4Batch = string(command.Stdin)
 		return system.Result{ExitCode: 0}, nil
 	case joined == "ip -6 -batch -":
 		if runner.failIPv6 {
@@ -67,6 +70,7 @@ func (runner *routeEngineRunner) Run(_ context.Context, command system.Command) 
 			return system.Result{ExitCode: 2}, errors.New("interrupted IPv6 apply")
 		}
 		runner.ipv6Installed = true
+		runner.ipv6Batch = string(command.Stdin)
 		return system.Result{ExitCode: 0}, nil
 	case strings.HasPrefix(joined, "ip -4 rule delete priority "):
 		runner.ipv4Installed = false
@@ -78,12 +82,12 @@ func (runner *routeEngineRunner) Run(_ context.Context, command system.Command) 
 		return system.Result{ExitCode: 0}, nil
 	case strings.HasPrefix(joined, "ip -j -4 rule show priority "), strings.HasPrefix(joined, "ip -j -4 route show table "):
 		if runner.ipv4Installed {
-			return ownedProtocolResult(), nil
+			return batchInventory(runner.ipv4Batch, command.Args), nil
 		}
 		return system.Result{Stdout: []byte("[]"), ExitCode: 0}, nil
 	case strings.HasPrefix(joined, "ip -j -6 rule show priority "), strings.HasPrefix(joined, "ip -j -6 route show table "):
 		if runner.ipv6Installed {
-			return ownedProtocolResult(), nil
+			return batchInventory(runner.ipv6Batch, command.Args), nil
 		}
 		return system.Result{Stdout: []byte("[]"), ExitCode: 0}, nil
 	default:
@@ -92,8 +96,43 @@ func (runner *routeEngineRunner) Run(_ context.Context, command system.Command) 
 	}
 }
 
-func ownedProtocolResult() system.Result {
-	return system.Result{Stdout: []byte(`[{"protocol":"` + routing.OwnedRouteProtocol + `"}]`), ExitCode: 0}
+func batchInventory(batch string, args []string) system.Result {
+	objects := []map[string]any{}
+	for _, line := range strings.Split(batch, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 3 || fields[0] != args[2] {
+			continue
+		}
+		object := map[string]any{}
+		start := 2
+		if fields[0] == "route" {
+			if fields[start] == "throw" || fields[start] == "blackhole" {
+				object["type"] = fields[start]
+				start++
+			}
+			object["dst"] = fields[start]
+			start++
+		}
+		for index := start; index+1 < len(fields); index += 2 {
+			key := fields[index]
+			if key == "proto" {
+				key = "protocol"
+			}
+			if key == "from" {
+				key = "src"
+			}
+			object[key] = fields[index+1]
+		}
+		filter := "table"
+		if fields[0] == "rule" {
+			filter = "priority"
+		}
+		if object[filter] == args[len(args)-1] {
+			objects = append(objects, object)
+		}
+	}
+	content, _ := json.Marshal(objects)
+	return system.Result{Stdout: content, ExitCode: 0}
 }
 
 func routeEngineStore(t *testing.T) (*database.Store, *sql.DB) {
