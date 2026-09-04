@@ -20,6 +20,7 @@ import (
 	managedHAProxy "github.com/egress-manager/egress-manager/internal/haproxy"
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/nat"
+	"github.com/egress-manager/egress-manager/internal/routeengine"
 	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
 )
 
@@ -51,6 +52,8 @@ type ControlService interface {
 	TestSingBox(context.Context, managedSingBox.TestRequest) (managedSingBox.TestResponse, error)
 	PlanSingBox(context.Context) (managedSingBox.Plan, error)
 	ApplySingBox(context.Context, managedSingBox.ApplyRequest) (managedSingBox.ApplyResponse, error)
+	PlanRoutes(context.Context) (routeengine.Review, error)
+	ApplyRoutes(context.Context, routeengine.ApplyRequest) (routeengine.ApplyResponse, error)
 }
 
 type ForwardRepository interface {
@@ -79,6 +82,13 @@ type OutboundRepository interface {
 	ListOutbounds(context.Context, domain.ID, int) ([]database.StoredOutbound, error)
 }
 
+type RouteRepository interface {
+	CreateRoute(context.Context, domain.Route, time.Time) (database.StoredRoute, error)
+	UpdateRoute(context.Context, domain.Route, int64, time.Time) (database.StoredRoute, error)
+	DeleteRoute(context.Context, domain.ID, int64) error
+	ListRoutes(context.Context, domain.ID, int) ([]database.StoredRoute, error)
+}
+
 type ServerConfig struct {
 	SessionCookieName string
 	SecureCookies     bool
@@ -93,15 +103,16 @@ type Server struct {
 	forwards  ForwardRepository
 	haproxy   HAProxyRepository
 	outbounds OutboundRepository
+	routes    RouteRepository
 	health    http.Handler
 	now       func() time.Time
 }
 
-func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, sessions SessionService, control ControlService, forwards ForwardRepository, haproxy HAProxyRepository, outbounds OutboundRepository, health http.Handler) (*Server, error) {
+func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, sessions SessionService, control ControlService, forwards ForwardRepository, haproxy HAProxyRepository, outbounds OutboundRepository, routes RouteRepository, health http.Handler) (*Server, error) {
 	if config.SessionCookieName == "" || !config.SecureCookies {
 		return nil, fmt.Errorf("secure session cookie configuration is required")
 	}
-	if logger == nil || login == nil || sessions == nil || control == nil || forwards == nil || haproxy == nil || outbounds == nil || health == nil {
+	if logger == nil || login == nil || sessions == nil || control == nil || forwards == nil || haproxy == nil || outbounds == nil || routes == nil || health == nil {
 		return nil, fmt.Errorf("API dependencies are required")
 	}
 	return &Server{
@@ -113,6 +124,7 @@ func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, ses
 		forwards:  forwards,
 		haproxy:   haproxy,
 		outbounds: outbounds,
+		routes:    routes,
 		health:    health,
 		now:       time.Now,
 	}, nil
@@ -141,6 +153,9 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("/api/v1/outbounds/plan", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.planOutboundsHandler))))
 	mux.Handle("/api/v1/outbounds/apply", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.applyOutboundsHandler))))
 	mux.Handle("/api/v1/outbounds", server.requireSession(http.HandlerFunc(server.outboundsHandler)))
+	mux.Handle("/api/v1/routes/plan", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.planRoutesHandler))))
+	mux.Handle("/api/v1/routes/apply", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.applyRoutesHandler))))
+	mux.Handle("/api/v1/routes", server.requireSession(http.HandlerFunc(server.routesHandler)))
 	mux.Handle("/api/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		WriteError(writer, request, NewError(http.StatusNotFound, CodeNotFound, "Endpoint not found.", nil))
 	}))

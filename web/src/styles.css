@@ -193,6 +193,10 @@ td code { color: #b7c3d1; font-size: 0.66rem; }
 .outbound-health span { padding: 0.3rem 0.42rem; border: 1px solid var(--border); border-radius: 0.35rem; color: var(--muted); background: #0b1219; font-size: 0.55rem; }
 .outbound-health strong { color: var(--muted-strong); font-weight: 650; }
 .outbound-card .row-actions { flex-wrap: wrap; justify-content: flex-end; }
+.route-card header code { display: inline-block; margin-top: 0.35rem; color: var(--accent); font-size: 0.62rem; }
+.route-toggles { display: flex; flex-wrap: wrap; gap: 1.1rem; color: var(--muted-strong); font-size: 0.68rem; }
+.route-toggles label { display: flex; align-items: center; gap: 0.45rem; }
+.route-toggles input { accent-color: var(--accent); }
 .outbound-input { min-height: 9rem; resize: vertical; padding-top: 0.7rem; padding-bottom: 0.7rem; font-family: var(--font-mono); line-height: 1.5; }
 
 .button { display: inline-flex; min-width: 0; align-items: center; justify-content: center; gap: 0.45rem; border: 1px solid transparent; border-radius: var(--radius-sm); font-weight: 650; cursor: pointer; transition: border-color 120ms ease, background 120ms ease, color 120ms ease, transform 120ms ease; white-space: nowrap; }

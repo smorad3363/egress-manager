@@ -7,6 +7,7 @@ import { NetworkInventory } from "./components/NetworkInventory";
 import { OutboundsManager } from "./components/OutboundsManager";
 import { HAProxyManager } from "./components/HAProxyManager";
 import { PortForwards } from "./components/PortForwards";
+import { RoutesManager } from "./components/RoutesManager";
 import { Badge } from "./components/ui/Badge";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
@@ -20,7 +21,7 @@ const navigation = [
   ["Network", "network"], ["Logs", "logs"], ["Settings", "settings"],
 ] as const;
 
-const routes = [
+const dashboardRoutes = [
   { name: "EU applications", source: "10.20.0.0/16", outbound: "Frankfurt · WG0", state: "Healthy", traffic: "1.8 TB" },
   { name: "Streaming relay", source: "tcp · 443", outbound: "Amsterdam · VLESS", state: "Healthy", traffic: "642 GB" },
   { name: "Backup transit", source: "10.40.8.0/24", outbound: "Helsinki · Direct", state: "Standby", traffic: "88 GB" },
@@ -39,6 +40,7 @@ function Dashboard() {
   const [newForwardRequest, setNewForwardRequest] = useState(0);
   const [newHAProxyRequest, setNewHAProxyRequest] = useState(0);
   const [newOutboundRequest, setNewOutboundRequest] = useState(0);
+  const [newRouteRequest, setNewRouteRequest] = useState(0);
   const reduceMotion = useReducedMotion();
 
   const notify = () => {
@@ -75,11 +77,11 @@ function Dashboard() {
           <Button className="mobile-menu" size="icon" variant="ghost" aria-label="Open navigation" onClick={() => setMobileNavigation(true)}><Icon name="menu" /></Button>
           <div><p className="breadcrumb">Console / {active}</p><h1>{active}</h1></div>
           <label className="command-search"><Icon name="search" /><span className="sr-only">Search console</span><input placeholder="Search" /><kbd>⌘ K</kbd></label>
-          <Button variant="primary" onClick={() => active === "Port Forward" ? setNewForwardRequest((value) => value + 1) : active === "HAProxy" ? setNewHAProxyRequest((value) => value + 1) : active === "Outbounds" ? setNewOutboundRequest((value) => value + 1) : setDialogOpen(true)}><Icon name="plus" />{active === "Port Forward" ? "New forward" : active === "HAProxy" ? "New frontend" : active === "Outbounds" ? "Import outbound" : "New route"}</Button>
+          <Button variant="primary" onClick={() => active === "Port Forward" ? setNewForwardRequest((value) => value + 1) : active === "HAProxy" ? setNewHAProxyRequest((value) => value + 1) : active === "Outbounds" ? setNewOutboundRequest((value) => value + 1) : active === "Routes" ? setNewRouteRequest((value) => value + 1) : setDialogOpen(true)}><Icon name="plus" />{active === "Port Forward" ? "New forward" : active === "HAProxy" ? "New frontend" : active === "Outbounds" ? "Import outbound" : "New route"}</Button>
         </header>
 
         <div className="content">
-          {active === "Network" ? <NetworkInventory /> : active === "Port Forward" ? <PortForwards createRequest={newForwardRequest} /> : active === "HAProxy" ? <HAProxyManager createRequest={newHAProxyRequest} /> : active === "Outbounds" ? <OutboundsManager createRequest={newOutboundRequest} /> : <>
+          {active === "Network" ? <NetworkInventory /> : active === "Port Forward" ? <PortForwards createRequest={newForwardRequest} /> : active === "HAProxy" ? <HAProxyManager createRequest={newHAProxyRequest} /> : active === "Outbounds" ? <OutboundsManager createRequest={newOutboundRequest} /> : active === "Routes" ? <RoutesManager createRequest={newRouteRequest} /> : <>
           <section className="page-heading" aria-labelledby="overview-title">
             <div><p className="eyebrow">LIVE OVERVIEW</p><h2 id="overview-title">Traffic is flowing normally.</h2><p>Policy and transport health across this gateway.</p></div>
             <div className="page-heading__meta"><span>Last reconciled</span><strong>12 seconds ago</strong></div>
@@ -115,7 +117,7 @@ function Dashboard() {
             <div className="table-scroll">
               <table>
                 <thead><tr><th>Route</th><th>Source</th><th>Outbound</th><th>Status</th><th className="align-right">Traffic</th></tr></thead>
-                <tbody>{routes.map((route) => <tr key={route.name}><td><span className="route-name"><Icon name="route" />{route.name}</span></td><td><code>{route.source}</code></td><td>{route.outbound}</td><td><Badge tone={route.state === "Healthy" ? "success" : "neutral"}>{route.state}</Badge></td><td className="align-right tabular">{route.traffic}</td></tr>)}</tbody>
+                <tbody>{dashboardRoutes.map((route) => <tr key={route.name}><td><span className="route-name"><Icon name="route" />{route.name}</span></td><td><code>{route.source}</code></td><td>{route.outbound}</td><td><Badge tone={route.state === "Healthy" ? "success" : "neutral"}>{route.state}</Badge></td><td className="align-right tabular">{route.traffic}</td></tr>)}</tbody>
               </table>
             </div>
           </Card>

@@ -20,6 +20,7 @@ import (
 	managedHAProxy "github.com/egress-manager/egress-manager/internal/haproxy"
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/nat"
+	"github.com/egress-manager/egress-manager/internal/routeengine"
 	"github.com/egress-manager/egress-manager/internal/secrets"
 	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
 )
@@ -32,6 +33,8 @@ type healthyControl struct {
 	singBoxImport    managedSingBox.ImportResponse
 	singBoxTest      managedSingBox.TestResponse
 	singBoxPlan      managedSingBox.Plan
+	routePlan        routeengine.Review
+	lastRouteApply   routeengine.ApplyRequest
 }
 
 func (control *healthyControl) Health(context.Context) error {
@@ -97,6 +100,17 @@ func (control *healthyControl) ApplySingBox(_ context.Context, request managedSi
 	return managedSingBox.ApplyResponse{TransactionID: request.TransactionID, State: domain.TransactionCommitted}, nil
 }
 
+func (control *healthyControl) PlanRoutes(context.Context) (routeengine.Review, error) {
+	control.calls++
+	return control.routePlan, nil
+}
+
+func (control *healthyControl) ApplyRoutes(_ context.Context, request routeengine.ApplyRequest) (routeengine.ApplyResponse, error) {
+	control.calls++
+	control.lastRouteApply = request
+	return routeengine.ApplyResponse{TransactionID: request.TransactionID, State: domain.TransactionCommitted, CombinedCandidateHash: request.ExpectedCombinedCandidate}, nil
+}
+
 func newTestAPIServer(t *testing.T) (*Server, *healthyControl) {
 	t.Helper()
 	connection, err := database.Open(context.Background(), filepath.Join(t.TempDir(), "api.db"))
@@ -138,6 +152,7 @@ func newTestAPIServer(t *testing.T) (*Server, *healthyControl) {
 		authService,
 		sessions,
 		control,
+		store,
 		store,
 		store,
 		store,

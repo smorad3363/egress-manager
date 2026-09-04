@@ -6,12 +6,12 @@ phase: 8
 phase_name: interface-subnet-egress-routing
 
 active_spec: specs/008-interface-subnet-egress-routing/spec.md
-active_task: route-authenticated-api-and-operations-ui
+active_task: isolated-route-no-leak-packet-tests
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: expose route CRUD, plan, apply, and status through authenticated IPC and CSRF-protected HTTP, then build the responsive operations UI and no-leak packet tests
+next_action: extend the disposable namespace lab to prove killed outbound, DNS, and IPv6 traffic cannot escape while management and outbound endpoint paths remain reachable
 
 dirty_work_expected: false
 
@@ -71,6 +71,8 @@ recent_decisions:
   - The only routing firewall table is inet egm_egress; native candidates are validated and exercised inside the disposable privileged network lab.
   - Route apply is one journaled transaction across sing-box, nftables, IPv4/IPv6 policy routing, and the owned routing state file; each recovery snapshot is independently authenticated.
   - Apply installs the new kill-switch table before moving traffic, verifies TUN creation before policy rules, and restores prior sing-box, policy routes, nftables, and state after failure or restart.
+  - Route plan and apply rebuild inside egressd; HTTP apply requires all six reviewed state/candidate hashes and never accepts a client-supplied native candidate.
+  - Existing outbound-only apply preserves active routed TUN intents from the owned routing state instead of silently removing them.
 
 touched_areas:
   - route API and operations UI

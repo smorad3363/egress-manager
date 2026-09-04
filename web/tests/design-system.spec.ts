@@ -181,3 +181,43 @@ test("outbound console tests, stores, manages, and applies without exposing cred
   await expect(plan).toBeHidden();
   expect(calls).toContain("POST /api/v1/outbounds/apply");
 });
+
+test("route console manages explicit policy and applies only reviewed hashes", async ({ page }) => {
+  const storedRoute = { route: { id: "vpn_clients", name: "VPN clients", source: { kind: "interface", interface: "tun0" }, outbound_id: "ams_socks", failure_policy: "block", dns_policy: "follow_outbound", dns_servers: ["1.1.1.1"], ipv4_policy: "follow_outbound", ipv6_policy: "block", kill_switch: true, mtu: 1400, tcp_mss: 1360, enabled: true }, revision: 2 };
+  const outbound = { outbound: { id: "ams_socks", name: "Amsterdam SOCKS", adapter: "sing-box", type: "socks5", server: { host: "192.0.2.30", port: 1080 }, capabilities: { tcp: true, udp: true }, health: { status: "healthy" }, enabled: true }, revision: 3 };
+  const calls: string[] = [];
+  await page.addInitScript(() => window.sessionStorage.setItem("egress.csrf", "test-csrf-token"));
+  await page.route("**/api/v1/outbounds?limit=128", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [outbound] }) }));
+  await page.route("**/api/v1/routes**", async (route) => {
+    const request = route.request(); const url = new URL(request.url()); calls.push(`${request.method()} ${url.pathname}`);
+    if (request.method() !== "GET") expect(request.headers()["x-csrf-token"]).toBe("test-csrf-token");
+    if (request.method() === "GET") { await route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [storedRoute], next_cursor: "" }) }); return; }
+    if (url.pathname.endsWith("/plan")) { await route.fulfill({ contentType: "application/json", body: JSON.stringify({ engine: "coordinated-egress-routing", sing_box_state_hash: "sb-state", routing_state_hash: "route-state", sing_box_candidate_hash: "sb-candidate", routing_candidate_hash: "route-candidate", native_candidate_hash: "native-candidate", combined_candidate_hash: "combined-candidate", enabled_outbounds: 1, enabled_routes: 1, sing_box_actions: [{ kind: "route", resource: "vpn_clients", summary: "Configure a dedicated TUN." }], routing_actions: [{ kind: "kill_switch", resource: "vpn_clients", summary: "Block unintended fallback." }], native_actions: [{ kind: "policy_route", resource: "vpn_clients", summary: "Install owned IP policy." }] }) }); return; }
+    if (url.pathname.endsWith("/apply")) { expect(await request.postDataJSON()).toEqual({ expected_sing_box_state_hash: "sb-state", expected_routing_state_hash: "route-state", expected_sing_box_candidate_hash: "sb-candidate", expected_routing_candidate_hash: "route-candidate", expected_native_candidate_hash: "native-candidate", expected_combined_candidate_hash: "combined-candidate" }); await route.fulfill({ contentType: "application/json", body: JSON.stringify({ transaction_id: "route_test", state: "COMMITTED", combined_candidate_hash: "combined-candidate" }) }); return; }
+    await route.fulfill({ status: request.method() === "POST" ? 201 : 200, contentType: "application/json", body: JSON.stringify(storedRoute) });
+  });
+  await page.goto("/");
+  await page.getByLabel("Primary navigation").getByRole("button", { name: "Routes" }).click();
+  await expect(page.getByRole("heading", { name: "Interface & subnet routes" })).toBeVisible();
+  await expect(page.getByText("VPN clients")).toBeVisible();
+  await expect(page.getByText("block · kill switch")).toBeVisible();
+  if (process.env.VISUAL_QA) await page.screenshot({ path: "test-results/routes.png", fullPage: true });
+  await page.locator(".topbar").getByRole("button", { name: "New route" }).click();
+  const editor = page.getByRole("dialog");
+  await expect(editor.getByRole("heading", { name: "Create egress route" })).toBeVisible();
+  await editor.getByLabel("Route ID").fill("branch_clients");
+  await editor.getByLabel("Display name").fill("Branch clients");
+  await editor.getByRole("textbox", { name: "Interface", exact: true }).fill("tun1");
+  await editor.getByLabel("Primary outbound").selectOption("ams_socks");
+  await editor.getByRole("button", { name: "Save route" }).click();
+  await expect(editor).toBeHidden();
+  expect(calls).toContain("POST /api/v1/routes");
+  await page.getByRole("button", { name: "Review & apply" }).click();
+  const review = page.getByRole("dialog");
+  await expect(review.getByRole("heading", { name: "Review egress route plan" })).toBeVisible();
+  await expect(review.getByText("Block unintended fallback.")).toBeVisible();
+  await expect(review.getByText("combined-candidate")).toHaveCount(0);
+  await review.getByRole("button", { name: "Apply atomically" }).click();
+  await expect(review).toBeHidden();
+  expect(calls).toContain("POST /api/v1/routes/apply");
+});

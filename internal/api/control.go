@@ -8,6 +8,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/ipc"
 	"github.com/egress-manager/egress-manager/internal/nat"
+	"github.com/egress-manager/egress-manager/internal/routeengine"
 	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
 )
 
@@ -15,6 +16,22 @@ func (control IPCControl) PlanHAProxy(ctx context.Context, request managedHAProx
 	var response managedHAProxy.Plan
 	if err := control.Client.Call(ctx, ipc.OperationHAProxyPlan, request, &response); err != nil {
 		return managedHAProxy.Plan{}, err
+	}
+	return response, nil
+}
+
+func (control IPCControl) PlanRoutes(ctx context.Context) (routeengine.Review, error) {
+	var response routeengine.Review
+	if err := control.Client.Call(ctx, ipc.OperationRoutesPlan, struct{}{}, &response); err != nil {
+		return routeengine.Review{}, err
+	}
+	return response, nil
+}
+
+func (control IPCControl) ApplyRoutes(ctx context.Context, request routeengine.ApplyRequest) (routeengine.ApplyResponse, error) {
+	var response routeengine.ApplyResponse
+	if err := control.Client.Call(ctx, ipc.OperationRoutesApply, request, &response); err != nil {
+		return routeengine.ApplyResponse{}, err
 	}
 	return response, nil
 }

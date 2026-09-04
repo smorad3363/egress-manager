@@ -1,14 +1,40 @@
 package routing
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/egress-manager/egress-manager/internal/domain"
+	"github.com/egress-manager/egress-manager/internal/system"
 )
+
+func InspectOwnedTable(ctx context.Context, runner system.Runner, timeout time.Duration) (bool, error) {
+	if runner == nil {
+		return false, fmt.Errorf("routing inspection runner is required")
+	}
+	if timeout <= 0 || timeout > 10*time.Second {
+		timeout = 2 * time.Second
+	}
+	commandContext, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	result, err := runner.Run(commandContext, system.Command{Name: "nft", Args: []string{"list", "tables"}})
+	if err != nil || result.ExitCode != 0 {
+		return false, errors.Join(err, fmt.Errorf("nft exited with code %d", result.ExitCode))
+	}
+	for _, line := range strings.Split(string(result.Stdout), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 3 && fields[0] == "table" && fields[1] == OwnedNFTFamily && fields[2] == OwnedNFTTable {
+			return true, nil
+		}
+	}
+	return false, nil
+}
 
 const (
 	OwnedNFTFamily     = "inet"

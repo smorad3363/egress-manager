@@ -46,11 +46,13 @@ const (
 	OperationSingBoxTest   Operation = "singbox.test"
 	OperationSingBoxPlan   Operation = "singbox.plan"
 	OperationSingBoxApply  Operation = "singbox.apply"
+	OperationRoutesPlan    Operation = "routes.plan"
+	OperationRoutesApply   Operation = "routes.apply"
 )
 
 func (operation Operation) Validate() error {
 	switch operation {
-	case OperationHealth, OperationInventory, OperationNATPlan, OperationNATApply, OperationNATCount, OperationHAProxyPlan, OperationHAProxyApply, OperationHAProxyStats, OperationSingBoxImport, OperationSingBoxTest, OperationSingBoxPlan, OperationSingBoxApply:
+	case OperationHealth, OperationInventory, OperationNATPlan, OperationNATApply, OperationNATCount, OperationHAProxyPlan, OperationHAProxyApply, OperationHAProxyStats, OperationSingBoxImport, OperationSingBoxTest, OperationSingBoxPlan, OperationSingBoxApply, OperationRoutesPlan, OperationRoutesApply:
 		return nil
 	default:
 		return ErrUnknownAction

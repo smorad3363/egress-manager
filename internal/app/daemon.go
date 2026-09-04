@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/netip"
 	"os"
 	"strings"
 	"sync"
@@ -22,6 +23,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/ipc"
 	"github.com/egress-manager/egress-manager/internal/nat"
 	"github.com/egress-manager/egress-manager/internal/routeengine"
+	"github.com/egress-manager/egress-manager/internal/routing"
 	"github.com/egress-manager/egress-manager/internal/secrets"
 	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
 	"github.com/egress-manager/egress-manager/internal/system"
@@ -273,7 +275,11 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		if err != nil {
 			return managedSingBox.ExecutionPlan{}, err
 		}
-		return managedSingBox.BuildPlan(outbounds, credentials, state)
+		routeState, err := routing.InspectState(configuration.RoutingStatePath)
+		if err != nil {
+			return managedSingBox.ExecutionPlan{}, err
+		}
+		return managedSingBox.BuildRoutedPlan(outbounds, credentials, routeState.Routes, state)
 	}
 	if err := server.Handle(ipc.OperationSingBoxImport, func(ctx context.Context, payload json.RawMessage) (any, error) {
 		var request managedSingBox.ImportRequest
@@ -376,6 +382,129 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 			return nil, managedSingBox.ErrStateChanged
 		}
 		return singboxExecutor.Execute(ctx, request.TransactionID, plan)
+	}); err != nil {
+		return err
+	}
+	loadRoutePlan := func(ctx context.Context) (routeengine.Plan, error) {
+		storedOutbounds, err := store.ListOutbounds(ctx, "", managedSingBox.MaximumOutbounds+1)
+		if err != nil {
+			return routeengine.Plan{}, err
+		}
+		if len(storedOutbounds) > managedSingBox.MaximumOutbounds {
+			return routeengine.Plan{}, fmt.Errorf("sing-box desired state exceeds %d outbounds", managedSingBox.MaximumOutbounds)
+		}
+		outbounds := make([]domain.Outbound, 0, len(storedOutbounds))
+		credentials := make(map[domain.ID][]byte)
+		for _, item := range storedOutbounds {
+			outbounds = append(outbounds, item.Outbound)
+			if item.Outbound.Enabled {
+				document, credentialErr := store.OutboundCredential(ctx, item.Outbound.ID)
+				if credentialErr != nil {
+					return routeengine.Plan{}, credentialErr
+				}
+				credentials[item.Outbound.ID] = document
+			}
+		}
+		storedRoutes, err := store.ListRoutes(ctx, "", routing.MaximumRoutes+1)
+		if err != nil {
+			return routeengine.Plan{}, err
+		}
+		if len(storedRoutes) > routing.MaximumRoutes {
+			return routeengine.Plan{}, fmt.Errorf("routing desired state exceeds %d routes", routing.MaximumRoutes)
+		}
+		routes := make([]domain.Route, 0, len(storedRoutes))
+		referenced := make(map[domain.ID]struct{})
+		for _, item := range storedRoutes {
+			routes = append(routes, item.Route)
+			if item.Route.Enabled {
+				referenced[item.Route.OutboundID] = struct{}{}
+				if item.Route.FallbackOutboundID != "" {
+					referenced[item.Route.FallbackOutboundID] = struct{}{}
+				}
+			}
+		}
+		resolved := make(routing.ResolvedEndpoints)
+		for _, outbound := range outbounds {
+			if _, needed := referenced[outbound.ID]; !needed {
+				continue
+			}
+			if _, parseErr := netip.ParseAddr(outbound.Server.Host); parseErr == nil {
+				continue
+			}
+			addresses, resolveErr := net.DefaultResolver.LookupNetIP(ctx, "ip", outbound.Server.Host)
+			if resolveErr != nil {
+				return routeengine.Plan{}, fmt.Errorf("resolve outbound endpoint %q: %w", outbound.ID, resolveErr)
+			}
+			if len(addresses) > 16 {
+				return routeengine.Plan{}, fmt.Errorf("outbound endpoint %q resolved to more than 16 addresses", outbound.ID)
+			}
+			resolved[outbound.ID] = addresses
+		}
+		host, err := collector.Collect(ctx)
+		if err != nil {
+			return routeengine.Plan{}, err
+		}
+		routingState, err := routing.InspectState(configuration.RoutingStatePath)
+		if err != nil {
+			return routeengine.Plan{}, err
+		}
+		desired, err := routing.BuildPlan(routing.Settings{TableBase: 20000, RulePriorityBase: 21000, ProtectedLocalPrefixes: configuration.ProtectedManagementCIDRs}, routes, outbounds, host, resolved, routingState)
+		if err != nil {
+			return routeengine.Plan{}, err
+		}
+		singBoxState, err := managedSingBox.InspectState(configuration.SingBoxConfigPath)
+		if err != nil {
+			return routeengine.Plan{}, err
+		}
+		parsedDesired, err := routing.ParseState(desired.Candidate(), true)
+		if err != nil {
+			return routeengine.Plan{}, err
+		}
+		singBoxPlan, err := managedSingBox.BuildRoutedPlan(outbounds, credentials, parsedDesired.Routes, singBoxState)
+		if err != nil {
+			return routeengine.Plan{}, err
+		}
+		tableExists, err := routing.InspectOwnedTable(ctx, runner, 2*time.Second)
+		if err != nil {
+			return routeengine.Plan{}, err
+		}
+		native, err := routing.BuildNativePlan(desired, tableExists)
+		if err != nil {
+			return routeengine.Plan{}, err
+		}
+		return routeengine.BuildPlan(singBoxPlan, desired, native)
+	}
+	if err := server.Handle(ipc.OperationRoutesPlan, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		if err := decodeEmptyPayload(payload); err != nil {
+			return nil, err
+		}
+		singboxMutex.Lock()
+		defer singboxMutex.Unlock()
+		plan, err := loadRoutePlan(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return plan.Review, nil
+	}); err != nil {
+		return err
+	}
+	if err := server.Handle(ipc.OperationRoutesApply, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		var request routeengine.ApplyRequest
+		if err := decodePayload(payload, &request); err != nil {
+			return nil, err
+		}
+		singboxMutex.Lock()
+		defer singboxMutex.Unlock()
+		plan, err := loadRoutePlan(ctx)
+		if err != nil {
+			return nil, err
+		}
+		review := plan.Review
+		if request.ExpectedSingBoxStateHash == "" || request.ExpectedRoutingStateHash == "" || request.ExpectedSingBoxCandidate == "" || request.ExpectedRoutingCandidate == "" || request.ExpectedNativeCandidate == "" || request.ExpectedCombinedCandidate == "" ||
+			review.SingBoxStateHash != request.ExpectedSingBoxStateHash || review.RoutingStateHash != request.ExpectedRoutingStateHash || review.SingBoxCandidateHash != request.ExpectedSingBoxCandidate || review.RoutingCandidateHash != request.ExpectedRoutingCandidate || review.NativeCandidateHash != request.ExpectedNativeCandidate || review.CombinedCandidateHash != request.ExpectedCombinedCandidate {
+			return nil, routeengine.ErrStateChanged
+		}
+		return routeExecutor.Execute(ctx, request.TransactionID, plan)
 	}); err != nil {
 		return err
 	}

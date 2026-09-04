@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -313,6 +315,27 @@ func ParseState(content []byte, exists bool) (State, error) {
 		seen[intent.ID] = struct{}{}
 	}
 	return State{Exists: true, Hash: stateHash(content, true), Routes: append([]RouteIntent{}, candidate.Routes...)}, nil
+}
+
+func InspectState(path string) (State, error) {
+	if !filepath.IsAbs(path) {
+		return State{}, fmt.Errorf("routing state path must be absolute")
+	}
+	info, err := os.Lstat(path)
+	if os.IsNotExist(err) {
+		return ParseState(nil, false)
+	}
+	if err != nil {
+		return State{}, fmt.Errorf("inspect routing state: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 || info.Size() < 1 || info.Size() > maximumCandidateBytes {
+		return State{}, fmt.Errorf("owned routing state is not a bounded regular file")
+	}
+	content, err := os.ReadFile(path)
+	if err != nil {
+		return State{}, fmt.Errorf("read routing state: %w", err)
+	}
+	return ParseState(content, true)
 }
 
 type routeSelector struct {
