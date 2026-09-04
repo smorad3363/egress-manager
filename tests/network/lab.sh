@@ -17,6 +17,9 @@ for command_name in ip nft socat sysctl timeout grep awk; do
     require_command "$command_name"
 done
 
+inventory_probe=${EGRESS_INVENTORY_PROBE:-/usr/local/bin/egress-inventory-probe}
+[ -x "$inventory_probe" ] || fail "inventory probe not executable: $inventory_probe"
+
 suffix=$$
 client_ns="egm-c-$suffix"
 router_ns="egm-r-$suffix"
@@ -104,6 +107,12 @@ udp_pid=$(ip netns exec "$server_ns" sh -c 'socat -T2 UDP-RECVFROM:5353,reuseadd
 
 sleep 0.2
 
+inventory_result=$(ip netns exec "$server_ns" "$inventory_probe")
+printf '%s\n' "$inventory_result" | grep -Fq '"name":"s0"' || fail "inventory did not detect server interface"
+printf '%s\n' "$inventory_result" | grep -Fq '"port":8080' || fail "inventory did not detect TCP listener"
+printf '%s\n' "$inventory_result" | grep -Fq '"port":5353' || fail "inventory did not detect UDP listener"
+printf '%s\n' "$inventory_result" | grep -Fq '"name":"nftables","available":true' || fail "inventory did not detect nftables"
+
 route_result=$(ip -n "$client_ns" route get 10.203.2.2)
 printf '%s\n' "$route_result" | grep -Fq 'via 10.203.1.1' || fail "client route does not use isolated router"
 
@@ -129,4 +138,4 @@ if ip netns exec "$router_ns" nft list table ip egm_lab >/dev/null 2>&1; then
 fi
 ip netns exec "$router_ns" nft list table inet foreign_lab >/dev/null || fail "foreign table was removed during rollback"
 
-printf 'PASS: isolated TCP/UDP NAT, source CIDR, routing, counters, rollback, and foreign preservation\n'
+printf 'PASS: isolated TCP/UDP NAT, read-only inventory, source CIDR, routing, counters, rollback, and foreign preservation\n'

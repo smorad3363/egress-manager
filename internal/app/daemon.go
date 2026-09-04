@@ -8,10 +8,13 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/egress-manager/egress-manager/internal/buildinfo"
 	"github.com/egress-manager/egress-manager/internal/config"
+	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/ipc"
+	"github.com/egress-manager/egress-manager/internal/system"
 )
 
 type DaemonOptions struct {
@@ -52,11 +55,12 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	}); err != nil {
 		return err
 	}
-	if err := server.Handle(ipc.OperationInventory, func(_ context.Context, payload json.RawMessage) (any, error) {
+	collector := inventory.Collector{Runner: system.ExecRunner{}, Files: inventory.OSFiles{}, Timeout: 2 * time.Second}
+	if err := server.Handle(ipc.OperationInventory, func(ctx context.Context, payload json.RawMessage) (any, error) {
 		if err := decodeEmptyPayload(payload); err != nil {
 			return nil, err
 		}
-		return map[string]any{"interfaces": []any{}}, nil
+		return collector.Collect(ctx)
 	}); err != nil {
 		return err
 	}

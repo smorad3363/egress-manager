@@ -3,6 +3,7 @@ import { lazy, Suspense, useState } from "react";
 import type { ReactNode } from "react";
 import { DesignSystem } from "./DesignSystem";
 import { Icon } from "./components/Icon";
+import { NetworkInventory } from "./components/NetworkInventory";
 import { Badge } from "./components/ui/Badge";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
@@ -72,6 +73,7 @@ function Dashboard() {
         </header>
 
         <div className="content">
+          {active === "Network" ? <NetworkInventory /> : <>
           <section className="page-heading" aria-labelledby="overview-title">
             <div><p className="eyebrow">LIVE OVERVIEW</p><h2 id="overview-title">Traffic is flowing normally.</h2><p>Policy and transport health across this gateway.</p></div>
             <div className="page-heading__meta"><span>Last reconciled</span><strong>12 seconds ago</strong></div>
@@ -111,6 +113,7 @@ function Dashboard() {
               </table>
             </div>
           </Card>
+          </>}
         </div>
       </main>
 

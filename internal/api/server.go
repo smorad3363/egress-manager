@@ -16,6 +16,7 @@ import (
 
 	"github.com/egress-manager/egress-manager/internal/auth"
 	"github.com/egress-manager/egress-manager/internal/database"
+	"github.com/egress-manager/egress-manager/internal/inventory"
 )
 
 const (
@@ -35,6 +36,7 @@ type SessionService interface {
 
 type ControlService interface {
 	Health(context.Context) error
+	Inventory(context.Context) (inventory.Inventory, error)
 }
 
 type ServerConfig struct {
@@ -77,6 +79,7 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("/api/v1/auth/logout", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.logoutHandler))))
 	mux.Handle("/api/v1/session", server.method(http.MethodGet, server.requireSession(http.HandlerFunc(server.sessionHandler))))
 	mux.Handle("/api/v1/control/health", server.method(http.MethodGet, server.requireSession(http.HandlerFunc(server.controlHealthHandler))))
+	mux.Handle("/api/v1/network/inventory", server.method(http.MethodGet, server.requireSession(http.HandlerFunc(server.networkInventoryHandler))))
 	mux.Handle("/api/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		WriteError(writer, request, NewError(http.StatusNotFound, CodeNotFound, "Endpoint not found.", nil))
 	}))
@@ -175,6 +178,16 @@ func (server *Server) controlHealthHandler(writer http.ResponseWriter, request *
 		return
 	}
 	_ = WriteJSON(writer, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+func (server *Server) networkInventoryHandler(writer http.ResponseWriter, request *http.Request) {
+	result, err := server.control.Inventory(request.Context())
+	if err != nil {
+		server.logger.ErrorContext(request.Context(), "network inventory failed", "error_type", fmt.Sprintf("%T", err))
+		WriteError(writer, request, NewError(http.StatusServiceUnavailable, CodeUnavailable, "Network inventory unavailable.", err))
+		return
+	}
+	_ = WriteJSON(writer, http.StatusOK, result)
 }
 
 type principal struct {

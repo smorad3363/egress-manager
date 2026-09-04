@@ -2,16 +2,16 @@ schema_version: 1
 
 project: egress-manager
 
-phase: 4
-phase_name: read-only-network-inventory
+phase: 5
+phase_name: nat-port-forward-engine
 
-active_spec: specs/004-read-only-network-inventory/spec.md
-active_task: typed-host-probes
+active_spec: specs/005-nat-port-forward-engine/spec.md
+active_task: nftables-plan-and-renderer
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: implement bounded read-only Linux probes and typed inventory parsers behind authenticated IPC and API
+next_action: implement normalized NAT intent, management-port protection, owned nftables dry-run plans, and failure-first tests
 
 dirty_work_expected: false
 
@@ -19,10 +19,10 @@ tests:
   last_run: 2026-09-04
   result: pass
   commands:
-    - pnpm --dir web typecheck
-    - pnpm --dir web lint
-    - pnpm --dir web build
+    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test ./... && go vet ./..."
+    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test -race ./..."
     - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=<installed-chrome> pnpm --dir web test:e2e
+    - docker build --tag egress-manager-network-lab --file tests/network/Dockerfile . && docker run --rm --privileged egress-manager-network-lab
 
 network_transaction:
   status: none
@@ -41,7 +41,8 @@ recent_decisions:
   - SQLite uses go-sqlite3 with CGO; rationale and build risk are recorded in ADR 0001.
   - Non-loopback panel listeners require TLS; browser sessions always use secure cookies.
   - The IPC key is domain-separated before use for login-throttle buckets.
+  - Inventory probes use fixed executables and arguments, bounded output, and per-command timeouts without a shell.
 
 touched_areas:
-  - specs/004-read-only-network-inventory
-  - internal inventory probes
+  - specs/005-nat-port-forward-engine
+  - internal NAT planner

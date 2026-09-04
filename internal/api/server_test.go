@@ -16,6 +16,7 @@ import (
 
 	"github.com/egress-manager/egress-manager/internal/auth"
 	"github.com/egress-manager/egress-manager/internal/database"
+	"github.com/egress-manager/egress-manager/internal/inventory"
 )
 
 type healthyControl struct {
@@ -25,6 +26,11 @@ type healthyControl struct {
 func (control *healthyControl) Health(context.Context) error {
 	control.calls++
 	return nil
+}
+
+func (control *healthyControl) Inventory(context.Context) (inventory.Inventory, error) {
+	control.calls++
+	return inventory.Inventory{Interfaces: []inventory.Interface{}, Routes: []inventory.Route{}, Listeners: []inventory.Listener{}, Capabilities: []inventory.Capability{}, Warnings: []string{}}, nil
 }
 
 func newTestAPIServer(t *testing.T) (*Server, *healthyControl) {
@@ -74,6 +80,21 @@ func TestUnauthenticatedControlEndpointIsRejected(t *testing.T) {
 
 	server, control := newTestAPIServer(t)
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/control/health", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+	if control.calls != 0 {
+		t.Fatalf("privileged control called %d times without authentication", control.calls)
+	}
+}
+
+func TestUnauthenticatedInventoryEndpointIsRejected(t *testing.T) {
+	t.Parallel()
+
+	server, control := newTestAPIServer(t)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/network/inventory", nil)
 	response := httptest.NewRecorder()
 	server.Handler().ServeHTTP(response, request)
 	if response.Code != http.StatusUnauthorized {
@@ -144,6 +165,36 @@ func TestLoginSessionCSRFControlAndLogoutFlow(t *testing.T) {
 	handler.ServeHTTP(logoutResponse, logoutRequest)
 	if logoutResponse.Code != http.StatusNoContent {
 		t.Fatalf("logout status = %d, body = %s", logoutResponse.Code, logoutResponse.Body.String())
+	}
+}
+
+func TestAuthenticatedInventoryEndpointReturnsTypedDocument(t *testing.T) {
+	t.Parallel()
+
+	server, control := newTestAPIServer(t)
+	handler := server.Handler()
+	loginRequest := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(`{"username":"operator","password":"correct horse battery staple"}`))
+	loginRequest.Header.Set("Content-Type", "application/json")
+	loginRequest.RemoteAddr = "192.0.2.40:54321"
+	loginRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(loginRecorder, loginRequest)
+	if loginRecorder.Code != http.StatusOK {
+		t.Fatalf("login status = %d, body = %s", loginRecorder.Code, loginRecorder.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/network/inventory", nil)
+	request.AddCookie(loginRecorder.Result().Cookies()[0])
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("inventory status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var document inventory.Inventory
+	if err := json.Unmarshal(response.Body.Bytes(), &document); err != nil {
+		t.Fatal(err)
+	}
+	if document.Interfaces == nil || document.Listeners == nil || control.calls != 1 {
+		t.Fatalf("inventory response = %#v; calls = %d", document, control.calls)
 	}
 }
 

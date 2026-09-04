@@ -17,12 +17,12 @@ client (10.203.1.2)
   -> server (10.203.2.2)
 ```
 
-It verifies TCP and UDP DNAT, masquerade, source-CIDR filtering, routing, nftables counters, owned-rule rollback, foreign-rule preservation, and two consecutive clean runs.
+It verifies TCP and UDP DNAT, masquerade, source-CIDR filtering, routing, nftables counters, owned-rule rollback, foreign-rule preservation, typed read-only inventory, and two consecutive clean runs.
 
 ## Docker
 
 ```sh
-docker build -t egress-manager-network-lab tests/network
+docker build -t egress-manager-network-lab -f tests/network/Dockerfile .
 docker run --rm --privileged egress-manager-network-lab
 ```
 
@@ -31,7 +31,8 @@ The nftables rules live only inside the disposable router namespace. Cleanup tar
 ## Host Linux
 
 ```sh
-sudo tests/network/run.sh
+go build -o /tmp/egress-inventory-probe ./tests/network/inventoryprobe
+sudo EGRESS_INVENTORY_PROBE=/tmp/egress-inventory-probe tests/network/run.sh
 ```
 
-Requires `iproute2`, `nftables`, `socat`, `procps`, and `coreutils`.
+Requires Go 1.27.1, `iproute2`, `iptables`, `nftables`, `socat`, `procps`, and `coreutils`.

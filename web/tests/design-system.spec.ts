@@ -44,3 +44,26 @@ test("design-system fixtures and reduced motion are available", async ({ page })
   const duration = await page.locator(".skeleton").first().evaluate((element) => getComputedStyle(element).animationDuration);
   expect(Number.parseFloat(duration)).toBeLessThan(0.001);
 });
+
+test("authenticated network inventory displays typed host state", async ({ page }) => {
+  await page.route("**/api/v1/network/inventory", async (route) => {
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({
+        generated_at: "2026-09-04T08:00:00Z",
+        interfaces: [{ name: "eth0", state: "up", mtu: 1500, addresses: [{ family: "inet", cidr: "192.0.2.9/24", scope: "global" }] }],
+        routes: [{ destination: "default", gateway: "192.0.2.1", interface: "eth0", default: true }],
+        listeners: [{ protocol: "tcp", address: "0.0.0.0", port: 443, process: "haproxy", pid: 42 }],
+        dns: { source: "/etc/resolv.conf", servers: ["1.1.1.1"], search_domains: ["internal.example"] },
+        capabilities: [{ name: "nftables", available: true, running: false, version: "nftables v1.0.9" }],
+        warnings: [],
+      }),
+    });
+  });
+  await page.goto("/");
+  await page.getByLabel("Primary navigation").getByRole("button", { name: "Network" }).click();
+  await expect(page.getByRole("heading", { name: "Host network inventory" })).toBeVisible();
+  await expect(page.getByText("192.0.2.9/24")).toBeVisible();
+  await expect(page.getByRole("cell", { name: "haproxy PID 42" })).toBeVisible();
+  await expect(page.getByText("nftables v1.0.9")).toBeVisible();
+});

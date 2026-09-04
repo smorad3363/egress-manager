@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/egress-manager/egress-manager/internal/config"
+	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/ipc"
 )
 
@@ -82,6 +83,13 @@ func TestDaemonAndWebLifecycle(t *testing.T) {
 	malformedClient := ipc.Client{SocketPath: configuration.ControlSocketPath, Authenticator: ipcAuthenticator}
 	if err := malformedClient.Call(context.Background(), ipc.OperationHealth, map[string]bool{"mutate": true}, nil); !ipc.IsRemoteError(err, "operation_failed") {
 		t.Fatalf("malformed typed payload error = %v", err)
+	}
+	var hostInventory inventory.Inventory
+	if err := malformedClient.Call(context.Background(), ipc.OperationInventory, struct{}{}, &hostInventory); err != nil {
+		t.Fatalf("typed inventory call failed: %v", err)
+	}
+	if len(hostInventory.Capabilities) == 0 {
+		t.Fatal("typed inventory response omitted capability states")
 	}
 
 	if err := ProvisionAdmin(context.Background(), configPath, keyPath, "operator", "correct horse battery staple"); err != nil {
