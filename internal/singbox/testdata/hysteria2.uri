@@ -1,0 +1,1 @@
+hysteria2://TEST_ONLY_NOT_A_SECRET@hysteria.example.com:443?sni=hysteria.example.com&security=tls#Hysteria2%20Fixture

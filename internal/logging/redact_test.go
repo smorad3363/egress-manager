@@ -19,16 +19,18 @@ func TestRedactingHandlerRemovesSecretAttributes(t *testing.T) {
 	logger.InfoContext(context.Background(), "login",
 		"username", "operator",
 		"password", "never-log-this",
+		"outbound_uuid", "never-log-uuid",
+		"pre_shared_key", "never-log-psk",
 		slog.Group("request", "authorization", "Bearer leak", "method", "POST"),
 	)
 	text := output.String()
-	for _, secret := range []string{"with-secret", "never-log-this", "Bearer leak"} {
+	for _, secret := range []string{"with-secret", "never-log-this", "never-log-uuid", "never-log-psk", "Bearer leak"} {
 		if strings.Contains(text, secret) {
 			t.Fatalf("structured log leaked %q: %s", secret, text)
 		}
 	}
-	if count := strings.Count(text, RedactedValue); count != 3 {
-		t.Fatalf("redaction count = %d, want 3: %s", count, text)
+	if count := strings.Count(text, RedactedValue); count != 5 {
+		t.Fatalf("redaction count = %d, want 5: %s", count, text)
 	}
 	if !strings.Contains(text, `"username":"operator"`) || !strings.Contains(text, `"method":"POST"`) {
 		t.Fatalf("non-secret fields were lost: %s", text)

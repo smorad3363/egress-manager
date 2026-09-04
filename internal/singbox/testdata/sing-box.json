@@ -1,0 +1,23 @@
+{
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "JSON VLESS Fixture",
+      "server": "json-vless.example.com",
+      "server_port": 443,
+      "uuid": "00000000-0000-4000-8000-000000000004",
+      "tls": {
+        "enabled": true,
+        "server_name": "json-vless.example.com"
+      }
+    },
+    {
+      "type": "socks5",
+      "tag": "JSON SOCKS5 Fixture",
+      "server": "json-socks.example.com",
+      "server_port": 1080,
+      "username": "fixture-user",
+      "password": "TEST_ONLY_NOT_A_SECRET"
+    }
+  ]
+}

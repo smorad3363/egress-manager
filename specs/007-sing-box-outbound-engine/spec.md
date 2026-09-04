@@ -75,3 +75,11 @@ Support URI and structured-configuration import where practical, with fixture-ba
 - API and IPC tests prove authentication, CSRF protection, strict typed payloads, bounded output, optimistic concurrency, and secret redaction.
 - UI supports test, save, enable, disable, delete, clone, health outcomes, latency, external IP, capability display, dry-run review, and apply.
 - Existing NAT, HAProxy, and foreign-state preservation suites remain green.
+
+## Progress
+
+- Adapter-neutral public domain model with typed capabilities and granular health outcomes.
+- AES-256-GCM credential documents with a domain-separated key, outbound-ID-bound authenticated context, bounded envelopes, and tamper detection.
+- Revisioned SQLite persistence with keyset pagination, encrypted credential isolation, atomic clone/delete semantics, and indexes for enabled adapter scans and protocol filtering.
+- Fixture-based URI import for VLESS, Trojan, Shadowsocks, VMess, Hysteria2, TUIC, SOCKS5, and WireGuard, plus structured sing-box JSON import.
+- Public import results and structured logging expose secret metadata only; credential values remain private and redacted.

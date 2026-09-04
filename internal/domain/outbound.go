@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"time"
 )
 
 var hostnamePattern = regexp.MustCompile(`^(?i:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*)$`)
@@ -33,6 +34,17 @@ var outboundTypes = []OutboundType{
 	OutboundTUIC,
 	OutboundSOCKS5,
 	OutboundWireGuard,
+}
+
+type OutboundAdapter string
+
+const OutboundAdapterSingBox OutboundAdapter = "sing-box"
+
+func (adapter OutboundAdapter) Validate() error {
+	if adapter != OutboundAdapterSingBox {
+		return fmt.Errorf("unsupported outbound adapter %q", adapter)
+	}
+	return nil
 }
 
 func (kind OutboundType) Validate() error {
@@ -70,19 +82,90 @@ type Capabilities struct {
 	UDP bool `json:"udp"`
 }
 
+type ProbeStatus string
+
+const (
+	ProbeUnknown     ProbeStatus = "unknown"
+	ProbePassed      ProbeStatus = "passed"
+	ProbeFailed      ProbeStatus = "failed"
+	ProbeUnsupported ProbeStatus = "unsupported"
+	ProbeUntestable  ProbeStatus = "untestable"
+)
+
+func (status ProbeStatus) Validate() error {
+	switch status {
+	case ProbeUnknown, ProbePassed, ProbeFailed, ProbeUnsupported, ProbeUntestable:
+		return nil
+	default:
+		return fmt.Errorf("unsupported probe status %q", status)
+	}
+}
+
+type OutboundHealth struct {
+	Status             HealthStatus  `json:"status"`
+	CheckedAt          *time.Time    `json:"checked_at,omitempty"`
+	ConfigurationValid ProbeStatus   `json:"configuration_valid"`
+	TransportReachable ProbeStatus   `json:"transport_reachable"`
+	InternetReachable  ProbeStatus   `json:"internet_reachable"`
+	ExternalIP         string        `json:"external_ip,omitempty"`
+	TCP                ProbeStatus   `json:"tcp"`
+	UDP                ProbeStatus   `json:"udp"`
+	Latency            time.Duration `json:"latency,omitempty"`
+	Detail             string        `json:"detail,omitempty"`
+}
+
+func UnknownOutboundHealth() OutboundHealth {
+	return OutboundHealth{
+		Status:             HealthUnknown,
+		ConfigurationValid: ProbeUnknown,
+		TransportReachable: ProbeUnknown,
+		InternetReachable:  ProbeUnknown,
+		TCP:                ProbeUnknown,
+		UDP:                ProbeUnknown,
+	}
+}
+
+func (health OutboundHealth) Validate() error {
+	var externalIPError error
+	if health.ExternalIP != "" {
+		if address, err := netip.ParseAddr(health.ExternalIP); err != nil || address.String() != health.ExternalIP {
+			externalIPError = fmt.Errorf("external IP must be a canonical IP address")
+		}
+	}
+	if health.Latency < 0 || health.Latency > 24*time.Hour {
+		return fmt.Errorf("outbound health latency must be between zero and 24h")
+	}
+	if len(health.Detail) > 256 {
+		return fmt.Errorf("outbound health detail must not exceed 256 bytes")
+	}
+	return joinErrors(
+		health.Status.Validate(),
+		health.ConfigurationValid.Validate(),
+		health.TransportReachable.Validate(),
+		health.InternetReachable.Validate(),
+		health.TCP.Validate(),
+		health.UDP.Validate(),
+		externalIPError,
+	)
+}
+
 type Outbound struct {
-	ID             ID           `json:"id"`
-	Name           string       `json:"name"`
-	Type           OutboundType `json:"type"`
-	Server         Endpoint     `json:"server"`
-	Capabilities   Capabilities `json:"capabilities"`
-	Health         Health       `json:"health"`
-	Enabled        bool         `json:"enabled"`
-	SecretMetadata []string     `json:"secret_metadata,omitempty"`
+	ID             ID              `json:"id"`
+	Name           string          `json:"name"`
+	Adapter        OutboundAdapter `json:"adapter"`
+	Type           OutboundType    `json:"type"`
+	Server         Endpoint        `json:"server"`
+	Capabilities   Capabilities    `json:"capabilities"`
+	Health         OutboundHealth  `json:"health"`
+	Enabled        bool            `json:"enabled"`
+	SecretMetadata []string        `json:"secret_metadata,omitempty"`
 }
 
 func (outbound Outbound) Validate() error {
 	var secretErrors []error
+	if len(outbound.SecretMetadata) > 32 {
+		secretErrors = append(secretErrors, fmt.Errorf("outbound must not contain more than 32 secret metadata entries"))
+	}
 	seen := make(map[string]struct{}, len(outbound.SecretMetadata))
 	for _, key := range outbound.SecretMetadata {
 		if err := validateConfigName("secret metadata", key); err != nil {
@@ -93,6 +176,11 @@ func (outbound Outbound) Validate() error {
 		}
 		seen[key] = struct{}{}
 	}
+	for _, required := range requiredOutboundSecrets(outbound.Type) {
+		if _, exists := seen[required]; !exists {
+			secretErrors = append(secretErrors, fmt.Errorf("%s outbound requires %s secret metadata", outbound.Type, required))
+		}
+	}
 
 	var capabilitiesError error
 	if !outbound.Capabilities.TCP && !outbound.Capabilities.UDP {
@@ -102,12 +190,28 @@ func (outbound Outbound) Validate() error {
 	return joinErrors(
 		outbound.ID.Validate("outbound id"),
 		validateDisplayName("outbound name", outbound.Name),
+		outbound.Adapter.Validate(),
 		outbound.Type.Validate(),
 		outbound.Server.Validate(),
 		outbound.Health.Validate(),
 		capabilitiesError,
 		errorsFrom(secretErrors),
 	)
+}
+
+func requiredOutboundSecrets(kind OutboundType) []string {
+	switch kind {
+	case OutboundVLESS, OutboundVMess:
+		return []string{"uuid"}
+	case OutboundTrojan, OutboundShadowsocks, OutboundHysteria2:
+		return []string{"password"}
+	case OutboundTUIC:
+		return []string{"uuid", "password"}
+	case OutboundWireGuard:
+		return []string{"private_key"}
+	default:
+		return nil
+	}
 }
 
 func errorsFrom(errs []error) error {

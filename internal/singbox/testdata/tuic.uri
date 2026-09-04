@@ -1,0 +1,1 @@
+tuic://00000000-0000-4000-8000-000000000003:TEST_ONLY_NOT_A_SECRET@tuic.example.com:443?congestion_control=bbr&security=tls&sni=tuic.example.com#TUIC%20Fixture

@@ -1,0 +1,1 @@
+vless://00000000-0000-4000-8000-000000000001@vless.example.com:443?encryption=none&security=tls&sni=vless.example.com&type=ws&path=%2Ffixture#VLESS%20Fixture

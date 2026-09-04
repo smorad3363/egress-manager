@@ -4,19 +4,21 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func validOutbound() Outbound {
 	return Outbound{
-		ID:   "vless-de",
-		Name: "VLESS Germany",
-		Type: OutboundVLESS,
+		ID:      "vless-de",
+		Name:    "VLESS Germany",
+		Adapter: OutboundAdapterSingBox,
+		Type:    OutboundVLESS,
 		Server: Endpoint{
 			Host: "edge.example.com",
 			Port: 443,
 		},
 		Capabilities: Capabilities{TCP: true, UDP: true},
-		Health:       Health{Status: HealthUnknown},
+		Health:       UnknownOutboundHealth(),
 		Enabled:      true,
 		SecretMetadata: []string{
 			"uuid",
@@ -35,8 +37,10 @@ func TestOutboundValidation(t *testing.T) {
 		{name: "valid", mutate: func(*Outbound) {}},
 		{name: "invalid endpoint", mutate: func(outbound *Outbound) { outbound.Server.Host = "https://bad host" }},
 		{name: "unknown protocol", mutate: func(outbound *Outbound) { outbound.Type = "unknown" }},
+		{name: "unknown adapter", mutate: func(outbound *Outbound) { outbound.Adapter = "unknown" }},
 		{name: "no capability", mutate: func(outbound *Outbound) { outbound.Capabilities = Capabilities{} }},
 		{name: "duplicate secret key", mutate: func(outbound *Outbound) { outbound.SecretMetadata = []string{"uuid", "uuid"} }},
+		{name: "missing required secret", mutate: func(outbound *Outbound) { outbound.SecretMetadata = nil }},
 	}
 
 	for _, test := range tests {
@@ -52,6 +56,20 @@ func TestOutboundValidation(t *testing.T) {
 				t.Fatal("Validate() expected an error")
 			}
 		})
+	}
+}
+
+func TestOutboundHealthValidation(t *testing.T) {
+	t.Parallel()
+	health := UnknownOutboundHealth()
+	health.ExternalIP = "203.0.113.9"
+	health.Latency = 25 * time.Millisecond
+	if err := health.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	health.ExternalIP = "not-an-ip"
+	if err := health.Validate(); err == nil {
+		t.Fatal("invalid external IP accepted")
 	}
 }
 

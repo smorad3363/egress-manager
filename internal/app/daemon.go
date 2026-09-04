@@ -20,6 +20,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/ipc"
 	"github.com/egress-manager/egress-manager/internal/nat"
+	"github.com/egress-manager/egress-manager/internal/secrets"
 	"github.com/egress-manager/egress-manager/internal/system"
 )
 
@@ -54,7 +55,14 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		return err
 	}
 	defer databaseConnection.Close()
-	store := database.NewStore(databaseConnection)
+	protector, err := secrets.NewProtector(key, nil)
+	if err != nil {
+		return err
+	}
+	store, err := database.NewProtectedStore(databaseConnection, protector)
+	if err != nil {
+		return err
+	}
 	runner := system.ExecRunner{}
 	executor := nat.Executor{Runner: runner, Journal: store, Verifier: nat.SystemVerifier{Runner: runner}}
 	if err := executor.Recover(ctx); err != nil {

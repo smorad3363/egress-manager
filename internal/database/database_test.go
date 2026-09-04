@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/egress-manager/egress-manager/internal/domain"
+	"github.com/egress-manager/egress-manager/internal/secrets"
 )
 
 func openTestDatabase(t *testing.T) *sql.DB {
@@ -39,8 +40,85 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(version) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 4 {
-		t.Fatalf("migration count = %d, want 4", count)
+	if count != 5 {
+		t.Fatalf("migration count = %d, want 5", count)
+	}
+}
+
+func TestOutboundRepositoryEncryptsCredentialsAndUsesOptimisticRevision(t *testing.T) {
+	t.Parallel()
+	database := openTestDatabase(t)
+	protector, err := secrets.NewProtector([32]byte{9, 8, 7, 6}, strings.NewReader(strings.Repeat("n", 128)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewProtectedStore(database, protector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	outbound := domain.Outbound{
+		ID: "vless_primary", Name: "VLESS Primary", Adapter: domain.OutboundAdapterSingBox, Type: domain.OutboundVLESS,
+		Server: domain.Endpoint{Host: "edge.example.com", Port: 443}, Capabilities: domain.Capabilities{TCP: true, UDP: true},
+		Health: domain.UnknownOutboundHealth(), Enabled: true, SecretMetadata: []string{"uuid"},
+	}
+	document := []byte(`{"uuid":"TEST_ONLY_NOT_A_SECRET"}`)
+	created, err := store.CreateOutbound(ctx, outbound, document, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Revision != 1 {
+		t.Fatalf("created revision = %d", created.Revision)
+	}
+	var definition string
+	var ciphertext []byte
+	if err := database.QueryRow(`SELECT o.definition, c.ciphertext FROM outbounds o JOIN outbound_credentials c ON c.outbound_id = o.id WHERE o.id = ?`, string(outbound.ID)).Scan(&definition, &ciphertext); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(definition, "TEST_ONLY_NOT_A_SECRET") || strings.Contains(string(ciphertext), "TEST_ONLY_NOT_A_SECRET") {
+		t.Fatal("stored outbound leaked credential plaintext")
+	}
+	opened, err := store.OutboundCredential(ctx, outbound.ID)
+	if err != nil || string(opened) != string(document) {
+		t.Fatalf("opened credential = %q, error = %v", opened, err)
+	}
+	outbound.Enabled = false
+	updated, err := store.UpdateOutbound(ctx, outbound, 1, nil, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Revision != 2 || updated.Outbound.Enabled {
+		t.Fatalf("updated outbound = %#v", updated)
+	}
+	changedEndpoint := outbound
+	changedEndpoint.Server.Host = "other.example.com"
+	if _, err := store.UpdateOutbound(ctx, changedEndpoint, 2, nil, now.Add(2*time.Second)); err == nil || !strings.Contains(err.Error(), "without replacement credential") {
+		t.Fatalf("credential-shape update error = %v", err)
+	}
+	if _, err := store.UpdateOutbound(ctx, outbound, 1, nil, now.Add(2*time.Second)); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale update error = %v", err)
+	}
+	clone := outbound
+	clone.ID = "vless_clone"
+	clone.Name = "VLESS Clone"
+	cloned, err := store.CloneOutbound(ctx, outbound.ID, 2, clone, now.Add(3*time.Second))
+	if err != nil || cloned.Revision != 1 {
+		t.Fatalf("cloned outbound = %#v, error = %v", cloned, err)
+	}
+	clonedDocument, err := store.OutboundCredential(ctx, clone.ID)
+	if err != nil || string(clonedDocument) != string(document) {
+		t.Fatalf("cloned credential = %q, error = %v", clonedDocument, err)
+	}
+	if err := store.DeleteOutbound(ctx, clone.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteOutbound(ctx, outbound.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	var credentials int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM outbound_credentials`).Scan(&credentials); err != nil || credentials != 0 {
+		t.Fatalf("credential rows = %d, error = %v", credentials, err)
 	}
 }
 
@@ -259,6 +337,27 @@ func TestThrottleQueryUsesCompositeIndex(t *testing.T) {
 	}
 	if !strings.Contains(detail, "idx_login_attempts_bucket_result_time") {
 		t.Fatalf("query plan does not use throttle index: %s", detail)
+	}
+}
+
+func TestOutboundFilteredKeysetQueryUsesCompositeIndex(t *testing.T) {
+	t.Parallel()
+	database := openTestDatabase(t)
+	var detail string
+	row := database.QueryRow(`
+        EXPLAIN QUERY PLAN
+        SELECT id
+        FROM outbounds
+        WHERE enabled = ? AND adapter = ? AND id > ?
+        ORDER BY id
+        LIMIT ?
+    `, true, "sing-box", "", 100)
+	var identifier, parent, notUsed int
+	if err := row.Scan(&identifier, &parent, &notUsed, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(detail, "idx_outbounds_enabled_adapter_id") {
+		t.Fatalf("query plan does not use outbound composite index: %s", detail)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/egress-manager/egress-manager/internal/secrets"
 	"github.com/mattn/go-sqlite3"
 )
 
@@ -16,11 +17,24 @@ var (
 )
 
 type Store struct {
-	database *sql.DB
+	database        *sql.DB
+	secretProtector SecretProtector
+}
+
+type SecretProtector interface {
+	Seal(string, []byte) (secrets.Envelope, error)
+	Open(string, secrets.Envelope) ([]byte, error)
 }
 
 func NewStore(database *sql.DB) *Store {
 	return &Store{database: database}
+}
+
+func NewProtectedStore(database *sql.DB, protector SecretProtector) (*Store, error) {
+	if database == nil || protector == nil {
+		return nil, fmt.Errorf("database and secret protector are required")
+	}
+	return &Store{database: database, secretProtector: protector}, nil
 }
 
 type Admin struct {

@@ -6,12 +6,12 @@ phase: 7
 phase_name: sing-box-outbound-engine
 
 active_spec: specs/007-sing-box-outbound-engine/spec.md
-active_task: generic-outbound-domain-and-secret-model
+active_task: sing-box-plan-test-and-transactional-runtime
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: implement the adapter-neutral outbound domain, revisioned persistence, secret references, and fixture-based sing-box import parsers
+next_action: implement secret-safe sing-box candidate planning, native validation, isolated health tests, transactional apply, and recovery
 
 dirty_work_expected: false
 
@@ -54,8 +54,10 @@ recent_decisions:
   - HAProxy statistics use only the Unix Runtime API with bounded typed parsing; no statistics web port is opened.
   - Outbound desired state remains adapter-neutral; sing-box is the first adapter rather than the domain abstraction.
   - Outbound public metadata stores only secret presence or references; secret values never enter plan, logs, API responses, or UI state.
+  - Outbound credential documents are encrypted with AES-256-GCM using a domain-separated key and outbound-ID-bound authenticated context.
+  - SOCKS5 remains the generic domain type and maps to the sing-box adapter type socks at the adapter boundary.
 
 touched_areas:
-  - generic outbound domain and validation
-  - secret-safe outbound persistence
-  - sing-box import parsing
+  - sing-box candidate planning and native validation
+  - outbound health probes
+  - transactional sing-box runtime and recovery

@@ -15,6 +15,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/config"
 	"github.com/egress-manager/egress-manager/internal/database"
 	"github.com/egress-manager/egress-manager/internal/ipc"
+	"github.com/egress-manager/egress-manager/internal/secrets"
 )
 
 type WebOptions struct {
@@ -44,7 +45,14 @@ func RunWeb(ctx context.Context, options WebOptions) error {
 		return err
 	}
 	defer databaseConnection.Close()
-	store := database.NewStore(databaseConnection)
+	protector, err := secrets.NewProtector(key, nil)
+	if err != nil {
+		return err
+	}
+	store, err := database.NewProtectedStore(databaseConnection, protector)
+	if err != nil {
+		return err
+	}
 	sessions, err := auth.NewSessionManager(store, 24*time.Hour)
 	if err != nil {
 		return err

@@ -12,11 +12,14 @@ var sensitiveKeyFragments = []string{
 	"authorization",
 	"cookie",
 	"credential",
+	"passphrase",
 	"password",
+	"pre_shared",
 	"private_key",
 	"secret",
 	"session",
 	"token",
+	"uuid",
 }
 
 type RedactingHandler struct {

@@ -1,0 +1,1 @@
+trojan://TEST_ONLY_NOT_A_SECRET@trojan.example.com:443?security=tls&sni=trojan.example.com#Trojan%20Fixture
