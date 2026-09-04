@@ -91,6 +91,56 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	singboxExecutor := managedSingBox.Executor{Runner: runner, Journal: store, Protector: protector, ConfigPath: configuration.SingBoxConfigPath}
 	interfaceExecutor := managedInterface.Executor{Runner: runner, Journal: store, Protector: protector, StatePath: configuration.InterfaceStatePath, RuntimeDirectory: configuration.InterfaceRuntimeDirectory}
 	routeExecutor := routeengine.Executor{Runner: runner, Journal: store, Protector: protector, SingBoxConfigPath: configuration.SingBoxConfigPath, RoutingStatePath: configuration.RoutingStatePath, InterfaceStatePath: configuration.InterfaceStatePath, InterfaceRuntimeDirectory: configuration.InterfaceRuntimeDirectory}
+	collector := inventory.Collector{Runner: runner, Files: inventory.OSFiles{}, Timeout: 2 * time.Second}
+	loadInterfacePlan := func(ctx context.Context) (managedInterface.ExecutionPlan, error) {
+		stored, err := store.ListOutbounds(ctx, "", managedInterface.MaximumOutbounds+1)
+		if err != nil {
+			return managedInterface.ExecutionPlan{}, err
+		}
+		if len(stored) > managedInterface.MaximumOutbounds {
+			return managedInterface.ExecutionPlan{}, fmt.Errorf("interface outbound desired state exceeds %d outbounds", managedInterface.MaximumOutbounds)
+		}
+		outbounds := make([]domain.Outbound, 0, len(stored))
+		credentials := make(map[domain.ID][]byte)
+		for _, item := range stored {
+			outbounds = append(outbounds, item.Outbound)
+			if item.Outbound.Enabled && item.Outbound.Adapter == domain.OutboundAdapterInterface {
+				document, credentialErr := store.OutboundCredential(ctx, item.Outbound.ID)
+				if credentialErr != nil {
+					return managedInterface.ExecutionPlan{}, credentialErr
+				}
+				credentials[item.Outbound.ID] = document
+			}
+		}
+		state, err := managedInterface.InspectState(configuration.InterfaceStatePath, configuration.InterfaceRuntimeDirectory)
+		if err != nil {
+			return managedInterface.ExecutionPlan{}, err
+		}
+		var interfaces []inventory.Interface
+		if len(credentials) > 0 || len(state.Entries) > 0 {
+			host, collectErr := collector.Collect(ctx)
+			if collectErr != nil {
+				return managedInterface.ExecutionPlan{}, collectErr
+			}
+			interfaces = host.Interfaces
+		}
+		return managedInterface.BuildPlan(outbounds, credentials, state, interfaces)
+	}
+	reconcileInterfaces := func(ctx context.Context) error {
+		plan, err := loadInterfacePlan(ctx)
+		if err != nil {
+			return fmt.Errorf("plan interface outbound reconciliation: %w", err)
+		}
+		if plan.Review.StateHash == plan.Review.CandidateHash && interfaceExecutor.VerifyRuntime(ctx, plan) == nil {
+			return nil
+		}
+		operationID, err := logging.NewOperationID(nil)
+		if err != nil {
+			return err
+		}
+		_, err = interfaceExecutor.Execute(ctx, domain.ID("interface_reconcile_"+operationID), plan)
+		return err
+	}
 	recoverXray := func(ctx context.Context) error {
 		unfinished, err := store.UnfinishedOperations(ctx, reliability.MaximumRecoveryOperations)
 		if err != nil {
@@ -130,55 +180,12 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		{Component: "xray", Recover: recoverXray},
 		{Component: "routing", Recover: routeExecutor.Recover},
 		{Component: "nat", Recover: executor.Recover},
-		{Component: "journal", Recover: verifyRecoveryJournal},
+		{Component: "journal_check", Recover: verifyRecoveryJournal},
+		{Component: "interface_reconcile", Recover: reconcileInterfaces},
+		{Component: "journal_final", Recover: verifyRecoveryJournal},
 	}}
 	if _, err := recoveryCoordinator.Run(ctx); err != nil {
 		return fmt.Errorf("startup recovery failed: %w", err)
-	}
-	collector := inventory.Collector{Runner: runner, Files: inventory.OSFiles{}, Timeout: 2 * time.Second}
-	loadInterfacePlan := func(ctx context.Context) (managedInterface.ExecutionPlan, error) {
-		stored, err := store.ListOutbounds(ctx, "", managedInterface.MaximumOutbounds+1)
-		if err != nil {
-			return managedInterface.ExecutionPlan{}, err
-		}
-		if len(stored) > managedInterface.MaximumOutbounds {
-			return managedInterface.ExecutionPlan{}, fmt.Errorf("interface outbound desired state exceeds %d outbounds", managedInterface.MaximumOutbounds)
-		}
-		outbounds := make([]domain.Outbound, 0, len(stored))
-		credentials := make(map[domain.ID][]byte)
-		for _, item := range stored {
-			outbounds = append(outbounds, item.Outbound)
-			if item.Outbound.Enabled && item.Outbound.Adapter == domain.OutboundAdapterInterface {
-				document, credentialErr := store.OutboundCredential(ctx, item.Outbound.ID)
-				if credentialErr != nil {
-					return managedInterface.ExecutionPlan{}, credentialErr
-				}
-				credentials[item.Outbound.ID] = document
-			}
-		}
-		state, err := managedInterface.InspectState(configuration.InterfaceStatePath, configuration.InterfaceRuntimeDirectory)
-		if err != nil {
-			return managedInterface.ExecutionPlan{}, err
-		}
-		var interfaces []inventory.Interface
-		if len(credentials) > 0 || len(state.Entries) > 0 {
-			host, collectErr := collector.Collect(ctx)
-			if collectErr != nil {
-				return managedInterface.ExecutionPlan{}, collectErr
-			}
-			interfaces = host.Interfaces
-		}
-		return managedInterface.BuildPlan(outbounds, credentials, state, interfaces)
-	}
-	startupInterfacePlan, err := loadInterfacePlan(ctx)
-	if err != nil {
-		return fmt.Errorf("plan interface outbound startup reconciliation: %w", err)
-	}
-	if startupInterfacePlan.Review.StateHash != startupInterfacePlan.Review.CandidateHash {
-		transactionID := domain.ID(fmt.Sprintf("interface_boot_%d", time.Now().UTC().Unix()))
-		if _, err := interfaceExecutor.Execute(ctx, transactionID, startupInterfacePlan); err != nil {
-			return fmt.Errorf("reconcile interface outbounds during startup: %w", err)
-		}
 	}
 	if err := startupLease.Release(); err != nil {
 		return fmt.Errorf("release startup recovery lock: %w", err)

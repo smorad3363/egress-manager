@@ -123,6 +123,46 @@ func TestExecutorAppliesAndVerifiesNativeInterfaces(t *testing.T) {
 	}
 }
 
+func TestExecutorRecreatesMissingRuntimeWithUnchangedDesiredState(t *testing.T) {
+	t.Parallel()
+	runner := newLifecycleRunner()
+	executor := testLifecycleExecutor(t, t.TempDir(), runner)
+	initial, _, _ := lifecyclePlan(t, executor, nil, true)
+	ctx := context.Background()
+	if _, err := executor.Execute(ctx, "interface_before_restart", initial); err != nil {
+		t.Fatal(err)
+	}
+	// Reboot loses kernel links and transient services, but preserves private files.
+	clear(runner.links)
+	clear(runner.services)
+	plan, _, _ := lifecyclePlan(t, executor, nil, true)
+	if plan.Review.StateHash != plan.Review.CandidateHash {
+		t.Fatal("unchanged desired state changed its hash")
+	}
+	if err := executor.VerifyRuntime(ctx, plan); err == nil {
+		t.Fatal("missing runtime accepted because files survived")
+	}
+	if _, err := executor.Execute(ctx, "interface_after_restart", plan); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := executor.VerifyRuntime(ctx, plan); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(runner.links) != 2 || len(runner.services) != 1 {
+		t.Fatalf("runtime did not converge: links=%d services=%d", len(runner.links), len(runner.services))
+	}
+	for name, kind := range runner.links {
+		if kind == "wireguard" {
+			runner.links[name] = "dummy"
+		}
+	}
+	if err := executor.VerifyRuntime(ctx, plan); err == nil {
+		t.Fatal("foreign link kind accepted as a healthy owned WireGuard interface")
+	}
+}
+
 func TestExecutorRollsBackPartialNativeApply(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()

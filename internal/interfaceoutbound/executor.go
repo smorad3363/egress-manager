@@ -190,6 +190,21 @@ func (executor Executor) validateNative(ctx context.Context, entries []candidate
 	return nil
 }
 
+// VerifyRuntime checks live interfaces as well as the authenticated runtime files.
+func (executor Executor) VerifyRuntime(ctx context.Context, plan ExecutionPlan) error {
+	if err := executor.validate(); err != nil {
+		return err
+	}
+	state, err := InspectState(executor.StatePath, executor.RuntimeDirectory)
+	if err != nil {
+		return err
+	}
+	if state.Hash != plan.Review.CandidateHash {
+		return ErrStateChanged
+	}
+	return executor.verifyEntries(ctx, snapshotFromPlan(plan).Configs)
+}
+
 func (executor Executor) apply(ctx context.Context, state State, plan ExecutionPlan) error {
 	current := make(map[domain.ID]StateEntry, len(state.Entries))
 	for _, entry := range state.Entries {
@@ -210,6 +225,20 @@ func (executor Executor) apply(ctx context.Context, state State, plan ExecutionP
 	for _, entry := range plan.entries {
 		existing, exists := current[entry.state.ID]
 		if exists && equalStateEntry(existing, entry.state) {
+			present, _, err := executor.inspectLink(ctx, entry.state.InterfaceName)
+			if err != nil {
+				return err
+			}
+			if !present {
+				if entry.state.Kind == domain.OutboundOpenVPN {
+					if err := executor.stopService(ctx, entry.state.ServiceName); err != nil {
+						return err
+					}
+				}
+				if err := executor.startEntry(ctx, entry.state); err != nil {
+					return err
+				}
+			}
 			if err := executor.verifyEntry(ctx, runtimeConfigSnapshot{Entry: entry.state, Content: entry.config}); err != nil {
 				return err
 			}
