@@ -38,6 +38,9 @@ router_server_if="egrs$suffix"
 server_host_if="egs$suffix"
 tcp_pid=""
 udp_pid=""
+haproxy_primary_pid=""
+haproxy_secondary_pid=""
+haproxy_backup_pid=""
 candidate_path="/tmp/egm-nat-$suffix.nft"
 iptables_candidate_path="/tmp/egm-nat-$suffix.iptables"
 haproxy_candidate_path="/tmp/egm-haproxy-$suffix.cfg"
@@ -48,7 +51,12 @@ namespace_exists() {
 
 cleanup() {
 	rm -f "$candidate_path" "$iptables_candidate_path" "$haproxy_candidate_path"
-    for process_id in "$tcp_pid" "$udp_pid"; do
+    if [ -f /tmp/egm-haproxy.pid ]; then
+        haproxy_pid=$(cat /tmp/egm-haproxy.pid 2>/dev/null || true)
+        if [ -n "$haproxy_pid" ]; then kill "$haproxy_pid" 2>/dev/null || true; fi
+    fi
+    rm -f /tmp/egm-haproxy.pid /tmp/egm-haproxy-runtime.sock /tmp/egm-haproxy-managed.cfg
+    for process_id in "$tcp_pid" "$udp_pid" "$haproxy_primary_pid" "$haproxy_secondary_pid" "$haproxy_backup_pid"; do
         if [ -n "$process_id" ] && kill -0 "$process_id" 2>/dev/null; then
             if ! kill "$process_id" 2>/dev/null; then
                 :
@@ -190,4 +198,65 @@ printf '%s\n' "$iptables_state" | grep -Fq ':FOREIGN_LAB - [0:0]' || fail "iptab
 if printf '%s\n' "$iptables_state" | grep -Fq ':EGM_PREROUTING - [0:0]'; then fail "iptables rollback left owned NAT chain"; fi
 if printf '%s\n' "$iptables_state" | grep -Fq ':EGM_FORWARD - [0:0]'; then fail "iptables rollback left owned filter chain"; fi
 
-printf 'PASS: isolated nftables and iptables TCP/UDP NAT, inventory, source CIDR, counters, rollback, and foreign preservation\n'
+haproxy_primary_pid=$(ip netns exec "$server_ns" sh -c 'socat TCP-LISTEN:18081,reuseaddr,fork SYSTEM:"printf primary" >/tmp/egm-haproxy-primary.log 2>&1 & echo $!')
+haproxy_secondary_pid=$(ip netns exec "$server_ns" sh -c 'socat TCP-LISTEN:18082,reuseaddr,fork SYSTEM:"printf secondary" >/tmp/egm-haproxy-secondary.log 2>&1 & echo $!')
+haproxy_backup_pid=$(ip netns exec "$server_ns" sh -c 'socat TCP-LISTEN:18083,reuseaddr,fork SYSTEM:"printf backup" >/tmp/egm-haproxy-backup.log 2>&1 & echo $!')
+sleep 0.3
+haproxy_apply=$(ip netns exec "$router_ns" env EGRESS_HAPROXY_EXECUTE=1 "$haproxy_probe")
+printf '%s\n' "$haproxy_apply" | grep -Fq '"state":"COMMITTED"' || fail "HAProxy transactional initial apply did not commit"
+
+distribution=""
+attempt=0
+while [ "$attempt" -lt 30 ]; do
+    response=$(ip netns exec "$client_ns" timeout 2 socat - TCP:10.203.1.1:18080 2>/dev/null || true)
+    distribution="$distribution $response"
+    if printf '%s\n' "$distribution" | grep -Fq primary && printf '%s\n' "$distribution" | grep -Fq secondary; then break; fi
+    attempt=$((attempt + 1))
+    sleep 0.1
+done
+printf '%s\n' "$distribution" | grep -Fq primary || fail "HAProxy pool did not select primary backend"
+printf '%s\n' "$distribution" | grep -Fq secondary || fail "HAProxy pool did not distribute to secondary backend"
+
+kill "$haproxy_primary_pid" "$haproxy_secondary_pid"
+haproxy_primary_pid=""
+haproxy_secondary_pid=""
+attempt=0
+failover=""
+while [ "$attempt" -lt 30 ]; do
+    failover=$(ip netns exec "$client_ns" timeout 2 socat - TCP:10.203.1.1:18080 2>/dev/null || true)
+    [ "$failover" = "backup" ] && break
+    attempt=$((attempt + 1))
+    sleep 0.2
+done
+[ "$failover" = "backup" ] || fail "HAProxy did not fail over to backup backend"
+
+haproxy_primary_pid=$(ip netns exec "$server_ns" sh -c 'socat TCP-LISTEN:18081,reuseaddr,fork SYSTEM:"printf primary" >/tmp/egm-haproxy-primary.log 2>&1 & echo $!')
+attempt=0
+recovered=""
+while [ "$attempt" -lt 30 ]; do
+    recovered=$(ip netns exec "$client_ns" timeout 2 socat - TCP:10.203.1.1:18080 2>/dev/null || true)
+    [ "$recovered" = "primary" ] && break
+    attempt=$((attempt + 1))
+    sleep 0.2
+done
+[ "$recovered" = "primary" ] || fail "HAProxy primary backend did not recover"
+
+old_haproxy_pid=$(cat /tmp/egm-haproxy.pid)
+haproxy_reload=$(ip netns exec "$router_ns" env EGRESS_HAPROXY_EXECUTE=1 "$haproxy_probe")
+printf '%s\n' "$haproxy_reload" | grep -Fq '"state":"COMMITTED"' || fail "HAProxy graceful reload did not commit"
+new_haproxy_pid=$(cat /tmp/egm-haproxy.pid)
+[ "$old_haproxy_pid" != "$new_haproxy_pid" ] || fail "HAProxy graceful reload did not replace master PID"
+attempt=0
+reload_response=""
+while [ "$attempt" -lt 30 ]; do
+    reload_response=$(ip netns exec "$client_ns" timeout 2 socat - TCP:10.203.1.1:18080 2>/dev/null || true)
+    case "$reload_response" in primary|backup) break ;; esac
+    attempt=$((attempt + 1))
+    sleep 0.1
+done
+case "$reload_response" in primary|backup) ;; *) fail "HAProxy traffic failed after graceful reload" ;; esac
+runtime_snapshot=$(ip netns exec "$router_ns" env EGRESS_HAPROXY_STATS=1 "$haproxy_probe")
+printf '%s\n' "$runtime_snapshot" | grep -Fq '"frontend_id":"lab_proxy"' || fail "HAProxy Runtime API omitted owned frontend statistics"
+printf '%s\n' "$runtime_snapshot" | grep -Fq '"backend_id":"lab_primary"' || fail "HAProxy Runtime API omitted backend statistics"
+
+printf 'PASS: isolated NAT engines, HAProxy distribution/failover/recovery/reload, counters, rollback, and foreign preservation\n'
