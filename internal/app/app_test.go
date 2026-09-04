@@ -18,6 +18,8 @@ import (
 	"github.com/egress-manager/egress-manager/internal/config"
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/ipc"
+	"github.com/egress-manager/egress-manager/internal/nat"
+	"github.com/egress-manager/egress-manager/internal/system"
 )
 
 func TestDeriveAuthenticationKeyIsDomainSeparated(t *testing.T) {
@@ -146,4 +148,55 @@ func waitFor(t *testing.T, timeout time.Duration, condition func() bool) {
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatal("timed out waiting for condition")
+}
+
+type engineSelectionRunner struct {
+	t       *testing.T
+	outputs map[string]string
+}
+
+func (runner engineSelectionRunner) Run(_ context.Context, command system.Command) (system.Result, error) {
+	runner.t.Helper()
+	key := command.Name + " " + strings.Join(command.Args, " ")
+	output, exists := runner.outputs[key]
+	if !exists {
+		runner.t.Fatalf("unexpected command %q", key)
+	}
+	return system.Result{Stdout: []byte(output), ExitCode: 0}, nil
+}
+
+func TestSelectNATEnginePrefersNativeAndPreservesExistingAdapter(t *testing.T) {
+	t.Parallel()
+	emptyNAT := "*nat\n:PREROUTING ACCEPT [0:0]\n:POSTROUTING ACCEPT [0:0]\nCOMMIT\n"
+	emptyFilter := "*filter\n:FORWARD ACCEPT [0:0]\nCOMMIT\n"
+
+	nftInventory := inventory.Inventory{Capabilities: []inventory.Capability{{Name: "nftables", Available: true}}}
+	engine, exists, _, err := selectNATEngine(context.Background(), engineSelectionRunner{t: t, outputs: map[string]string{"nft list tables": "table inet foreign\n"}}, nftInventory, nat.IPv4)
+	if err != nil || engine != "nftables" || exists {
+		t.Fatalf("native selection = %q, %v, %v", engine, exists, err)
+	}
+
+	iptablesInventory := inventory.Inventory{Capabilities: []inventory.Capability{{Name: "iptables", Available: true}}}
+	engine, _, _, err = selectNATEngine(context.Background(), engineSelectionRunner{t: t, outputs: map[string]string{"iptables-save -t nat": emptyNAT, "iptables-save -t filter": emptyFilter}}, iptablesInventory, nat.IPv4)
+	if err != nil || engine != "iptables" {
+		t.Fatalf("fallback selection = %q, %v", engine, err)
+	}
+
+	managedNAT := strings.Replace(emptyNAT, "COMMIT", ":EGM_PREROUTING - [0:0]\nCOMMIT", 1)
+	bothAvailable := inventory.Inventory{Capabilities: []inventory.Capability{{Name: "nftables", Available: true}, {Name: "iptables", Available: true}}}
+	engine, _, _, err = selectNATEngine(context.Background(), engineSelectionRunner{t: t, outputs: map[string]string{"nft list tables": "table inet foreign\n", "iptables-save -t nat": managedNAT, "iptables-save -t filter": emptyFilter}}, bothAvailable, nat.IPv4)
+	if err != nil || engine != "iptables" {
+		t.Fatalf("existing adapter selection = %q, %v", engine, err)
+	}
+}
+
+func TestSelectNATEngineRejectsAmbiguousOwnedState(t *testing.T) {
+	t.Parallel()
+	managedNAT := "*nat\n:PREROUTING ACCEPT [0:0]\n:POSTROUTING ACCEPT [0:0]\n:EGM_PREROUTING - [0:0]\nCOMMIT\n"
+	emptyFilter := "*filter\n:FORWARD ACCEPT [0:0]\nCOMMIT\n"
+	hostInventory := inventory.Inventory{Capabilities: []inventory.Capability{{Name: "nftables", Available: true}, {Name: "iptables", Available: true}}}
+	_, _, _, err := selectNATEngine(context.Background(), engineSelectionRunner{t: t, outputs: map[string]string{"nft list tables": "table ip egm_nat4\n", "iptables-save -t nat": managedNAT, "iptables-save -t filter": emptyFilter}}, hostInventory, nat.IPv4)
+	if err == nil || !strings.Contains(err.Error(), "ambiguous mutation") {
+		t.Fatalf("selectNATEngine() error = %v", err)
+	}
 }

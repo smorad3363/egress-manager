@@ -47,6 +47,9 @@ func InspectOwnedTable(ctx context.Context, runner system.Runner, family Address
 }
 
 func (executor Executor) Execute(ctx context.Context, id domain.ID, requestedChange string, plan Plan) error {
+	if plan.Engine == "iptables" {
+		return executor.executeIPTables(ctx, id, requestedChange, plan)
+	}
 	if executor.Runner == nil || executor.Journal == nil || executor.Verifier == nil {
 		return fmt.Errorf("NAT executor dependencies are required")
 	}
@@ -116,6 +119,12 @@ func (executor Executor) Recover(ctx context.Context) error {
 	}
 	var recoveryErrors []error
 	for _, operation := range operations {
+		if operation.Operation == "nat_apply_iptables" {
+			if err := executor.recoverIPTables(ctx, operation); err != nil {
+				recoveryErrors = append(recoveryErrors, err)
+			}
+			continue
+		}
 		if operation.Operation != "nat_apply" {
 			continue
 		}
@@ -266,6 +275,12 @@ func (executor Executor) timeout() time.Duration {
 func validateExecutablePlan(plan Plan) error {
 	if len(plan.Candidate) == 0 || len(plan.Candidate) > 1<<20 || strings.Contains(strings.ToLower(plan.Candidate), "flush ruleset") {
 		return fmt.Errorf("NAT candidate is empty, oversized, or globally destructive")
+	}
+	if plan.Engine == "iptables" {
+		if plan.OwnedTable != "nat/EGM_PREROUTING nat/EGM_POSTROUTING filter/EGM_FORWARD" || plan.StateHash == "" || strings.Contains(plan.Candidate, "-F PREROUTING") || strings.Contains(plan.Candidate, "-F POSTROUTING") || strings.Contains(plan.Candidate, "-F FORWARD") {
+			return fmt.Errorf("iptables plan metadata or ownership boundary is invalid")
+		}
+		return nil
 	}
 	family, table, err := ownedTableFromCandidate(plan.Candidate)
 	if err != nil {

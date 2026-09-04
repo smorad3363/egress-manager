@@ -96,15 +96,19 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 				sshPorts = append(sshPorts, listener.Port)
 			}
 		}
-		tableExists, err := nat.InspectOwnedTable(ctx, runner, request.Family, 2*time.Second)
+		engine, tableExists, iptablesState, err := selectNATEngine(ctx, runner, hostInventory, request.Family)
 		if err != nil {
 			return nat.Plan{}, err
 		}
-		return nat.BuildNFTPlan(request.Family, request.Forwards, hostInventory.Listeners, nat.SafetyPolicy{
+		policy := nat.SafetyPolicy{
 			SSHPorts:               sshPorts,
 			PanelPort:              configuration.ListenPort,
 			ProtectedLocalPrefixes: configuration.ProtectedManagementCIDRs,
-		}, tableExists)
+		}
+		if engine == "iptables" {
+			return nat.BuildIPTablesPlan(request.Family, request.Forwards, hostInventory.Listeners, policy, iptablesState)
+		}
+		return nat.BuildNFTPlan(request.Family, request.Forwards, hostInventory.Listeners, policy, tableExists)
 	}
 	if err := server.Handle(ipc.OperationNATPlan, func(ctx context.Context, payload json.RawMessage) (any, error) {
 		var request nat.PlanRequest
@@ -142,6 +146,17 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}
 		natMutex.Lock()
 		defer natMutex.Unlock()
+		hostInventory, err := collector.Collect(ctx)
+		if err != nil {
+			return nil, err
+		}
+		engine, _, _, err := selectNATEngine(ctx, runner, hostInventory, request.Family)
+		if err != nil {
+			return nil, err
+		}
+		if engine == "iptables" {
+			return (nat.IPTablesCounterReader{Runner: runner}).Read(ctx, request.Family)
+		}
 		return (nat.CounterReader{Runner: runner}).Read(ctx, request.Family)
 	}); err != nil {
 		return err
@@ -159,6 +174,49 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	defer removeOwnedSocket(configuration.ControlSocketPath, identity, logger)
 	logger.Info("egressd ready", "socket_path", configuration.ControlSocketPath, "version", buildinfo.Version)
 	return server.Serve(ctx, listener)
+}
+
+func selectNATEngine(ctx context.Context, runner system.Runner, hostInventory inventory.Inventory, family nat.AddressFamily) (string, bool, nat.IPTablesState, error) {
+	nftAvailable := capabilityAvailable(hostInventory, "nftables")
+	iptablesAvailable := capabilityAvailable(hostInventory, "iptables")
+	var nftExists bool
+	var iptablesState = nat.IPTablesState{NatRules: []string{}, FilterRules: []string{}}
+	var err error
+	if nftAvailable {
+		nftExists, err = nat.InspectOwnedTable(ctx, runner, family, 2*time.Second)
+		if err != nil {
+			return "", false, nat.IPTablesState{}, err
+		}
+	}
+	if iptablesAvailable {
+		inspectedState, inspectErr := nat.InspectIPTablesState(ctx, runner, family, 2*time.Second)
+		if inspectErr != nil && !nftAvailable {
+			return "", false, nat.IPTablesState{}, inspectErr
+		}
+		if inspectErr == nil {
+			iptablesState = inspectedState
+		}
+	}
+	iptableExists := iptablesState.PreroutingChain || iptablesState.PostroutingChain || iptablesState.ForwardChain
+	if nftExists && iptableExists {
+		return "", false, nat.IPTablesState{}, fmt.Errorf("both nftables and iptables Egress Manager state exist; refusing ambiguous mutation")
+	}
+	if iptableExists || !nftAvailable && iptablesAvailable {
+		return "iptables", false, iptablesState, nil
+	}
+	if nftAvailable {
+		return "nftables", nftExists, iptablesState, nil
+	}
+	return "", false, nat.IPTablesState{}, fmt.Errorf("no compatible nftables or iptables engine is available")
+}
+
+func capabilityAvailable(hostInventory inventory.Inventory, name string) bool {
+	for _, capability := range hostInventory.Capabilities {
+		if strings.EqualFold(capability.Name, name) {
+			return capability.Available
+		}
+	}
+	return false
 }
 
 func decodeEmptyPayload(payload json.RawMessage) error {

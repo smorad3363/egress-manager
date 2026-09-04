@@ -13,7 +13,7 @@ require_command() {
 [ "$(uname -s)" = "Linux" ] || fail "network lab requires Linux"
 [ "$(id -u)" -eq 0 ] || fail "network lab requires root or a privileged container"
 
-for command_name in ip nft socat sysctl timeout grep awk; do
+for command_name in ip nft iptables iptables-save iptables-restore socat sysctl timeout grep awk; do
     require_command "$command_name"
 done
 
@@ -23,6 +23,8 @@ nat_probe=${EGRESS_NAT_PROBE:-/usr/local/bin/egress-nat-probe}
 [ -x "$nat_probe" ] || fail "NAT probe not executable: $nat_probe"
 counter_probe=${EGRESS_COUNTER_PROBE:-/usr/local/bin/egress-counter-probe}
 [ -x "$counter_probe" ] || fail "counter probe not executable: $counter_probe"
+iptables_probe=${EGRESS_IPTABLES_PROBE:-/usr/local/bin/egress-iptables-probe}
+[ -x "$iptables_probe" ] || fail "iptables probe not executable: $iptables_probe"
 
 suffix=$$
 client_ns="egm-c-$suffix"
@@ -35,13 +37,14 @@ server_host_if="egs$suffix"
 tcp_pid=""
 udp_pid=""
 candidate_path="/tmp/egm-nat-$suffix.nft"
+iptables_candidate_path="/tmp/egm-nat-$suffix.iptables"
 
 namespace_exists() {
     ip netns list | awk '{print $1}' | grep -Fxq "$1"
 }
 
 cleanup() {
-	rm -f "$candidate_path"
+	rm -f "$candidate_path" "$iptables_candidate_path"
     for process_id in "$tcp_pid" "$udp_pid"; do
         if [ -n "$process_id" ] && kill -0 "$process_id" 2>/dev/null; then
             if ! kill "$process_id" 2>/dev/null; then
@@ -149,4 +152,34 @@ if ip netns exec "$router_ns" nft list table ip egm_nat4 >/dev/null 2>&1; then
 fi
 ip netns exec "$router_ns" nft list table inet foreign_lab >/dev/null || fail "foreign table was removed during rollback"
 
-printf 'PASS: isolated TCP/UDP NAT, read-only inventory, source CIDR, routing, counters, rollback, and foreign preservation\n'
+ip netns exec "$router_ns" iptables -N FOREIGN_LAB
+ip netns exec "$router_ns" iptables -A FOREIGN_LAB -m comment --comment foreign_marker -j RETURN
+"$iptables_probe" >"$iptables_candidate_path"
+ip netns exec "$router_ns" iptables-restore --test --noflush <"$iptables_candidate_path"
+ip netns exec "$router_ns" iptables-restore --noflush <"$iptables_candidate_path"
+ip netns exec "$router_ns" env EGRESS_IPTABLES_INSPECT=1 "$iptables_probe" >"$iptables_candidate_path"
+ip netns exec "$router_ns" iptables-restore --test --noflush <"$iptables_candidate_path"
+ip netns exec "$router_ns" iptables-restore --noflush <"$iptables_candidate_path"
+iptables_state=$(ip netns exec "$router_ns" iptables-save)
+printf '%s\n' "$iptables_state" | grep -Fq ':FOREIGN_LAB - [0:0]' || fail "iptables adapter removed a foreign chain"
+printf '%s\n' "$iptables_state" | grep -Fq 'egm_anchor_prerouting' || fail "iptables adapter did not install owned NAT anchor"
+printf '%s\n' "$iptables_state" | grep -Fq 'egm_anchor_forward' || fail "iptables adapter did not install owned filter anchor"
+[ "$(printf '%s\n' "$iptables_state" | grep -c 'egm_anchor_prerouting')" -eq 1 ] || fail "iptables adapter duplicated its NAT anchor"
+[ "$(printf '%s\n' "$iptables_state" | grep -c 'egm_anchor_forward')" -eq 1 ] || fail "iptables adapter duplicated its filter anchor"
+
+tcp_result=$(printf 'iptables-tcp-ok' | ip netns exec "$client_ns" socat - TCP:10.203.1.1:19080,connect-timeout=2)
+[ "$tcp_result" = "iptables-tcp-ok" ] || fail "iptables adapter TCP DNAT echo failed"
+udp_result=$(printf 'iptables-udp-ok' | ip netns exec "$client_ns" timeout 3 socat -T2 - UDP:10.203.1.1:19053)
+[ "$udp_result" = "iptables-udp-ok" ] || fail "iptables adapter UDP DNAT echo failed"
+iptables_counter_result=$(ip netns exec "$router_ns" env EGRESS_COUNTER_ENGINE=iptables "$counter_probe")
+printf '%s\n' "$iptables_counter_result" | grep -Eq '"forward_id":"lab_tcp","accepted_packets":[1-9][0-9]*' || fail "iptables typed TCP counter reader did not report traffic"
+printf '%s\n' "$iptables_counter_result" | grep -Eq '"forward_id":"lab_udp","accepted_packets":[1-9][0-9]*' || fail "iptables typed UDP counter reader did not report traffic"
+ip netns exec "$router_ns" env EGRESS_IPTABLES_ROLLBACK=1 "$iptables_probe" >"$iptables_candidate_path"
+ip netns exec "$router_ns" iptables-restore --test --noflush <"$iptables_candidate_path"
+ip netns exec "$router_ns" iptables-restore --noflush <"$iptables_candidate_path"
+iptables_state=$(ip netns exec "$router_ns" iptables-save)
+printf '%s\n' "$iptables_state" | grep -Fq ':FOREIGN_LAB - [0:0]' || fail "iptables rollback removed a foreign chain"
+if printf '%s\n' "$iptables_state" | grep -Fq ':EGM_PREROUTING - [0:0]'; then fail "iptables rollback left owned NAT chain"; fi
+if printf '%s\n' "$iptables_state" | grep -Fq ':EGM_FORWARD - [0:0]'; then fail "iptables rollback left owned filter chain"; fi
+
+printf 'PASS: isolated nftables and iptables TCP/UDP NAT, inventory, source CIDR, counters, rollback, and foreign preservation\n'

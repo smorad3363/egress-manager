@@ -4,7 +4,7 @@ tags:
   - egress-manager
   - specification
   - phase/5
-status: ready
+status: complete
 related:
   - "[[PROJECT_ROADMAP]]"
   - "[[CONSTITUTION]]"
@@ -49,3 +49,13 @@ Implement safe, transactional TCP and UDP port forwarding with nftables as the p
 - TCP and UDP namespace integration tests exercise generated rules.
 - Foreign firewall-preservation tests remain green.
 - No product code performs a global firewall flush.
+
+## Implemented
+
+- Revisioned SQLite desired-state storage with keyset pagination.
+- Authenticated API and HMAC-protected IPC for plan, apply, and counters.
+- Transactional nftables execution with native validation, owned-table snapshots, rollback, and restart recovery.
+- Compatible iptables/ip6tables adapter with owned chains, stable anchors, owned-state hashes, native validation, rollback, restart recovery, and counter parsing.
+- Automatic engine selection that prefers nftables, preserves an existing owned iptables deployment, and rejects ambiguous dual-engine state.
+- Responsive port-forward UI for create, clone, enable, disable, delete, dry-run review, atomic apply, IPv4/IPv6 selection, and counters.
+- Repeatable namespace integration for TCP, UDP, source restrictions, counters, owned-state replacement, rollback, and foreign-rule preservation across both firewall engines.

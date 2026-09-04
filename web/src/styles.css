@@ -150,6 +150,7 @@ td code { color: #b7c3d1; font-size: 0.66rem; }
 
 .forward-heading { align-items: end; }
 .forward-actions, .row-actions { display: flex; gap: 0.45rem; }
+.family-select { width: 5.4rem; min-height: 2.3rem; }
 .forward-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; margin-top: 1.7rem; }
 .forward-summary .card { display: flex; min-height: 6.2rem; flex-direction: column; justify-content: center; padding: 0.9rem 1rem; }
 .forward-summary span, .forward-summary small { color: var(--muted); font-size: 0.64rem; }

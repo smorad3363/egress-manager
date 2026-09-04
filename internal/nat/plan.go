@@ -88,6 +88,7 @@ type Plan struct {
 	Targets      []VerificationTarget `json:"verification_targets"`
 	Actions      []Action             `json:"actions"`
 	Candidate    string               `json:"candidate"`
+	StateHash    string               `json:"state_hash,omitempty"`
 }
 
 type VerificationTarget struct {
@@ -99,31 +100,10 @@ func BuildNFTPlan(family AddressFamily, desired []domain.PortForward, listeners 
 	if err != nil {
 		return Plan{}, err
 	}
-	if err := policy.Validate(); err != nil {
-		return Plan{}, fmt.Errorf("validate NAT safety policy: %w", err)
-	}
-	if len(desired) > MaximumForwards {
-		return Plan{}, fmt.Errorf("NAT configuration exceeds %d forwards", MaximumForwards)
-	}
-
-	normalized := make([]domain.PortForward, 0, len(desired))
-	for _, forward := range desired {
-		if err := forward.Validate(); err != nil {
-			return Plan{}, fmt.Errorf("validate port forward %q: %w", forward.ID, err)
-		}
-		if family == IPv4 && !forward.ListenAddress.Is4() || family == IPv6 && !forward.ListenAddress.Is6() {
-			continue
-		}
-		forward = normalizeForward(forward)
-		if err := enforceSafety(forward, listeners, policy); err != nil {
-			return Plan{}, err
-		}
-		normalized = append(normalized, forward)
-	}
-	if err := rejectDuplicates(normalized); err != nil {
+	normalized, err := prepareForwards(family, desired, listeners, policy)
+	if err != nil {
 		return Plan{}, err
 	}
-	sort.Slice(normalized, func(i, j int) bool { return normalized[i].ID < normalized[j].ID })
 
 	plan := Plan{
 		Engine:       "nftables",
@@ -150,6 +130,38 @@ func BuildNFTPlan(family AddressFamily, desired []domain.PortForward, listeners 
 		return Plan{}, fmt.Errorf("nftables candidate exceeds %d bytes", maximumCandidateBytes)
 	}
 	return plan, nil
+}
+
+func prepareForwards(family AddressFamily, desired []domain.PortForward, listeners []inventory.Listener, policy SafetyPolicy) ([]domain.PortForward, error) {
+	if _, _, err := family.nativeName(); err != nil {
+		return nil, err
+	}
+	if err := policy.Validate(); err != nil {
+		return nil, fmt.Errorf("validate NAT safety policy: %w", err)
+	}
+	if len(desired) > MaximumForwards {
+		return nil, fmt.Errorf("NAT configuration exceeds %d forwards", MaximumForwards)
+	}
+
+	normalized := make([]domain.PortForward, 0, len(desired))
+	for _, forward := range desired {
+		if err := forward.Validate(); err != nil {
+			return nil, fmt.Errorf("validate port forward %q: %w", forward.ID, err)
+		}
+		if family == IPv4 && !forward.ListenAddress.Is4() || family == IPv6 && !forward.ListenAddress.Is6() {
+			continue
+		}
+		forward = normalizeForward(forward)
+		if err := enforceSafety(forward, listeners, policy); err != nil {
+			return nil, err
+		}
+		normalized = append(normalized, forward)
+	}
+	if err := rejectDuplicates(normalized); err != nil {
+		return nil, err
+	}
+	sort.Slice(normalized, func(i, j int) bool { return normalized[i].ID < normalized[j].ID })
+	return normalized, nil
 }
 
 func appendVerificationTarget(targets []VerificationTarget, address string) []VerificationTarget {

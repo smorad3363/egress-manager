@@ -49,19 +49,20 @@ export function PortForwards({ createRequest }: { createRequest: number }) {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [family, setFamily] = useState<"ipv4" | "ipv6">("ipv4");
 
   const load = useCallback(async () => {
     setState({ status: "loading" });
     try {
       const [list, counters] = await Promise.all([
         api<{ items: StoredForward[] }>("/api/v1/port-forwards?limit=100"),
-        api<{ items: Counter[] }>("/api/v1/port-forwards/counters?family=ipv4"),
+        api<{ items: Counter[] }>(`/api/v1/port-forwards/counters?family=${family}`),
       ]);
       setState({ status: "ready", items: list.items, counters: counters.items });
     } catch (caught) {
       setState({ status: "error", message: message(caught) });
     }
-  }, []);
+  }, [family]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { if (createRequest > 0) setFormOpen(true); }, [createRequest]);
@@ -102,7 +103,7 @@ export function PortForwards({ createRequest }: { createRequest: number }) {
     setError(null);
     try {
       const result = await api<Plan>("/api/v1/port-forwards/plan", {
-        method: "POST", body: JSON.stringify({ family: "ipv4", forwards: state.items.map((item) => item.forward) }),
+        method: "POST", body: JSON.stringify({ family, forwards: state.items.map((item) => item.forward) }),
       });
       setPlan(result);
     } catch (caught) {
@@ -116,7 +117,7 @@ export function PortForwards({ createRequest }: { createRequest: number }) {
     setBusy(true);
     setError(null);
     try {
-      await api("/api/v1/port-forwards/apply", { method: "POST", body: JSON.stringify({ family: "ipv4" }) });
+      await api("/api/v1/port-forwards/apply", { method: "POST", body: JSON.stringify({ family }) });
       setPlan(null);
       await load();
     } catch (caught) {
@@ -132,12 +133,12 @@ export function PortForwards({ createRequest }: { createRequest: number }) {
   return <section>
     <div className="inventory-heading forward-heading">
       <div><p className="eyebrow">TRANSACTIONAL NAT</p><h2>Port forwarding</h2><p>Desired rules stay staged until review and atomic apply.</p></div>
-      <div className="forward-actions"><Button variant="secondary" disabled={busy} onClick={() => void load()}>Refresh</Button><Button variant="primary" disabled={busy} onClick={() => void preview()}>Review & apply</Button></div>
+      <div className="forward-actions"><select className="input family-select" aria-label="Address family" value={family} onChange={(event) => setFamily(event.target.value as "ipv4" | "ipv6")}><option value="ipv4">IPv4</option><option value="ipv6">IPv6</option></select><Button variant="secondary" disabled={busy} onClick={() => void load()}>Refresh</Button><Button variant="primary" disabled={busy} onClick={() => void preview()}>Review & apply</Button></div>
     </div>
     {error ? <div className="inventory-warning" role="alert"><Icon name="shield" /><span>{error}</span></div> : null}
     <div className="forward-summary">
       <Card><span>Configured</span><strong>{state.items.length}</strong><small>Maximum 16 per apply</small></Card>
-      <Card><span>Enabled</span><strong>{state.items.filter((item) => item.forward.enabled).length}</strong><small>IPv4 desired rules</small></Card>
+      <Card><span>Enabled</span><strong>{state.items.filter((item) => item.forward.enabled && (family === "ipv6" ? item.forward.listen_address.includes(":") : !item.forward.listen_address.includes(":"))).length}</strong><small>{family.toUpperCase()} desired rules</small></Card>
       <Card><span>Accepted</span><strong>{formatCount(state.counters.reduce((total, item) => total + item.accepted_packets, 0))}</strong><small>Packets since last apply</small></Card>
       <Card><span>Dropped</span><strong>{formatCount(state.counters.reduce((total, item) => total + item.dropped_packets, 0))}</strong><small>Source policy rejects</small></Card>
     </div>
@@ -189,8 +190,9 @@ function toForward(form: FormState): PortForward {
   const protocols = ([form.tcp && "tcp", form.udp && "udp"].filter(Boolean)) as Array<"tcp" | "udp">;
   if (protocols.length === 0) throw new Error("Select TCP, UDP, or both.");
   const idBase = form.name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "forward";
+  const suffix = Date.now().toString(36);
   return {
-    id: `${idBase}_${Date.now().toString(36)}`.slice(0, 64), name: form.name.trim(), protocols,
+    id: `${idBase.slice(0, 63-suffix.length)}_${suffix}`, name: form.name.trim(), protocols,
     listen_address: form.listenAddress.trim(), ...(form.mode === "ports" ? { listen_ports: ranges } : { all_ports_except: ranges }),
     remote_address: form.remoteAddress.trim(), ...(form.remotePort ? { remote_port_start: Number(form.remotePort) } : {}),
     source_cidrs: form.sourceCIDRs.split(",").map((value) => value.trim()).filter(Boolean), enabled: true,
@@ -208,7 +210,7 @@ function parseRanges(value: string): PortRange[] {
   return ranges;
 }
 
-function cloneID(id: string) { return `${id}_copy_${Date.now().toString(36)}`.slice(0, 64); }
+function cloneID(id: string) { const suffix = `_copy_${Date.now().toString(36)}`; return `${id.slice(0, 64-suffix.length)}${suffix}`; }
 function portLabel(forward: PortForward) { const ranges = forward.listen_ports || forward.all_ports_except || []; return `${forward.all_ports_except ? "except " : ""}${ranges.map((range) => range.from === range.to ? range.from : `${range.from}-${range.to}`).join(", ")}`; }
 function formatCount(value: number) { return new Intl.NumberFormat("en", { notation: value >= 10_000 ? "compact" : "standard" }).format(value); }
 function message(error: unknown) { return error instanceof Error ? error.message : "Request failed."; }

@@ -2,18 +2,18 @@ schema_version: 1
 
 project: egress-manager
 
-phase: 5
-phase_name: nat-port-forward-engine
+phase: 6
+phase_name: haproxy-engine
 
-active_spec: specs/005-nat-port-forward-engine/spec.md
-active_task: iptables-compatibility-adapter
+active_spec: specs/006-haproxy-engine/spec.md
+active_task: haproxy-domain-storage-and-planner
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: implement and validate a namespaced iptables compatibility adapter without touching foreign rules
+next_action: implement HAProxy desired-state persistence, validation, deterministic rendering, and owned-state inspection
 
-dirty_work_expected: true
+dirty_work_expected: false
 
 tests:
   last_run: 2026-09-04
@@ -46,6 +46,9 @@ recent_decisions:
   - NAT operations are journaled before mutation and interrupted operations recover by restoring the owned-table snapshot.
   - Port-forward desired state uses revisioned SQLite rows and keyset pagination; mutation remains separate from privileged apply.
   - Traffic counters are read from stable owned-rule comments through bounded nftables JSON output.
+  - nftables remains primary; existing owned iptables state remains on the compatibility adapter until explicitly migrated.
+  - Ambiguous simultaneous owned state across nftables and iptables is rejected instead of guessed.
 
 touched_areas:
-  - iptables compatibility adapter
+  - HAProxy domain and persistence
+  - HAProxy candidate planner
