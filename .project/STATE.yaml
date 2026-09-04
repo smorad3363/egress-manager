@@ -2,16 +2,16 @@ schema_version: 1
 
 project: egress-manager
 
-phase: 9
-phase_name: xray-marzban-3x-ui-adapter
+phase: 10
+phase_name: interface-outbounds
 
-active_spec: specs/009-xray-panel-adapter/spec.md
-active_task: phase-9-exit-gate
-status: complete
+active_spec: specs/010-interface-outbounds/spec.md
+active_task: interface-outbound-domain-and-import
+status: in_progress
 
 last_green_ref: HEAD
 
-next_action: create the Phase 10 Interface Outbounds specification from the authoritative English roadmap
+next_action: extend the generic outbound model and add bounded secret-safe WireGuard and OpenVPN import parsers
 
 dirty_work_expected: false
 
@@ -92,11 +92,12 @@ recent_decisions:
   - The Xray console exposes explicit writable/read-only discovery, revisioned binding CRUD, owned-action review, and exact-three-hash apply without exposing native candidates.
   - Representative fixtures are validated with official Xray v26.7.28 after verifying the published SHA-256 digest 8195d909f1109b8f3d99eefe401a3c451d7bf4af71f24d3815420f77e5dd2a40.
   - The operator runbook documents loader preparation, ownership limits, stale-plan behavior, restart impact, rollback, and recovery.
+  - Native VPNs extend the generic outbound abstraction through a separate interface adapter instead of being forced through sing-box.
+  - Interface-outbound imports reject configuration features that can mutate foreign routes, DNS, execute programs, or escape the owned lifecycle boundary.
+  - Native interface lifecycle must be prepared before policy traffic moves and rolled back after owned route state in reverse dependency order.
 
 touched_areas:
-  - Xray, Marzban, and 3x-ui discovery
-  - native Xray routing adapter boundary
-  - external configuration change detection
-  - responsive Xray operations console
-  - representative native Xray fixtures
-  - Xray operator runbook
+  - generic outbound abstraction
+  - WireGuard and OpenVPN import boundaries
+  - native interface lifecycle
+  - coordinated egress routing transaction
