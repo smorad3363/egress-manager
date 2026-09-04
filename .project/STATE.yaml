@@ -6,12 +6,12 @@ phase: 11
 phase_name: reliability-recovery
 
 active_spec: specs/011-reliability-recovery/spec.md
-active_task: recovery-inventory-and-contracts
+active_task: ordered-recovery-coordinator
 status: in_progress
 
-last_green_ref: ed91258
+last_green_ref: HEAD
 
-next_action: inventory existing subsystem journals, startup recovery order, and mutation entry points; then implement the shared recovery status and operation-lock contracts
+next_action: extract ordered startup recovery into a shared idempotent coordinator, then expose egressctl recover through the authenticated privileged boundary
 
 dirty_work_expected: false
 
@@ -112,6 +112,9 @@ recent_decisions:
   - The disposable lab uses kernel WireGuard end to end on standard Linux; on WSL2 it validates kernel interface and peer lifecycle, then uses isolated point-to-point transport for routing assertions because kernel-created UDP sockets cannot use mirrored networking reliably.
   - Phase 11 composes existing authenticated subsystem journals and ownership-safe mutation paths rather than replacing them with a parallel recovery mechanism.
   - Emergency bypass removes only Egress Manager-owned interception and routing; it never flushes foreign firewall or route state.
+  - All host-network apply paths and startup recovery share one nonblocking Linux flock; the kernel releases ownership after a crash while bounded metadata preserves operator diagnostics.
+  - Recovery status never exposes protected previous snapshots, candidate configurations, credentials, or raw failure details.
+  - CI executes the pinned Docker network lab instead of maintaining a divergent host dependency and probe list.
 
 touched_areas:
   - runtime transaction journals

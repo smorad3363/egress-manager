@@ -19,6 +19,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/ipc"
 	"github.com/egress-manager/egress-manager/internal/nat"
+	"github.com/egress-manager/egress-manager/internal/reliability"
 	"github.com/egress-manager/egress-manager/internal/system"
 )
 
@@ -92,6 +93,13 @@ func TestDaemonAndWebLifecycle(t *testing.T) {
 	}
 	if len(hostInventory.Capabilities) == 0 {
 		t.Fatal("typed inventory response omitted capability states")
+	}
+	var recoveryStatus reliability.RecoveryStatus
+	if err := malformedClient.Call(context.Background(), ipc.OperationRecoveryStatus, struct{}{}, &recoveryStatus); err != nil {
+		t.Fatalf("typed recovery status call failed: %v", err)
+	}
+	if !recoveryStatus.Ready || recoveryStatus.RecoveryRequired || recoveryStatus.MutationLock.Active {
+		t.Fatalf("unexpected recovery status = %#v", recoveryStatus)
 	}
 
 	if err := ProvisionAdmin(context.Background(), configPath, keyPath, "operator", "correct horse battery staple"); err != nil {

@@ -46,15 +46,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
-        with:
-          go-version: "1.27.1"
-          cache: true
-      - name: Install isolated network test dependencies
-        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y iproute2 iptables nftables procps socat
-      - name: Build read-only inventory probe
-        run: go build -trimpath -o /tmp/egress-inventory-probe ./tests/network/inventoryprobe
-      - name: Build NAT plan probe
-        run: go build -trimpath -o /tmp/egress-nat-probe ./tests/network/natprobe
+      - name: Build pinned network lab
+        run: docker build --tag egress-manager-network-lab --file tests/network/Dockerfile .
       - name: Run repeatable namespace lab
-        run: sudo EGRESS_INVENTORY_PROBE=/tmp/egress-inventory-probe EGRESS_NAT_PROBE=/tmp/egress-nat-probe tests/network/run.sh
+        run: docker run --rm --privileged egress-manager-network-lab

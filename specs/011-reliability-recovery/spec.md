@@ -107,4 +107,10 @@ egressctl rollback
 
 - Phase specification created from the authoritative English roadmap after the Phase 10 native WireGuard/OpenVPN exit gate passed.
 - Graphify connected Phase 11 to the existing runtime transaction journal, safe network mutation transaction, native validation, interface/subnet routing, and checkpointed interruption recovery boundaries.
-
+- Inventory found six independently serialized host-mutation paths and ordered startup recovery, but no cross-component lock; concurrent NAT, HAProxy, sing-box, interface, routing, and Xray applies could overlap.
+- Added a Linux kernel-backed global mutation lock with nonblocking acquisition, a private mode-`0600` metadata file, boot/process-start identity, bounded strict metadata parsing, symlink rejection, automatic crash release, stale metadata replacement, and secret-free inspection.
+- Startup recovery/reconciliation and all six privileged apply paths now share the same lock while read-only operations remain available.
+- Added a secret-free recovery status contract over authenticated IPC. It reports readiness, active or last lock ownership, and sanitized unfinished journal summaries without snapshot, candidate, credential, or raw failure content.
+- Added `egressctl status` with human and JSON output plus stable usage, transport-failure, and recovery-required exit codes.
+- Updated CI to run the same pinned Docker network-lab image used locally, eliminating drift from the expanded WireGuard/OpenVPN probe and dependency set.
+- Checkpoint acceptance passed: full Go test/vet/race and two consecutive privileged network-lab runs are green.

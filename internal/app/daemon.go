@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -23,6 +24,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/ipc"
 	"github.com/egress-manager/egress-manager/internal/nat"
+	"github.com/egress-manager/egress-manager/internal/reliability"
 	"github.com/egress-manager/egress-manager/internal/routeengine"
 	"github.com/egress-manager/egress-manager/internal/routing"
 	"github.com/egress-manager/egress-manager/internal/secrets"
@@ -70,6 +72,16 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	if err != nil {
 		return err
 	}
+	mutationLock := reliability.FileLock{Path: configuration.OperationLockPath}
+	startupLease, err := mutationLock.TryAcquire("startup_recovery", "startup")
+	if err != nil {
+		return fmt.Errorf("acquire startup recovery lock: %w", err)
+	}
+	defer func() {
+		if releaseErr := startupLease.Release(); releaseErr != nil {
+			logger.Error("release startup recovery lock", "error", releaseErr)
+		}
+	}()
 	runner := system.ExecRunner{}
 	xrayDiscoverer := managedXray.Discoverer{Runner: runner, Files: managedXray.OSFileSystem{}, Timeout: 2 * time.Second}
 	executor := nat.Executor{Runner: runner, Journal: store, Verifier: nat.SystemVerifier{Runner: runner}}
@@ -163,6 +175,9 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 			return fmt.Errorf("reconcile interface outbounds during startup: %w", err)
 		}
 	}
+	if err := startupLease.Release(); err != nil {
+		return fmt.Errorf("release startup recovery lock: %w", err)
+	}
 	server, err := ipc.NewServer(authenticator, logger)
 	if err != nil {
 		return err
@@ -175,6 +190,14 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 			return nil, fmt.Errorf("database health check failed")
 		}
 		return map[string]string{"status": "ok", "version": buildinfo.Version}, nil
+	}); err != nil {
+		return err
+	}
+	if err := server.Handle(ipc.OperationRecoveryStatus, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		if err := decodeEmptyPayload(payload); err != nil {
+			return nil, err
+		}
+		return reliability.Inspect(ctx, store, mutationLock, time.Now().UTC())
 	}); err != nil {
 		return err
 	}
@@ -231,14 +254,16 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}
 		natMutex.Lock()
 		defer natMutex.Unlock()
-		plan, err := buildPlan(ctx, nat.PlanRequest{Family: request.Family, Forwards: request.Forwards})
-		if err != nil {
-			return nil, err
-		}
-		if err := executor.Execute(ctx, request.TransactionID, request.RequestedChange, plan); err != nil {
-			return nil, err
-		}
-		return nat.ApplyResponse{TransactionID: request.TransactionID, State: domain.TransactionCommitted}, nil
+		return withMutationLock(mutationLock, request.TransactionID, "nat", func() (any, error) {
+			plan, err := buildPlan(ctx, nat.PlanRequest{Family: request.Family, Forwards: request.Forwards})
+			if err != nil {
+				return nil, err
+			}
+			if err := executor.Execute(ctx, request.TransactionID, request.RequestedChange, plan); err != nil {
+				return nil, err
+			}
+			return nat.ApplyResponse{TransactionID: request.TransactionID, State: domain.TransactionCommitted}, nil
+		})
 	}); err != nil {
 		return err
 	}
@@ -301,11 +326,13 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}
 		haproxyMutex.Lock()
 		defer haproxyMutex.Unlock()
-		plan, err := buildHAProxyPlan(ctx, managedHAProxy.PlanRequest{Frontends: request.Frontends, Backends: request.Backends})
-		if err != nil {
-			return nil, err
-		}
-		return haproxyExecutor.Execute(ctx, request.TransactionID, request.RequestedChange, plan)
+		return withMutationLock(mutationLock, request.TransactionID, "haproxy", func() (any, error) {
+			plan, err := buildHAProxyPlan(ctx, managedHAProxy.PlanRequest{Frontends: request.Frontends, Backends: request.Backends})
+			if err != nil {
+				return nil, err
+			}
+			return haproxyExecutor.Execute(ctx, request.TransactionID, request.RequestedChange, plan)
+		})
 	}); err != nil {
 		return err
 	}
@@ -450,14 +477,16 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}
 		outboundMutex.Lock()
 		defer outboundMutex.Unlock()
-		plan, err := loadSingBoxPlan(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if request.ExpectedStateHash == "" || request.ExpectedCandidateHash == "" || plan.Plan.StateHash != request.ExpectedStateHash || plan.Plan.CandidateHash != request.ExpectedCandidateHash {
-			return nil, managedSingBox.ErrStateChanged
-		}
-		return singboxExecutor.Execute(ctx, request.TransactionID, plan)
+		return withMutationLock(mutationLock, request.TransactionID, "singbox", func() (any, error) {
+			plan, err := loadSingBoxPlan(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if request.ExpectedStateHash == "" || request.ExpectedCandidateHash == "" || plan.Plan.StateHash != request.ExpectedStateHash || plan.Plan.CandidateHash != request.ExpectedCandidateHash {
+				return nil, managedSingBox.ErrStateChanged
+			}
+			return singboxExecutor.Execute(ctx, request.TransactionID, plan)
+		})
 	}); err != nil {
 		return err
 	}
@@ -551,14 +580,16 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}
 		outboundMutex.Lock()
 		defer outboundMutex.Unlock()
-		plan, err := loadInterfacePlan(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if request.ExpectedStateHash == "" || request.ExpectedCandidateHash == "" || plan.Review.StateHash != request.ExpectedStateHash || plan.Review.CandidateHash != request.ExpectedCandidateHash {
-			return nil, managedInterface.ErrStateChanged
-		}
-		return interfaceExecutor.Execute(ctx, request.TransactionID, plan)
+		return withMutationLock(mutationLock, request.TransactionID, "interface", func() (any, error) {
+			plan, err := loadInterfacePlan(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if request.ExpectedStateHash == "" || request.ExpectedCandidateHash == "" || plan.Review.StateHash != request.ExpectedStateHash || plan.Review.CandidateHash != request.ExpectedCandidateHash {
+				return nil, managedInterface.ErrStateChanged
+			}
+			return interfaceExecutor.Execute(ctx, request.TransactionID, plan)
+		})
 	}); err != nil {
 		return err
 	}
@@ -687,16 +718,18 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}
 		outboundMutex.Lock()
 		defer outboundMutex.Unlock()
-		plan, err := loadRoutePlan(ctx)
-		if err != nil {
-			return nil, err
-		}
-		review := plan.Review
-		if request.ExpectedSingBoxStateHash == "" || request.ExpectedRoutingStateHash == "" || request.ExpectedInterfaceStateHash == "" || request.ExpectedSingBoxCandidate == "" || request.ExpectedRoutingCandidate == "" || request.ExpectedNativeCandidate == "" || request.ExpectedCombinedCandidate == "" ||
-			review.SingBoxStateHash != request.ExpectedSingBoxStateHash || review.RoutingStateHash != request.ExpectedRoutingStateHash || review.InterfaceStateHash != request.ExpectedInterfaceStateHash || review.SingBoxCandidateHash != request.ExpectedSingBoxCandidate || review.RoutingCandidateHash != request.ExpectedRoutingCandidate || review.NativeCandidateHash != request.ExpectedNativeCandidate || review.CombinedCandidateHash != request.ExpectedCombinedCandidate {
-			return nil, routeengine.ErrStateChanged
-		}
-		return routeExecutor.Execute(ctx, request.TransactionID, plan)
+		return withMutationLock(mutationLock, request.TransactionID, "routing", func() (any, error) {
+			plan, err := loadRoutePlan(ctx)
+			if err != nil {
+				return nil, err
+			}
+			review := plan.Review
+			if request.ExpectedSingBoxStateHash == "" || request.ExpectedRoutingStateHash == "" || request.ExpectedInterfaceStateHash == "" || request.ExpectedSingBoxCandidate == "" || request.ExpectedRoutingCandidate == "" || request.ExpectedNativeCandidate == "" || request.ExpectedCombinedCandidate == "" ||
+				review.SingBoxStateHash != request.ExpectedSingBoxStateHash || review.RoutingStateHash != request.ExpectedRoutingStateHash || review.InterfaceStateHash != request.ExpectedInterfaceStateHash || review.SingBoxCandidateHash != request.ExpectedSingBoxCandidate || review.RoutingCandidateHash != request.ExpectedRoutingCandidate || review.NativeCandidateHash != request.ExpectedNativeCandidate || review.CombinedCandidateHash != request.ExpectedCombinedCandidate {
+				return nil, routeengine.ErrStateChanged
+			}
+			return routeExecutor.Execute(ctx, request.TransactionID, plan)
+		})
 	}); err != nil {
 		return err
 	}
@@ -761,16 +794,18 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}
 		xrayMutex.Lock()
 		defer xrayMutex.Unlock()
-		plan, installation, err := loadXrayPlan(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if request.ExpectedForeignStateHash == "" || request.ExpectedFragmentStateHash == "" || request.ExpectedCandidateHash == "" ||
-			plan.Review.ForeignStateHash != request.ExpectedForeignStateHash || plan.Review.FragmentStateHash != request.ExpectedFragmentStateHash || plan.Review.CandidateHash != request.ExpectedCandidateHash {
-			return nil, managedXray.ErrXrayStateChanged
-		}
-		executor := managedXray.FragmentExecutor{Runner: runner, Journal: store, Protector: protector, Installation: installation}
-		return executor.Execute(ctx, request.TransactionID, plan)
+		return withMutationLock(mutationLock, request.TransactionID, "xray", func() (any, error) {
+			plan, installation, err := loadXrayPlan(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if request.ExpectedForeignStateHash == "" || request.ExpectedFragmentStateHash == "" || request.ExpectedCandidateHash == "" ||
+				plan.Review.ForeignStateHash != request.ExpectedForeignStateHash || plan.Review.FragmentStateHash != request.ExpectedFragmentStateHash || plan.Review.CandidateHash != request.ExpectedCandidateHash {
+				return nil, managedXray.ErrXrayStateChanged
+			}
+			executor := managedXray.FragmentExecutor{Runner: runner, Journal: store, Protector: protector, Installation: installation}
+			return executor.Execute(ctx, request.TransactionID, plan)
+		})
 	}); err != nil {
 		return err
 	}
@@ -787,6 +822,17 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	defer removeOwnedSocket(configuration.ControlSocketPath, identity, logger)
 	logger.Info("egressd ready", "socket_path", configuration.ControlSocketPath, "version", buildinfo.Version)
 	return server.Serve(ctx, listener)
+}
+
+func withMutationLock(lock reliability.FileLock, operationID domain.ID, component string, action func() (any, error)) (value any, err error) {
+	lease, err := lock.TryAcquire(operationID, component)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		err = errors.Join(err, lease.Release())
+	}()
+	return action()
 }
 
 func selectManagedXrayInstallation(report managedXray.Report) (managedXray.Installation, error) {

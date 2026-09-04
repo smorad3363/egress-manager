@@ -24,6 +24,7 @@ type Config struct {
 	DataDirectory             string         `json:"data_directory"`
 	DatabasePath              string         `json:"database_path"`
 	ControlSocketPath         string         `json:"control_socket_path"`
+	OperationLockPath         string         `json:"operation_lock_path"`
 	HAProxyConfigPath         string         `json:"haproxy_config_path"`
 	HAProxyRuntimeSocketPath  string         `json:"haproxy_runtime_socket_path"`
 	HAProxyPIDPath            string         `json:"haproxy_pid_path"`
@@ -45,6 +46,7 @@ func Default(dataDirectory string) Config {
 		DataDirectory:             dataDirectory,
 		DatabasePath:              filepath.Join(dataDirectory, "egress-manager.db"),
 		ControlSocketPath:         filepath.Join(dataDirectory, "egressd.sock"),
+		OperationLockPath:         filepath.Join(dataDirectory, "operation.lock"),
 		HAProxyConfigPath:         filepath.Join(dataDirectory, "haproxy.cfg"),
 		HAProxyRuntimeSocketPath:  filepath.Join(dataDirectory, "haproxy-runtime.sock"),
 		HAProxyPIDPath:            filepath.Join(dataDirectory, "haproxy.pid"),
@@ -95,6 +97,7 @@ func (configuration Config) Validate() error {
 		errs = append(errs, fmt.Errorf("control_socket_path must be absolute"))
 	}
 	for name, path := range map[string]string{
+		"operation_lock_path":         configuration.OperationLockPath,
 		"haproxy_config_path":         configuration.HAProxyConfigPath,
 		"haproxy_runtime_socket_path": configuration.HAProxyRuntimeSocketPath,
 		"haproxy_pid_path":            configuration.HAProxyPIDPath,
@@ -107,7 +110,7 @@ func (configuration Config) Validate() error {
 			errs = append(errs, fmt.Errorf("%s must be absolute", name))
 		}
 	}
-	paths := []string{configuration.ControlSocketPath, configuration.HAProxyConfigPath, configuration.HAProxyRuntimeSocketPath, configuration.HAProxyPIDPath, configuration.SingBoxConfigPath, configuration.RoutingStatePath, configuration.InterfaceStatePath, configuration.InterfaceRuntimeDirectory}
+	paths := []string{configuration.ControlSocketPath, configuration.OperationLockPath, configuration.HAProxyConfigPath, configuration.HAProxyRuntimeSocketPath, configuration.HAProxyPIDPath, configuration.SingBoxConfigPath, configuration.RoutingStatePath, configuration.InterfaceStatePath, configuration.InterfaceRuntimeDirectory}
 	seenPaths := map[string]struct{}{}
 	for _, path := range paths {
 		cleaned := filepath.Clean(path)
@@ -157,6 +160,9 @@ func Load(path string) (Config, error) {
 	}
 	if configuration.RoutingStatePath == "" && filepath.IsAbs(configuration.DataDirectory) {
 		configuration.RoutingStatePath = filepath.Join(configuration.DataDirectory, "routing.json")
+	}
+	if configuration.OperationLockPath == "" && filepath.IsAbs(configuration.DataDirectory) {
+		configuration.OperationLockPath = filepath.Join(configuration.DataDirectory, "operation.lock")
 	}
 	if configuration.InterfaceRuntimeDirectory == "" {
 		configuration.InterfaceRuntimeDirectory = filepath.Join("/run", "egress-manager", "interface-outbounds")
