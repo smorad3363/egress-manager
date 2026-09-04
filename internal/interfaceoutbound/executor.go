@@ -616,6 +616,9 @@ func (executor Executor) validate() error {
 	if !filepath.IsAbs(executor.StatePath) || !filepath.IsAbs(executor.RuntimeDirectory) || filepath.Clean(executor.StatePath) == filepath.Clean(executor.RuntimeDirectory) || filepath.Clean(executor.StatePath) == filepath.Clean(filepath.Dir(executor.StatePath)) {
 		return fmt.Errorf("distinct absolute interface outbound paths are required")
 	}
+	if filepath.Clean(filepath.Dir(executor.StatePath)) != filepath.Clean(executor.RuntimeDirectory) {
+		return fmt.Errorf("interface outbound state must be inside the runtime directory")
+	}
 	return nil
 }
 

@@ -18,6 +18,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/database"
 	"github.com/egress-manager/egress-manager/internal/domain"
 	managedHAProxy "github.com/egress-manager/egress-manager/internal/haproxy"
+	managedInterface "github.com/egress-manager/egress-manager/internal/interfaceoutbound"
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/nat"
 	"github.com/egress-manager/egress-manager/internal/routeengine"
@@ -58,6 +59,9 @@ type ControlService interface {
 	DiscoverXray(context.Context) (managedXray.Report, error)
 	PlanXray(context.Context) (managedXray.FragmentReview, error)
 	ApplyXray(context.Context, managedXray.FragmentApplyRequest) (managedXray.FragmentApplyResponse, error)
+	ImportInterfaceOutbound(context.Context, managedInterface.ImportRequest) (managedInterface.ImportResponse, error)
+	PlanInterfaceOutbounds(context.Context) (managedInterface.Review, error)
+	ApplyInterfaceOutbounds(context.Context, managedInterface.ApplyRequest) (managedInterface.ApplyResponse, error)
 }
 
 type ForwardRepository interface {
@@ -173,6 +177,9 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("/api/v1/xray/bindings", server.requireSession(http.HandlerFunc(server.xrayBindingsHandler)))
 	mux.Handle("/api/v1/xray/plan", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.xrayPlanHandler))))
 	mux.Handle("/api/v1/xray/apply", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.xrayApplyHandler))))
+	mux.Handle("/api/v1/interface-outbounds/import", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.interfaceOutboundImportHandler))))
+	mux.Handle("/api/v1/interface-outbounds/plan", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.interfaceOutboundsPlanHandler))))
+	mux.Handle("/api/v1/interface-outbounds/apply", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.interfaceOutboundsApplyHandler))))
 	mux.Handle("/api/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		WriteError(writer, request, NewError(http.StatusNotFound, CodeNotFound, "Endpoint not found.", nil))
 	}))

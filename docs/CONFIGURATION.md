@@ -24,6 +24,10 @@ Both services read the same strict JSON configuration and IPC shared key. Unknow
   "haproxy_config_path": "/var/lib/egress-manager/haproxy.cfg",
   "haproxy_runtime_socket_path": "/run/egress-manager/haproxy-runtime.sock",
   "haproxy_pid_path": "/run/egress-manager/haproxy.pid",
+  "sing_box_config_path": "/var/lib/egress-manager/sing-box.json",
+  "routing_state_path": "/var/lib/egress-manager/routing.json",
+  "interface_state_path": "/run/egress-manager/interface-outbounds/state.json",
+  "interface_runtime_directory": "/run/egress-manager/interface-outbounds",
   "session_cookie_name": "egress_session",
   "ssh_ports": [22],
   "protected_management_cidrs": []
@@ -31,6 +35,8 @@ Both services read the same strict JSON configuration and IPC shared key. Unknow
 ```
 
 Non-loopback listeners require absolute `tls_certificate_path` and `tls_private_key_path` values. Session cookies are always `Secure`, `HttpOnly`, and `SameSite=Strict`.
+
+Native WireGuard and OpenVPN runtime profiles are materialized with mode `0600` only below `interface_runtime_directory`; keep this directory on `/run` or another tmpfs. `interface_state_path` is secret-free but intentionally shares the volatile runtime boundary so desired encrypted database state is reconciled after reboot.
 
 Every active SSH listener and the panel port are excluded from NAT capture. Add canonical local management networks to `protected_management_cidrs`; a forward whose listen address is inside one of these networks is rejected.
 

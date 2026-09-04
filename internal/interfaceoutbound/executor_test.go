@@ -251,7 +251,8 @@ func testLifecycleExecutor(t *testing.T, root string, runner system.Runner) Exec
 	if err != nil {
 		t.Fatal(err)
 	}
-	return Executor{Runner: runner, Journal: database.NewStore(databaseConnection), Protector: protector, StatePath: filepath.Join(root, "state.json"), RuntimeDirectory: filepath.Join(root, "runtime")}
+	runtimeDirectory := filepath.Join(root, "runtime")
+	return Executor{Runner: runner, Journal: database.NewStore(databaseConnection), Protector: protector, StatePath: filepath.Join(runtimeDirectory, "state.json"), RuntimeDirectory: runtimeDirectory}
 }
 
 func lifecyclePlan(t *testing.T, executor Executor, interfaces []inventory.Interface, includeOpenVPN bool) (ExecutionPlan, []domain.Outbound, ImportResult) {

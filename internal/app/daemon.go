@@ -19,6 +19,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/database"
 	"github.com/egress-manager/egress-manager/internal/domain"
 	managedHAProxy "github.com/egress-manager/egress-manager/internal/haproxy"
+	managedInterface "github.com/egress-manager/egress-manager/internal/interfaceoutbound"
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/ipc"
 	"github.com/egress-manager/egress-manager/internal/nat"
@@ -88,6 +89,10 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	if err := routeExecutor.Recover(ctx); err != nil {
 		return fmt.Errorf("recover interrupted coordinated route operations: %w", err)
 	}
+	interfaceExecutor := managedInterface.Executor{Runner: runner, Journal: store, Protector: protector, StatePath: configuration.InterfaceStatePath, RuntimeDirectory: configuration.InterfaceRuntimeDirectory}
+	if err := interfaceExecutor.Recover(ctx); err != nil {
+		return fmt.Errorf("recover interrupted interface outbound operations: %w", err)
+	}
 	unfinished, err := store.UnfinishedOperations(ctx, 1000)
 	if err != nil {
 		return err
@@ -114,6 +119,50 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}
 	}
 	collector := inventory.Collector{Runner: runner, Files: inventory.OSFiles{}, Timeout: 2 * time.Second}
+	loadInterfacePlan := func(ctx context.Context) (managedInterface.ExecutionPlan, error) {
+		stored, err := store.ListOutbounds(ctx, "", managedInterface.MaximumOutbounds+1)
+		if err != nil {
+			return managedInterface.ExecutionPlan{}, err
+		}
+		if len(stored) > managedInterface.MaximumOutbounds {
+			return managedInterface.ExecutionPlan{}, fmt.Errorf("interface outbound desired state exceeds %d outbounds", managedInterface.MaximumOutbounds)
+		}
+		outbounds := make([]domain.Outbound, 0, len(stored))
+		credentials := make(map[domain.ID][]byte)
+		for _, item := range stored {
+			outbounds = append(outbounds, item.Outbound)
+			if item.Outbound.Enabled && item.Outbound.Adapter == domain.OutboundAdapterInterface {
+				document, credentialErr := store.OutboundCredential(ctx, item.Outbound.ID)
+				if credentialErr != nil {
+					return managedInterface.ExecutionPlan{}, credentialErr
+				}
+				credentials[item.Outbound.ID] = document
+			}
+		}
+		state, err := managedInterface.InspectState(configuration.InterfaceStatePath, configuration.InterfaceRuntimeDirectory)
+		if err != nil {
+			return managedInterface.ExecutionPlan{}, err
+		}
+		var interfaces []inventory.Interface
+		if len(credentials) > 0 || len(state.Entries) > 0 {
+			host, collectErr := collector.Collect(ctx)
+			if collectErr != nil {
+				return managedInterface.ExecutionPlan{}, collectErr
+			}
+			interfaces = host.Interfaces
+		}
+		return managedInterface.BuildPlan(outbounds, credentials, state, interfaces)
+	}
+	startupInterfacePlan, err := loadInterfacePlan(ctx)
+	if err != nil {
+		return fmt.Errorf("plan interface outbound startup reconciliation: %w", err)
+	}
+	if startupInterfacePlan.Review.StateHash != startupInterfacePlan.Review.CandidateHash {
+		transactionID := domain.ID(fmt.Sprintf("interface_boot_%d", time.Now().UTC().Unix()))
+		if _, err := interfaceExecutor.Execute(ctx, transactionID, startupInterfacePlan); err != nil {
+			return fmt.Errorf("reconcile interface outbounds during startup: %w", err)
+		}
+	}
 	server, err := ipc.NewServer(authenticator, logger)
 	if err != nil {
 		return err
@@ -271,7 +320,7 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		return err
 	}
 
-	var singboxMutex sync.Mutex
+	var outboundMutex sync.Mutex
 	singboxTester := managedSingBox.Tester{
 		Validator: managedSingBox.NativeValidator{Runner: runner, TempDirectory: configuration.DataDirectory, Timeout: 5 * time.Second},
 		Dialer:    &net.Dialer{Timeout: 2 * time.Second},
@@ -313,8 +362,8 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		if err := decodePayload(payload, &request); err != nil {
 			return nil, err
 		}
-		singboxMutex.Lock()
-		defer singboxMutex.Unlock()
+		outboundMutex.Lock()
+		defer outboundMutex.Unlock()
 		parsed, err := managedSingBox.ParseImport(request.Input)
 		if err != nil {
 			return nil, err
@@ -340,8 +389,8 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		if err := decodePayload(payload, &request); err != nil {
 			return nil, err
 		}
-		singboxMutex.Lock()
-		defer singboxMutex.Unlock()
+		outboundMutex.Lock()
+		defer outboundMutex.Unlock()
 		if (request.ID == "") == (request.Input == "") {
 			return nil, fmt.Errorf("exactly one stored outbound ID or import input is required")
 		}
@@ -384,8 +433,8 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		if err := decodeEmptyPayload(payload); err != nil {
 			return nil, err
 		}
-		singboxMutex.Lock()
-		defer singboxMutex.Unlock()
+		outboundMutex.Lock()
+		defer outboundMutex.Unlock()
 		plan, err := loadSingBoxPlan(ctx)
 		if err != nil {
 			return nil, err
@@ -399,8 +448,8 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		if err := decodePayload(payload, &request); err != nil {
 			return nil, err
 		}
-		singboxMutex.Lock()
-		defer singboxMutex.Unlock()
+		outboundMutex.Lock()
+		defer outboundMutex.Unlock()
 		plan, err := loadSingBoxPlan(ctx)
 		if err != nil {
 			return nil, err
@@ -409,6 +458,57 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 			return nil, managedSingBox.ErrStateChanged
 		}
 		return singboxExecutor.Execute(ctx, request.TransactionID, plan)
+	}); err != nil {
+		return err
+	}
+	if err := server.Handle(ipc.OperationInterfaceImport, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		var request managedInterface.ImportRequest
+		if err := decodePayload(payload, &request); err != nil {
+			return nil, err
+		}
+		outboundMutex.Lock()
+		defer outboundMutex.Unlock()
+		parsed, err := managedInterface.ParseImport(request.Input)
+		if err != nil {
+			return nil, err
+		}
+		stored, err := store.CreateOutbound(ctx, parsed.Outbound, parsed.CredentialDocument, time.Now().UTC())
+		if err != nil {
+			return nil, err
+		}
+		return managedInterface.ImportResponse{Outbound: stored.Outbound}, nil
+	}); err != nil {
+		return err
+	}
+	if err := server.Handle(ipc.OperationInterfacePlan, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		if err := decodeEmptyPayload(payload); err != nil {
+			return nil, err
+		}
+		outboundMutex.Lock()
+		defer outboundMutex.Unlock()
+		plan, err := loadInterfacePlan(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return plan.Review, nil
+	}); err != nil {
+		return err
+	}
+	if err := server.Handle(ipc.OperationInterfaceApply, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		var request managedInterface.ApplyRequest
+		if err := decodePayload(payload, &request); err != nil {
+			return nil, err
+		}
+		outboundMutex.Lock()
+		defer outboundMutex.Unlock()
+		plan, err := loadInterfacePlan(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if request.ExpectedStateHash == "" || request.ExpectedCandidateHash == "" || plan.Review.StateHash != request.ExpectedStateHash || plan.Review.CandidateHash != request.ExpectedCandidateHash {
+			return nil, managedInterface.ErrStateChanged
+		}
+		return interfaceExecutor.Execute(ctx, request.TransactionID, plan)
 	}); err != nil {
 		return err
 	}
@@ -505,8 +605,8 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		if err := decodeEmptyPayload(payload); err != nil {
 			return nil, err
 		}
-		singboxMutex.Lock()
-		defer singboxMutex.Unlock()
+		outboundMutex.Lock()
+		defer outboundMutex.Unlock()
 		plan, err := loadRoutePlan(ctx)
 		if err != nil {
 			return nil, err
@@ -520,8 +620,8 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		if err := decodePayload(payload, &request); err != nil {
 			return nil, err
 		}
-		singboxMutex.Lock()
-		defer singboxMutex.Unlock()
+		outboundMutex.Lock()
+		defer outboundMutex.Unlock()
 		plan, err := loadRoutePlan(ctx)
 		if err != nil {
 			return nil, err

@@ -19,37 +19,42 @@ const (
 )
 
 type Config struct {
-	ListenAddress            string         `json:"listen_address"`
-	ListenPort               uint16         `json:"listen_port"`
-	DataDirectory            string         `json:"data_directory"`
-	DatabasePath             string         `json:"database_path"`
-	ControlSocketPath        string         `json:"control_socket_path"`
-	HAProxyConfigPath        string         `json:"haproxy_config_path"`
-	HAProxyRuntimeSocketPath string         `json:"haproxy_runtime_socket_path"`
-	HAProxyPIDPath           string         `json:"haproxy_pid_path"`
-	SingBoxConfigPath        string         `json:"sing_box_config_path"`
-	RoutingStatePath         string         `json:"routing_state_path"`
-	SessionCookieName        string         `json:"session_cookie_name"`
-	SSHPorts                 []uint16       `json:"ssh_ports"`
-	ProtectedManagementCIDRs []netip.Prefix `json:"protected_management_cidrs"`
-	TLSCertificatePath       string         `json:"tls_certificate_path,omitempty"`
-	TLSPrivateKeyPath        string         `json:"tls_private_key_path,omitempty"`
+	ListenAddress             string         `json:"listen_address"`
+	ListenPort                uint16         `json:"listen_port"`
+	DataDirectory             string         `json:"data_directory"`
+	DatabasePath              string         `json:"database_path"`
+	ControlSocketPath         string         `json:"control_socket_path"`
+	HAProxyConfigPath         string         `json:"haproxy_config_path"`
+	HAProxyRuntimeSocketPath  string         `json:"haproxy_runtime_socket_path"`
+	HAProxyPIDPath            string         `json:"haproxy_pid_path"`
+	SingBoxConfigPath         string         `json:"sing_box_config_path"`
+	RoutingStatePath          string         `json:"routing_state_path"`
+	InterfaceStatePath        string         `json:"interface_state_path"`
+	InterfaceRuntimeDirectory string         `json:"interface_runtime_directory"`
+	SessionCookieName         string         `json:"session_cookie_name"`
+	SSHPorts                  []uint16       `json:"ssh_ports"`
+	ProtectedManagementCIDRs  []netip.Prefix `json:"protected_management_cidrs"`
+	TLSCertificatePath        string         `json:"tls_certificate_path,omitempty"`
+	TLSPrivateKeyPath         string         `json:"tls_private_key_path,omitempty"`
 }
 
 func Default(dataDirectory string) Config {
+	interfaceRuntime := filepath.Join("/run", "egress-manager", "interface-outbounds")
 	return Config{
-		ListenAddress:            defaultListenAddress,
-		DataDirectory:            dataDirectory,
-		DatabasePath:             filepath.Join(dataDirectory, "egress-manager.db"),
-		ControlSocketPath:        filepath.Join(dataDirectory, "egressd.sock"),
-		HAProxyConfigPath:        filepath.Join(dataDirectory, "haproxy.cfg"),
-		HAProxyRuntimeSocketPath: filepath.Join(dataDirectory, "haproxy-runtime.sock"),
-		HAProxyPIDPath:           filepath.Join(dataDirectory, "haproxy.pid"),
-		SingBoxConfigPath:        filepath.Join(dataDirectory, "sing-box.json"),
-		RoutingStatePath:         filepath.Join(dataDirectory, "routing.json"),
-		SessionCookieName:        defaultCookieName,
-		SSHPorts:                 []uint16{22},
-		ProtectedManagementCIDRs: []netip.Prefix{},
+		ListenAddress:             defaultListenAddress,
+		DataDirectory:             dataDirectory,
+		DatabasePath:              filepath.Join(dataDirectory, "egress-manager.db"),
+		ControlSocketPath:         filepath.Join(dataDirectory, "egressd.sock"),
+		HAProxyConfigPath:         filepath.Join(dataDirectory, "haproxy.cfg"),
+		HAProxyRuntimeSocketPath:  filepath.Join(dataDirectory, "haproxy-runtime.sock"),
+		HAProxyPIDPath:            filepath.Join(dataDirectory, "haproxy.pid"),
+		SingBoxConfigPath:         filepath.Join(dataDirectory, "sing-box.json"),
+		RoutingStatePath:          filepath.Join(dataDirectory, "routing.json"),
+		InterfaceStatePath:        filepath.Join(interfaceRuntime, "state.json"),
+		InterfaceRuntimeDirectory: interfaceRuntime,
+		SessionCookieName:         defaultCookieName,
+		SSHPorts:                  []uint16{22},
+		ProtectedManagementCIDRs:  []netip.Prefix{},
 	}
 }
 
@@ -95,12 +100,14 @@ func (configuration Config) Validate() error {
 		"haproxy_pid_path":            configuration.HAProxyPIDPath,
 		"sing_box_config_path":        configuration.SingBoxConfigPath,
 		"routing_state_path":          configuration.RoutingStatePath,
+		"interface_state_path":        configuration.InterfaceStatePath,
+		"interface_runtime_directory": configuration.InterfaceRuntimeDirectory,
 	} {
 		if strings.TrimSpace(path) == "" || !filepath.IsAbs(path) {
 			errs = append(errs, fmt.Errorf("%s must be absolute", name))
 		}
 	}
-	paths := []string{configuration.ControlSocketPath, configuration.HAProxyConfigPath, configuration.HAProxyRuntimeSocketPath, configuration.HAProxyPIDPath, configuration.SingBoxConfigPath, configuration.RoutingStatePath}
+	paths := []string{configuration.ControlSocketPath, configuration.HAProxyConfigPath, configuration.HAProxyRuntimeSocketPath, configuration.HAProxyPIDPath, configuration.SingBoxConfigPath, configuration.RoutingStatePath, configuration.InterfaceStatePath, configuration.InterfaceRuntimeDirectory}
 	seenPaths := map[string]struct{}{}
 	for _, path := range paths {
 		cleaned := filepath.Clean(path)
@@ -108,6 +115,9 @@ func (configuration Config) Validate() error {
 			errs = append(errs, fmt.Errorf("runtime paths must be distinct"))
 		}
 		seenPaths[cleaned] = struct{}{}
+	}
+	if filepath.Clean(filepath.Dir(configuration.InterfaceStatePath)) != filepath.Clean(configuration.InterfaceRuntimeDirectory) {
+		errs = append(errs, fmt.Errorf("interface_state_path must be inside interface_runtime_directory"))
 	}
 	if (configuration.TLSCertificatePath == "") != (configuration.TLSPrivateKeyPath == "") {
 		errs = append(errs, fmt.Errorf("TLS certificate and private key paths must be configured together"))
@@ -147,6 +157,12 @@ func Load(path string) (Config, error) {
 	}
 	if configuration.RoutingStatePath == "" && filepath.IsAbs(configuration.DataDirectory) {
 		configuration.RoutingStatePath = filepath.Join(configuration.DataDirectory, "routing.json")
+	}
+	if configuration.InterfaceRuntimeDirectory == "" {
+		configuration.InterfaceRuntimeDirectory = filepath.Join("/run", "egress-manager", "interface-outbounds")
+	}
+	if configuration.InterfaceStatePath == "" {
+		configuration.InterfaceStatePath = filepath.Join(configuration.InterfaceRuntimeDirectory, "state.json")
 	}
 	if err := configuration.Validate(); err != nil {
 		return Config{}, fmt.Errorf("validate configuration: %w", err)

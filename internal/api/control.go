@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	managedHAProxy "github.com/egress-manager/egress-manager/internal/haproxy"
+	managedInterface "github.com/egress-manager/egress-manager/internal/interfaceoutbound"
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/ipc"
 	"github.com/egress-manager/egress-manager/internal/nat"
@@ -12,6 +13,30 @@ import (
 	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
 	managedXray "github.com/egress-manager/egress-manager/internal/xray"
 )
+
+func (control IPCControl) ImportInterfaceOutbound(ctx context.Context, request managedInterface.ImportRequest) (managedInterface.ImportResponse, error) {
+	var response managedInterface.ImportResponse
+	if err := control.Client.Call(ctx, ipc.OperationInterfaceImport, request, &response); err != nil {
+		return managedInterface.ImportResponse{}, err
+	}
+	return response, nil
+}
+
+func (control IPCControl) PlanInterfaceOutbounds(ctx context.Context) (managedInterface.Review, error) {
+	var response managedInterface.Review
+	if err := control.Client.Call(ctx, ipc.OperationInterfacePlan, struct{}{}, &response); err != nil {
+		return managedInterface.Review{}, err
+	}
+	return response, nil
+}
+
+func (control IPCControl) ApplyInterfaceOutbounds(ctx context.Context, request managedInterface.ApplyRequest) (managedInterface.ApplyResponse, error) {
+	var response managedInterface.ApplyResponse
+	if err := control.Client.Call(ctx, ipc.OperationInterfaceApply, request, &response); err != nil {
+		return managedInterface.ApplyResponse{}, err
+	}
+	return response, nil
+}
 
 func (control IPCControl) DiscoverXray(ctx context.Context) (managedXray.Report, error) {
 	var response managedXray.Report

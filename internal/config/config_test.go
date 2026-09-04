@@ -59,6 +59,8 @@ func TestLoadDefaultsRoutingStatePathForExistingConfigurations(t *testing.T) {
 	configuration := Default(directory)
 	configuration.ListenPort = 43127
 	configuration.RoutingStatePath = ""
+	configuration.InterfaceStatePath = ""
+	configuration.InterfaceRuntimeDirectory = ""
 	data, err := json.Marshal(configuration)
 	if err != nil {
 		t.Fatal(err)
@@ -72,6 +74,9 @@ func TestLoadDefaultsRoutingStatePathForExistingConfigurations(t *testing.T) {
 	}
 	if loaded.RoutingStatePath != filepath.Join(directory, "routing.json") {
 		t.Fatalf("routing state path = %q", loaded.RoutingStatePath)
+	}
+	if loaded.InterfaceStatePath != "/run/egress-manager/interface-outbounds/state.json" || loaded.InterfaceRuntimeDirectory != "/run/egress-manager/interface-outbounds" {
+		t.Fatalf("interface runtime defaults = %q %q", loaded.InterfaceStatePath, loaded.InterfaceRuntimeDirectory)
 	}
 }
 

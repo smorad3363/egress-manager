@@ -18,6 +18,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/database"
 	"github.com/egress-manager/egress-manager/internal/domain"
 	managedHAProxy "github.com/egress-manager/egress-manager/internal/haproxy"
+	managedInterface "github.com/egress-manager/egress-manager/internal/interfaceoutbound"
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/nat"
 	"github.com/egress-manager/egress-manager/internal/routeengine"
@@ -27,18 +28,22 @@ import (
 )
 
 type healthyControl struct {
-	calls            int
-	lastImport       managedSingBox.ImportRequest
-	lastTest         managedSingBox.TestRequest
-	lastSingBoxApply managedSingBox.ApplyRequest
-	singBoxImport    managedSingBox.ImportResponse
-	singBoxTest      managedSingBox.TestResponse
-	singBoxPlan      managedSingBox.Plan
-	routePlan        routeengine.Review
-	lastRouteApply   routeengine.ApplyRequest
-	xrayReport       managedXray.Report
-	xrayPlan         managedXray.FragmentReview
-	lastXrayApply    managedXray.FragmentApplyRequest
+	calls               int
+	lastImport          managedSingBox.ImportRequest
+	lastTest            managedSingBox.TestRequest
+	lastSingBoxApply    managedSingBox.ApplyRequest
+	singBoxImport       managedSingBox.ImportResponse
+	singBoxTest         managedSingBox.TestResponse
+	singBoxPlan         managedSingBox.Plan
+	routePlan           routeengine.Review
+	lastRouteApply      routeengine.ApplyRequest
+	xrayReport          managedXray.Report
+	xrayPlan            managedXray.FragmentReview
+	lastXrayApply       managedXray.FragmentApplyRequest
+	interfaceImport     managedInterface.ImportResponse
+	interfacePlan       managedInterface.Review
+	lastInterfaceApply  managedInterface.ApplyRequest
+	lastInterfaceImport managedInterface.ImportRequest
 }
 
 func (control *healthyControl) Health(context.Context) error {
@@ -129,6 +134,23 @@ func (control *healthyControl) ApplyXray(_ context.Context, request managedXray.
 	control.calls++
 	control.lastXrayApply = request
 	return managedXray.FragmentApplyResponse{TransactionID: request.TransactionID, State: domain.TransactionCommitted, CandidateHash: request.ExpectedCandidateHash}, nil
+}
+
+func (control *healthyControl) ImportInterfaceOutbound(_ context.Context, request managedInterface.ImportRequest) (managedInterface.ImportResponse, error) {
+	control.calls++
+	control.lastInterfaceImport = request
+	return control.interfaceImport, nil
+}
+
+func (control *healthyControl) PlanInterfaceOutbounds(context.Context) (managedInterface.Review, error) {
+	control.calls++
+	return control.interfacePlan, nil
+}
+
+func (control *healthyControl) ApplyInterfaceOutbounds(_ context.Context, request managedInterface.ApplyRequest) (managedInterface.ApplyResponse, error) {
+	control.calls++
+	control.lastInterfaceApply = request
+	return managedInterface.ApplyResponse{TransactionID: request.TransactionID, State: domain.TransactionCommitted, CandidateHash: request.ExpectedCandidateHash}, nil
 }
 
 func newTestAPIServer(t *testing.T) (*Server, *healthyControl) {
