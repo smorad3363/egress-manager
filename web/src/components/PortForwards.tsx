@@ -7,6 +7,7 @@ import { SelectField, TextField } from "./ui/Field";
 import { Icon } from "./Icon";
 import { Skeleton } from "./ui/Skeleton";
 import { StatePanel } from "./ui/StatePanel";
+import { api } from "../lib/api";
 
 type PortRange = { from: number; to: number };
 type PortForward = {
@@ -167,22 +168,6 @@ export function PortForwards({ createRequest }: { createRequest: number }) {
       {plan ? <div className="plan-review"><div className="plan-meta"><Badge tone="success">{plan.engine}</Badge><code>{plan.owned_table}</code><span>{plan.enabled_rules} enabled</span></div><ol>{plan.actions.map((action, index) => <li key={`${action.kind}-${action.resource}-${index}`}><strong>{action.kind}</strong><span>{action.summary}</span><code>{action.resource}</code></li>)}</ol><details><summary>Generated native changes</summary><pre>{plan.candidate}</pre></details><div className="dialog__actions"><Button variant="ghost" onClick={() => setPlan(null)}>Cancel</Button><Button variant="primary" disabled={busy} onClick={() => void apply()}>Apply atomically</Button></div></div> : null}
     </Dialog>
   </section>;
-}
-
-async function api<T = unknown>(path: string, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers);
-  if (init?.body) headers.set("Content-Type", "application/json");
-  if (init?.method && !["GET", "HEAD"].includes(init.method)) {
-    const token = window.sessionStorage.getItem("egress.csrf") || document.querySelector<HTMLMetaElement>('meta[name="csrf-token"]')?.content;
-    if (token) headers.set("X-CSRF-Token", token);
-  }
-  const response = await fetch(path, { ...init, headers, credentials: "same-origin" });
-  if (!response.ok) {
-    const body = await response.json().catch(() => null) as { message?: string } | null;
-    throw new Error(body?.message || (response.status === 401 ? "Sign in to manage port forwards." : "Request failed."));
-  }
-  if (response.status === 204) return undefined as T;
-  return response.json() as Promise<T>;
 }
 
 function toForward(form: FormState): PortForward {

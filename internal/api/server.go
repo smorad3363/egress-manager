@@ -17,6 +17,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/auth"
 	"github.com/egress-manager/egress-manager/internal/database"
 	"github.com/egress-manager/egress-manager/internal/domain"
+	managedHAProxy "github.com/egress-manager/egress-manager/internal/haproxy"
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/nat"
 )
@@ -42,6 +43,9 @@ type ControlService interface {
 	PlanNAT(context.Context, nat.PlanRequest) (nat.Plan, error)
 	ApplyNAT(context.Context, nat.ApplyRequest) (nat.ApplyResponse, error)
 	NATCounters(context.Context, nat.CounterRequest) (nat.CounterSnapshot, error)
+	PlanHAProxy(context.Context, managedHAProxy.PlanRequest) (managedHAProxy.Plan, error)
+	ApplyHAProxy(context.Context, managedHAProxy.ApplyRequest) (managedHAProxy.ApplyResponse, error)
+	HAProxyStats(context.Context) (managedHAProxy.RuntimeSnapshot, error)
 }
 
 type ForwardRepository interface {
@@ -49,6 +53,17 @@ type ForwardRepository interface {
 	UpdatePortForward(context.Context, domain.PortForward, int64, time.Time) (database.StoredPortForward, error)
 	DeletePortForward(context.Context, domain.ID, int64) error
 	ListPortForwards(context.Context, domain.ID, int) ([]database.StoredPortForward, error)
+}
+
+type HAProxyRepository interface {
+	CreateHAProxyBackend(context.Context, domain.HAProxyBackend, time.Time) (database.StoredHAProxyBackend, error)
+	UpdateHAProxyBackend(context.Context, domain.HAProxyBackend, int64, time.Time) (database.StoredHAProxyBackend, error)
+	DeleteHAProxyBackend(context.Context, domain.ID, int64) error
+	ListHAProxyBackends(context.Context, domain.ID, int) ([]database.StoredHAProxyBackend, error)
+	CreateHAProxyFrontend(context.Context, domain.HAProxyFrontend, time.Time) (database.StoredHAProxyFrontend, error)
+	UpdateHAProxyFrontend(context.Context, domain.HAProxyFrontend, int64, time.Time) (database.StoredHAProxyFrontend, error)
+	DeleteHAProxyFrontend(context.Context, domain.ID, int64) error
+	ListHAProxyFrontends(context.Context, domain.ID, int) ([]database.StoredHAProxyFrontend, error)
 }
 
 type ServerConfig struct {
@@ -63,15 +78,16 @@ type Server struct {
 	sessions SessionService
 	control  ControlService
 	forwards ForwardRepository
+	haproxy  HAProxyRepository
 	health   http.Handler
 	now      func() time.Time
 }
 
-func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, sessions SessionService, control ControlService, forwards ForwardRepository, health http.Handler) (*Server, error) {
+func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, sessions SessionService, control ControlService, forwards ForwardRepository, haproxy HAProxyRepository, health http.Handler) (*Server, error) {
 	if config.SessionCookieName == "" || !config.SecureCookies {
 		return nil, fmt.Errorf("secure session cookie configuration is required")
 	}
-	if logger == nil || login == nil || sessions == nil || control == nil || forwards == nil || health == nil {
+	if logger == nil || login == nil || sessions == nil || control == nil || forwards == nil || haproxy == nil || health == nil {
 		return nil, fmt.Errorf("API dependencies are required")
 	}
 	return &Server{
@@ -81,6 +97,7 @@ func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, ses
 		sessions: sessions,
 		control:  control,
 		forwards: forwards,
+		haproxy:  haproxy,
 		health:   health,
 		now:      time.Now,
 	}, nil
@@ -98,6 +115,11 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("/api/v1/port-forwards/apply", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.applyPortForwardsHandler))))
 	mux.Handle("/api/v1/port-forwards/counters", server.method(http.MethodGet, server.requireSession(http.HandlerFunc(server.portForwardCountersHandler))))
 	mux.Handle("/api/v1/port-forwards", server.requireSession(http.HandlerFunc(server.portForwardsHandler)))
+	mux.Handle("/api/v1/haproxy/backends", server.requireSession(http.HandlerFunc(server.haproxyBackendsHandler)))
+	mux.Handle("/api/v1/haproxy/frontends", server.requireSession(http.HandlerFunc(server.haproxyFrontendsHandler)))
+	mux.Handle("/api/v1/haproxy/plan", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.haproxyPlanHandler))))
+	mux.Handle("/api/v1/haproxy/apply", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.haproxyApplyHandler))))
+	mux.Handle("/api/v1/haproxy/stats", server.method(http.MethodGet, server.requireSession(http.HandlerFunc(server.haproxyStatsHandler))))
 	mux.Handle("/api/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		WriteError(writer, request, NewError(http.StatusNotFound, CodeNotFound, "Endpoint not found.", nil))
 	}))
@@ -251,16 +273,20 @@ func requiresCSRF(method string) bool {
 }
 
 func decodeJSON(request *http.Request, output any) error {
+	return decodeJSONLimit(request, output, maximumJSONBytes)
+}
+
+func decodeJSONLimit(request *http.Request, output any, limit int64) error {
 	contentType := request.Header.Get("Content-Type")
 	if !strings.HasPrefix(strings.ToLower(contentType), "application/json") {
 		return fmt.Errorf("Content-Type must be application/json")
 	}
-	data, err := io.ReadAll(io.LimitReader(request.Body, maximumJSONBytes+1))
+	data, err := io.ReadAll(io.LimitReader(request.Body, limit+1))
 	if err != nil {
 		return err
 	}
-	if len(data) > maximumJSONBytes {
-		return fmt.Errorf("request body exceeds %d bytes", maximumJSONBytes)
+	if int64(len(data)) > limit {
+		return fmt.Errorf("request body exceeds %d bytes", limit)
 	}
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()

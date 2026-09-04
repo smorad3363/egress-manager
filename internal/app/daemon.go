@@ -16,6 +16,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/config"
 	"github.com/egress-manager/egress-manager/internal/database"
 	"github.com/egress-manager/egress-manager/internal/domain"
+	managedHAProxy "github.com/egress-manager/egress-manager/internal/haproxy"
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/ipc"
 	"github.com/egress-manager/egress-manager/internal/nat"
@@ -58,6 +59,11 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	executor := nat.Executor{Runner: runner, Journal: store, Verifier: nat.SystemVerifier{Runner: runner}}
 	if err := executor.Recover(ctx); err != nil {
 		return fmt.Errorf("recover interrupted network operations: %w", err)
+	}
+	haproxyRuntime := managedHAProxy.RuntimeClient{SocketPath: configuration.HAProxyRuntimeSocketPath, Dialer: managedHAProxy.NetDialer{}, Timeout: 2 * time.Second}
+	haproxyExecutor := managedHAProxy.Executor{Runner: runner, Journal: store, Runtime: haproxyRuntime, ConfigPath: configuration.HAProxyConfigPath, PIDPath: configuration.HAProxyPIDPath}
+	if err := haproxyExecutor.Recover(ctx); err != nil {
+		return fmt.Errorf("recover interrupted HAProxy operations: %w", err)
 	}
 	collector := inventory.Collector{Runner: runner, Files: inventory.OSFiles{}, Timeout: 2 * time.Second}
 	server, err := ipc.NewServer(authenticator, logger)
@@ -158,6 +164,61 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 			return (nat.IPTablesCounterReader{Runner: runner}).Read(ctx, request.Family)
 		}
 		return (nat.CounterReader{Runner: runner}).Read(ctx, request.Family)
+	}); err != nil {
+		return err
+	}
+
+	var haproxyMutex sync.Mutex
+	buildHAProxyPlan := func(ctx context.Context, request managedHAProxy.PlanRequest) (managedHAProxy.Plan, error) {
+		hostInventory, err := collector.Collect(ctx)
+		if err != nil {
+			return managedHAProxy.Plan{}, err
+		}
+		state, err := managedHAProxy.InspectState(configuration.HAProxyConfigPath)
+		if err != nil {
+			return managedHAProxy.Plan{}, err
+		}
+		protectedPorts := append([]uint16{configuration.ListenPort}, configuration.SSHPorts...)
+		for _, listener := range hostInventory.Listeners {
+			if strings.EqualFold(listener.Process, "sshd") && listener.Protocol == "tcp" && listener.Port != 0 && !containsPort(protectedPorts, listener.Port) {
+				protectedPorts = append(protectedPorts, listener.Port)
+			}
+		}
+		return managedHAProxy.BuildPlan(managedHAProxy.Settings{RuntimeSocket: configuration.HAProxyRuntimeSocketPath, PIDFile: configuration.HAProxyPIDPath, MaxConnections: 100000, ConnectTimeout: 5 * time.Second, ClientTimeout: 30 * time.Second, ServerTimeout: 30 * time.Second, ProtectedPorts: protectedPorts}, request.Frontends, request.Backends, hostInventory.Listeners, state)
+	}
+	if err := server.Handle(ipc.OperationHAProxyPlan, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		var request managedHAProxy.PlanRequest
+		if err := decodePayload(payload, &request); err != nil {
+			return nil, err
+		}
+		haproxyMutex.Lock()
+		defer haproxyMutex.Unlock()
+		return buildHAProxyPlan(ctx, request)
+	}); err != nil {
+		return err
+	}
+	if err := server.Handle(ipc.OperationHAProxyApply, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		var request managedHAProxy.ApplyRequest
+		if err := decodePayload(payload, &request); err != nil {
+			return nil, err
+		}
+		haproxyMutex.Lock()
+		defer haproxyMutex.Unlock()
+		plan, err := buildHAProxyPlan(ctx, managedHAProxy.PlanRequest{Frontends: request.Frontends, Backends: request.Backends})
+		if err != nil {
+			return nil, err
+		}
+		return haproxyExecutor.Execute(ctx, request.TransactionID, request.RequestedChange, plan)
+	}); err != nil {
+		return err
+	}
+	if err := server.Handle(ipc.OperationHAProxyStats, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		if err := decodeEmptyPayload(payload); err != nil {
+			return nil, err
+		}
+		haproxyMutex.Lock()
+		defer haproxyMutex.Unlock()
+		return haproxyRuntime.Snapshot(ctx)
 	}); err != nil {
 		return err
 	}

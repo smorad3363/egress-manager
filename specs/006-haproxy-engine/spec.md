@@ -4,7 +4,7 @@ tags:
   - egress-manager
   - specification
   - phase/6
-status: ready
+status: complete
 related:
   - "[[PROJECT_ROADMAP]]"
   - "[[CONSTITUTION]]"
@@ -61,3 +61,13 @@ Implement HAProxy as an independent transactional TCP proxy and load-balancer mo
 - API and IPC tests prove authentication, CSRF protection, strict typed payloads, and bounded output.
 - UI supports complete desired-state management, dry-run review, apply state, health, and statistics without making raw syntax the default view.
 - Existing NAT and foreign-firewall preservation suites remain green.
+
+## Implemented
+
+- Revisioned SQLite frontend and backend desired state with normalized, protected pool membership and keyset pagination.
+- Deterministic owned configuration planning with protected-port and live-listener conflict detection.
+- Journaled native validation, atomic install, master-worker graceful reload, verification, rollback, and interrupted-operation recovery.
+- Bounded, typed Unix Runtime API parsing for process, connection, health, session, traffic, failure, and downtime outcomes.
+- Authenticated API and HMAC-protected IPC for CRUD, dry-run plans, apply, and runtime statistics.
+- Responsive HAProxy UI for desired-state management, health and traffic visibility, configuration review, and apply.
+- Repeatable integration coverage for distribution, backup failover, recovery, invalid configuration rejection, graceful reload, rollback, and existing NAT/foreign-state preservation.

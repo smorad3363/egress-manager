@@ -2,16 +2,16 @@ schema_version: 1
 
 project: egress-manager
 
-phase: 6
-phase_name: haproxy-engine
+phase: 7
+phase_name: sing-box-outbound-engine
 
-active_spec: specs/006-haproxy-engine/spec.md
-active_task: haproxy-api-ipc-and-ui
+active_spec: specs/007-sing-box-outbound-engine/spec.md
+active_task: generic-outbound-domain-and-secret-model
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: expose HAProxy desired state, dry-run, apply, health, and statistics through authenticated IPC/API and UI
+next_action: implement the adapter-neutral outbound domain, revisioned persistence, secret references, and fixture-based sing-box import parsers
 
 dirty_work_expected: false
 
@@ -52,7 +52,10 @@ recent_decisions:
   - HAProxy frontend/backend references use a normalized link table so referenced backends cannot be deleted silently.
   - HAProxy validation uses a secure temporary file; apply uses atomic rename and dedicated daemon-mode master-worker graceful reload.
   - HAProxy statistics use only the Unix Runtime API with bounded typed parsing; no statistics web port is opened.
+  - Outbound desired state remains adapter-neutral; sing-box is the first adapter rather than the domain abstraction.
+  - Outbound public metadata stores only secret presence or references; secret values never enter plan, logs, API responses, or UI state.
 
 touched_areas:
-  - HAProxy authenticated IPC and API
-  - HAProxy operations UI
+  - generic outbound domain and validation
+  - secret-safe outbound persistence
+  - sing-box import parsing

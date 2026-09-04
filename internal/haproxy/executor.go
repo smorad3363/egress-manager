@@ -287,6 +287,11 @@ func inspectConfig(path string) ([]byte, State, error) {
 	return content, state, err
 }
 
+func InspectState(path string) (State, error) {
+	_, state, err := inspectConfig(path)
+	return state, err
+}
+
 func writeTemporaryConfig(path string, content []byte) (string, error) {
 	directory := filepath.Dir(path)
 	if err := os.MkdirAll(directory, 0o700); err != nil {

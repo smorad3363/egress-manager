@@ -17,6 +17,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/auth"
 	"github.com/egress-manager/egress-manager/internal/database"
 	"github.com/egress-manager/egress-manager/internal/domain"
+	managedHAProxy "github.com/egress-manager/egress-manager/internal/haproxy"
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/nat"
 )
@@ -48,6 +49,21 @@ func (control *healthyControl) ApplyNAT(_ context.Context, request nat.ApplyRequ
 func (control *healthyControl) NATCounters(_ context.Context, request nat.CounterRequest) (nat.CounterSnapshot, error) {
 	control.calls++
 	return nat.CounterSnapshot{Family: request.Family, Items: []nat.ForwardCounters{{ForwardID: "web_tls", AcceptedPackets: 5, AcceptedBytes: 400}}}, nil
+}
+
+func (control *healthyControl) PlanHAProxy(context.Context, managedHAProxy.PlanRequest) (managedHAProxy.Plan, error) {
+	control.calls++
+	return managedHAProxy.Plan{Engine: "haproxy", StateHash: "test", Actions: []managedHAProxy.Action{}, Candidate: "# Egress Manager owned HAProxy configuration\n"}, nil
+}
+
+func (control *healthyControl) ApplyHAProxy(_ context.Context, request managedHAProxy.ApplyRequest) (managedHAProxy.ApplyResponse, error) {
+	control.calls++
+	return managedHAProxy.ApplyResponse{TransactionID: request.TransactionID, State: domain.TransactionCommitted, Runtime: managedHAProxy.RuntimeSnapshot{Info: managedHAProxy.RuntimeInfo{PID: 42}, Stats: []managedHAProxy.RuntimeStat{}}}, nil
+}
+
+func (control *healthyControl) HAProxyStats(context.Context) (managedHAProxy.RuntimeSnapshot, error) {
+	control.calls++
+	return managedHAProxy.RuntimeSnapshot{Info: managedHAProxy.RuntimeInfo{Name: "HAProxy", Version: "test", PID: 42}, Stats: []managedHAProxy.RuntimeStat{}}, nil
 }
 
 func newTestAPIServer(t *testing.T) (*Server, *healthyControl) {
@@ -83,6 +99,7 @@ func newTestAPIServer(t *testing.T) (*Server, *healthyControl) {
 		authService,
 		sessions,
 		control,
+		store,
 		store,
 		health,
 	)

@@ -108,3 +108,33 @@ test("port-forward console previews and applies owned NAT plan", async ({ page }
   await plan.getByRole("button", { name: "Apply atomically" }).click();
   await expect(plan).toBeHidden();
 });
+
+test("HAProxy console shows health outcomes and graceful apply review", async ({ page }) => {
+  await page.addInitScript(() => window.sessionStorage.setItem("egress.csrf", "test-csrf-token"));
+  await page.route("**/api/v1/haproxy/**", async (route) => {
+    const request = route.request(); const url = new URL(request.url());
+    if (request.method() !== "GET") expect(request.headers()["x-csrf-token"]).toBe("test-csrf-token");
+    if (url.pathname.endsWith("/frontends")) { await route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ frontend: { id: "public_api", name: "Public API", bind: "192.0.2.10", port: 443, backend_ids: ["api_primary", "api_backup"], algorithm: "leastconn", enabled: true }, revision: 1 }] }) }); return; }
+    if (url.pathname.endsWith("/backends")) { await route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ backend: { id: "api_primary", name: "API Primary", server: { host: "10.20.0.10", port: 8080 }, weight: 100, backup: false, health_check: true, health: { status: "unknown" }, enabled: true }, revision: 1 }, { backend: { id: "api_backup", name: "API Backup", server: { host: "10.20.0.11", port: 8080 }, weight: 50, backup: true, health_check: true, health: { status: "unknown" }, enabled: true }, revision: 1 }] }) }); return; }
+    if (url.pathname.endsWith("/stats")) { await route.fulfill({ contentType: "application/json", body: JSON.stringify({ info: { name: "HAProxy", version: "3.0.5", pid: 42, uptime_seconds: 3600, current_connections: 12, total_connections: 4812 }, stats: [{ frontend_id: "public_api", backend_id: "api_primary", kind: "server", status: "healthy", current_sessions: 8, total_sessions: 3200, bytes_in: 1024000, bytes_out: 4096000, check_failures: 0, downtime_seconds: 0 }, { frontend_id: "public_api", backend_id: "api_backup", kind: "server", status: "healthy", current_sessions: 0, total_sessions: 20, bytes_in: 1000, bytes_out: 2000, check_failures: 1, downtime_seconds: 4 }] }) }); return; }
+    if (url.pathname.endsWith("/plan")) { await route.fulfill({ contentType: "application/json", body: JSON.stringify({ engine: "haproxy", state_hash: "test", enabled_frontends: 1, enabled_backends: 2, actions: [{ kind: "replace", resource: "owned HAProxy configuration", summary: "Atomically replace the project-owned HAProxy configuration." }], candidate: "# Egress Manager owned HAProxy configuration\nfrontend egm_fe_public_api\n  bind 192.0.2.10:443\n" }) }); return; }
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ transaction_id: "haproxy_test", state: "COMMITTED", runtime: { info: { pid: 43 }, stats: [] } }) });
+  });
+  await page.goto("/");
+  await page.getByLabel("Primary navigation").getByRole("button", { name: "HAProxy" }).click();
+  await expect(page.getByRole("heading", { name: "HAProxy", level: 2 })).toBeVisible();
+  await expect(page.getByText("Public API")).toBeVisible();
+  await expect(page.getByText("API Primary", { exact: true })).toBeVisible();
+  await expect(page.getByText("2 / 2")).toBeVisible();
+  if (process.env.VISUAL_QA) await page.screenshot({ path: "test-results/haproxy.png", fullPage: true });
+  await page.getByRole("button", { name: "New frontend" }).click();
+  await expect(page.getByRole("dialog").getByRole("heading", { name: "Create frontend" })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
+  await page.getByRole("button", { name: "Review & apply" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "Review HAProxy plan" })).toBeVisible();
+  await dialog.getByText("Advanced read-only configuration").click();
+  await expect(dialog.getByText("frontend egm_fe_public_api", { exact: false })).toBeVisible();
+  await dialog.getByRole("button", { name: "Apply & reload" }).click();
+  await expect(dialog).toBeHidden();
+});

@@ -174,6 +174,11 @@ td code { color: #b7c3d1; font-size: 0.66rem; }
 .plan-review details { border: 1px solid var(--border); border-radius: var(--radius-sm); background: #080e14; }
 .plan-review summary { padding: 0.7rem; color: var(--muted-strong); cursor: pointer; font-size: 0.68rem; }
 .plan-review pre { max-height: 17rem; overflow: auto; margin: 0; padding: 0.8rem; border-top: 1px solid var(--border); color: #aebdca; font-size: 0.6rem; line-height: 1.55; white-space: pre; }
+.haproxy-frontends { margin-top: 0.8rem; }.haproxy-frontends > .card-header { margin-bottom: 1rem; }
+.backend-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.8rem; margin-top: 0.8rem; }
+.backend-card { padding: 0.9rem; }.backend-card > div:first-child { display: flex; align-items: center; gap: 0.6rem; }.backend-card > div:first-child > div { display: flex; min-width: 0; flex: 1; flex-direction: column; }.backend-card > div:first-child strong { font-size: 0.72rem; }.backend-card > div:first-child code { margin-top: 0.2rem; color: var(--muted); font-size: 0.6rem; }
+.backend-card dl { display: grid; grid-template-columns: repeat(2, 1fr); margin: 0.8rem 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }.backend-card dl div { padding: 0.55rem 0; }.backend-card dt { color: var(--muted); font-size: 0.58rem; }.backend-card dd { margin: 0.15rem 0 0; color: var(--muted-strong); font-size: 0.66rem; }.backend-card .row-actions { justify-content: flex-end; }
+.backend-picker { display: grid; gap: 0.4rem; max-height: 12rem; overflow-y: auto; margin: 0; padding: 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }.backend-picker legend { padding: 0 0.3rem; color: #c7d1dc; font-size: 0.68rem; }.backend-picker label { display: flex; align-items: center; gap: 0.55rem; padding: 0.45rem; border-radius: var(--radius-sm); background: #0b1219; }.backend-picker label span { display: flex; flex-direction: column; color: var(--muted-strong); font-size: 0.68rem; }.backend-picker label small, .backend-picker p { color: var(--muted); font-size: 0.58rem; }
 
 .button { display: inline-flex; min-width: 0; align-items: center; justify-content: center; gap: 0.45rem; border: 1px solid transparent; border-radius: var(--radius-sm); font-weight: 650; cursor: pointer; transition: border-color 120ms ease, background 120ms ease, color 120ms ease, transform 120ms ease; white-space: nowrap; }
 .button:active:not(:disabled) { transform: translateY(1px); }
@@ -259,6 +264,7 @@ td code { color: #b7c3d1; font-size: 0.66rem; }
   .forward-summary { grid-template-columns: repeat(2, 1fr); }
   .inventory-grid { grid-template-columns: 1fr; }
   .capability-grid { grid-template-columns: repeat(2, 1fr); }
+  .backend-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 760px) {
@@ -291,6 +297,7 @@ td code { color: #b7c3d1; font-size: 0.66rem; }
   .service-list { grid-template-columns: 1fr; }
   .swatches { grid-template-columns: repeat(2, 1fr); }
   .inventory-summary, .interface-list, .capability-grid, .inventory-loading, .forward-summary, .forward-loading { grid-template-columns: 1fr; }
+  .backend-grid { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

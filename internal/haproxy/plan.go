@@ -20,7 +20,7 @@ import (
 const (
 	MaximumFrontends = 128
 	MaximumBackends  = 256
-	maximumCandidate = 128 << 10
+	maximumCandidate = 96 << 10
 )
 
 type Settings struct {
@@ -76,7 +76,7 @@ func ParseState(content []byte, exists bool) (State, error) {
 			inOwnedFrontend = strings.HasPrefix(fields[1], "egm_fe_")
 			continue
 		}
-		if len(fields) >= 2 && (fields[0] == "backend" || fields[0] == "global" || fields[0] == "defaults") {
+		if fields[0] == "backend" || fields[0] == "global" || fields[0] == "defaults" || fields[0] == "listen" {
 			inOwnedFrontend = false
 		}
 		if inOwnedFrontend && len(fields) == 2 && fields[0] == "bind" {
