@@ -65,3 +65,11 @@ Route traffic selected by ingress interface or source subnet through an enabled 
 - Apply is journaled, validated, atomic, verifiable, reversible, and recoverable.
 - Authenticated API and UI support CRUD, explicit failure policy, dry-run review, apply, and outcome visibility.
 - Disposable no-leak tests pass twice while existing NAT, HAProxy, sing-box, and foreign-state suites remain green.
+
+## Progress
+
+- Adapter-neutral route model with explicit primary and fallback outbounds, failure, DNS, IPv4, IPv6, kill-switch, MTU, and TCP MSS policy.
+- Revisioned SQLite desired state with keyset pagination, exact enabled-selector uniqueness, and indexed restrictive foreign keys for both primary and fallback outbounds.
+- Read-only inventory now includes bounded, typed Linux policy rules for foreign-priority preservation.
+- Deterministic safety planner resolves subnet ingress interfaces, rejects selector overlap and protected-management capture, requires enabled compatible outbounds, bounds hostname resolution, reserves foreign route tables and rule priorities, and emits explicit endpoint bypasses.
+- Project-owned routing candidates and public plans use stable hashes, dedicated TUN names, bounded policy slots, and no secret material.

@@ -7,6 +7,7 @@ const (
 	maximumInterfaces   = 512
 	maximumAddresses    = 2048
 	maximumRoutes       = 4096
+	maximumPolicyRules  = 4096
 	maximumListeners    = 4096
 	maximumCapabilities = 32
 )
@@ -15,6 +16,7 @@ type Inventory struct {
 	GeneratedAt  time.Time    `json:"generated_at"`
 	Interfaces   []Interface  `json:"interfaces"`
 	Routes       []Route      `json:"routes"`
+	PolicyRules  []PolicyRule `json:"policy_rules"`
 	Listeners    []Listener   `json:"listeners"`
 	DNS          DNSState     `json:"dns"`
 	Capabilities []Capability `json:"capabilities"`
@@ -42,6 +44,16 @@ type Route struct {
 	Table       string `json:"table,omitempty"`
 	Metric      int    `json:"metric,omitempty"`
 	Default     bool   `json:"default"`
+}
+
+type PolicyRule struct {
+	Priority    int    `json:"priority"`
+	Source      string `json:"source"`
+	Destination string `json:"destination,omitempty"`
+	Table       string `json:"table"`
+	FWMark      string `json:"fwmark,omitempty"`
+	Input       string `json:"input_interface,omitempty"`
+	Output      string `json:"output_interface,omitempty"`
 }
 
 type Listener struct {

@@ -94,6 +94,39 @@ func parseRoutes(data []byte) ([]Route, error) {
 	return routes, nil
 }
 
+type ipRuleDocument struct {
+	Priority    int             `json:"priority"`
+	Source      string          `json:"src"`
+	Destination string          `json:"dst"`
+	Table       json.RawMessage `json:"table"`
+	FWMark      string          `json:"fwmark"`
+	Input       string          `json:"iif"`
+	Output      string          `json:"oif"`
+}
+
+func parsePolicyRules(data []byte) ([]PolicyRule, error) {
+	var documents []ipRuleDocument
+	if err := json.Unmarshal(data, &documents); err != nil {
+		return nil, fmt.Errorf("decode policy rule inventory: %w", err)
+	}
+	if len(documents) > maximumPolicyRules {
+		return nil, fmt.Errorf("policy rule inventory exceeds %d records", maximumPolicyRules)
+	}
+	rules := make([]PolicyRule, 0, len(documents))
+	for _, document := range documents {
+		if document.Priority < 0 {
+			return nil, fmt.Errorf("policy rule inventory contains invalid priority")
+		}
+		source := document.Source
+		if source == "" {
+			source = "all"
+		}
+		rules = append(rules, PolicyRule{Priority: document.Priority, Source: source, Destination: document.Destination, Table: rawScalar(document.Table), FWMark: document.FWMark, Input: document.Input, Output: document.Output})
+	}
+	sort.Slice(rules, func(i, j int) bool { return rules[i].Priority < rules[j].Priority })
+	return rules, nil
+}
+
 func rawScalar(value json.RawMessage) string {
 	if len(value) == 0 || bytes.Equal(value, []byte("null")) {
 		return ""

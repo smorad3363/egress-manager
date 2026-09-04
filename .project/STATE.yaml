@@ -6,12 +6,12 @@ phase: 8
 phase_name: interface-subnet-egress-routing
 
 active_spec: specs/008-interface-subnet-egress-routing/spec.md
-active_task: route-domain-persistence-and-planner
+active_task: route-native-candidates-and-singbox-tun-composition
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: implement adapter-neutral interface/subnet egress-route desired state, protected outbound references, explicit failure and IP/DNS policies, and deterministic safety planning
+next_action: render and natively validate owned nftables and iproute2 candidates, compose dedicated sing-box TUN inbounds and route rules, then add transactional apply and rollback
 
 dirty_work_expected: false
 
@@ -62,8 +62,11 @@ recent_decisions:
   - sing-box apply requires the exact reviewed owned-state and candidate hashes; stale UI plans are rejected.
   - Generated sing-box candidates share the 128 KiB encrypted-journal bound so every valid plan is journalable before mutation.
   - Egress-route failure policy defaults to block; direct routing is permitted only when explicitly configured.
+  - Enabled routes use a partial unique source index; primary and fallback outbound foreign keys are separately indexed and restrictive.
+  - IPv4 subnet selectors resolve to exactly one active ingress interface so opposite-family blocking can be enforced without ambiguous client identity.
+  - Route tables and rule priorities are deterministic per route but skip all foreign numeric tables and priorities discovered by inventory.
 
 touched_areas:
-  - interface and subnet route domain model
-  - route persistence and outbound references
-  - route safety planner
+  - native policy-routing and kill-switch candidates
+  - sing-box TUN composition
+  - routing transaction executor

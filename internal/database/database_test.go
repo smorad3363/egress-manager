@@ -40,8 +40,90 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(version) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 5 {
-		t.Fatalf("migration count = %d, want 5", count)
+	if count != 6 {
+		t.Fatalf("migration count = %d, want 6", count)
+	}
+}
+
+func TestRouteRepositoryProtectsOutboundsAndUsesKeysetRevisions(t *testing.T) {
+	t.Parallel()
+	database := openTestDatabase(t)
+	protector, err := secrets.NewProtector([32]byte{5, 4, 3, 2}, strings.NewReader(strings.Repeat("r", 128)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewProtectedStore(database, protector)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	newOutbound := func(id domain.ID, name string) domain.Outbound {
+		return domain.Outbound{ID: id, Name: name, Adapter: domain.OutboundAdapterSingBox, Type: domain.OutboundSOCKS5, Server: domain.Endpoint{Host: "192.0.2.40", Port: 1080}, Capabilities: domain.Capabilities{TCP: true, UDP: true}, Health: domain.UnknownOutboundHealth(), Enabled: true}
+	}
+	primary := newOutbound("route_primary", "Route primary")
+	fallback := newOutbound("route_fallback", "Route fallback")
+	for _, outbound := range []domain.Outbound{primary, fallback} {
+		if _, err := store.CreateOutbound(ctx, outbound, []byte(`{"version":1}`), now); err != nil {
+			t.Fatal(err)
+		}
+	}
+	route := domain.Route{
+		ID: "vpn_clients", Name: "VPN clients", Source: domain.RouteSource{Kind: domain.RouteSourceSubnet, Subnet: netip.MustParsePrefix("10.8.0.0/24")},
+		OutboundID: primary.ID, FailurePolicy: domain.FailureBlock, DNSPolicy: domain.DNSFollowOutbound,
+		IPv4Policy: domain.IPv4FollowOutbound, IPv6Policy: domain.IPv6Block, KillSwitch: true, MTU: 1400, TCPMSS: 1360, Enabled: true,
+	}
+	created, err := store.CreateRoute(ctx, route, now)
+	if err != nil || created.Revision != 1 {
+		t.Fatalf("created route = %#v, error = %v", created, err)
+	}
+	for query, index := range map[string]string{
+		`EXPLAIN QUERY PLAN SELECT id FROM egress_routes WHERE outbound_id = ?`:          "idx_egress_routes_outbound",
+		`EXPLAIN QUERY PLAN SELECT id FROM egress_routes WHERE fallback_outbound_id = ?`: "idx_egress_routes_fallback_outbound",
+	} {
+		var selectID, order, from int
+		var detail string
+		if err := database.QueryRow(query, string(primary.ID)).Scan(&selectID, &order, &from, &detail); err != nil || !strings.Contains(detail, index) {
+			t.Fatalf("query plan = %q, error = %v, want index %s", detail, err, index)
+		}
+	}
+	duplicate := route
+	duplicate.ID = "vpn_clients_duplicate"
+	duplicate.Name = "VPN clients duplicate"
+	if _, err := store.CreateRoute(ctx, duplicate, now); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate enabled selector error = %v", err)
+	}
+	if err := store.DeleteOutbound(ctx, primary.ID, 1); !errors.Is(err, ErrConflict) {
+		t.Fatalf("delete referenced primary error = %v", err)
+	}
+	route.FailurePolicy = domain.FailureFailover
+	route.FallbackOutboundID = fallback.ID
+	updated, err := store.UpdateRoute(ctx, route, 1, now.Add(time.Second))
+	if err != nil || updated.Revision != 2 || updated.Route.FallbackOutboundID != fallback.ID {
+		t.Fatalf("updated route = %#v, error = %v", updated, err)
+	}
+	if err := store.DeleteOutbound(ctx, fallback.ID, 1); !errors.Is(err, ErrConflict) {
+		t.Fatalf("delete referenced fallback error = %v", err)
+	}
+	items, err := store.ListRoutes(ctx, "", 10)
+	if err != nil || len(items) != 1 || items[0].Route.ID != route.ID {
+		t.Fatalf("route list = %#v, error = %v", items, err)
+	}
+	after, err := store.ListRoutes(ctx, route.ID, 10)
+	if err != nil || len(after) != 0 {
+		t.Fatalf("route keyset page = %#v, error = %v", after, err)
+	}
+	if _, err := store.UpdateRoute(ctx, route, 1, now.Add(2*time.Second)); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale route update error = %v", err)
+	}
+	if err := store.DeleteRoute(ctx, route.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteOutbound(ctx, primary.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteOutbound(ctx, fallback.ID, 1); err != nil {
+		t.Fatal(err)
 	}
 }
 

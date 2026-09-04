@@ -90,6 +90,23 @@ func (policy DNSPolicy) Validate() error {
 	}
 }
 
+type IPv4Policy string
+
+const (
+	IPv4FollowOutbound IPv4Policy = "follow_outbound"
+	IPv4Block          IPv4Policy = "block"
+	IPv4Direct         IPv4Policy = "direct"
+)
+
+func (policy IPv4Policy) Validate() error {
+	switch policy {
+	case IPv4FollowOutbound, IPv4Block, IPv4Direct:
+		return nil
+	default:
+		return fmt.Errorf("unsupported IPv4 policy %q", policy)
+	}
+}
+
 type IPv6Policy string
 
 const (
@@ -108,24 +125,63 @@ func (policy IPv6Policy) Validate() error {
 }
 
 type Route struct {
-	ID            ID            `json:"id"`
-	Name          string        `json:"name"`
-	Source        RouteSource   `json:"source"`
-	OutboundID    ID            `json:"outbound_id"`
-	FailurePolicy FailurePolicy `json:"failure_policy"`
-	DNSPolicy     DNSPolicy     `json:"dns_policy"`
-	IPv6Policy    IPv6Policy    `json:"ipv6_policy"`
-	Enabled       bool          `json:"enabled"`
+	ID                 ID            `json:"id"`
+	Name               string        `json:"name"`
+	Source             RouteSource   `json:"source"`
+	OutboundID         ID            `json:"outbound_id"`
+	FallbackOutboundID ID            `json:"fallback_outbound_id,omitempty"`
+	FailurePolicy      FailurePolicy `json:"failure_policy"`
+	DNSPolicy          DNSPolicy     `json:"dns_policy"`
+	IPv4Policy         IPv4Policy    `json:"ipv4_policy"`
+	IPv6Policy         IPv6Policy    `json:"ipv6_policy"`
+	KillSwitch         bool          `json:"kill_switch"`
+	MTU                uint16        `json:"mtu,omitempty"`
+	TCPMSS             uint16        `json:"tcp_mss,omitempty"`
+	Enabled            bool          `json:"enabled"`
 }
 
 func (route Route) Validate() error {
+	var fallbackError error
+	if route.FailurePolicy == FailureFailover {
+		if err := route.FallbackOutboundID.Validate("fallback outbound id"); err != nil {
+			fallbackError = err
+		} else if route.FallbackOutboundID == route.OutboundID {
+			fallbackError = fmt.Errorf("fallback outbound must differ from primary outbound")
+		}
+	} else if route.FallbackOutboundID != "" {
+		fallbackError = fmt.Errorf("fallback outbound is allowed only with failover policy")
+	}
+	var mtuError error
+	if route.MTU != 0 && (route.MTU < 576 || route.MTU > 9000) {
+		mtuError = fmt.Errorf("route MTU must be zero or between 576 and 9000")
+	}
+	var mssError error
+	if route.TCPMSS != 0 {
+		if route.TCPMSS < 536 || route.TCPMSS > 8960 {
+			mssError = fmt.Errorf("route TCP MSS must be zero or between 536 and 8960")
+		} else if route.MTU != 0 && route.TCPMSS >= route.MTU {
+			mssError = fmt.Errorf("route TCP MSS must be smaller than MTU")
+		}
+	}
+	var killSwitchError error
+	if route.FailurePolicy == FailureDirect && route.KillSwitch {
+		killSwitchError = fmt.Errorf("direct failure policy cannot enable the kill switch")
+	}
+	if (route.FailurePolicy == FailureBlock || route.FailurePolicy == FailureFailover) && !route.KillSwitch {
+		killSwitchError = fmt.Errorf("block and failover policies require the kill switch")
+	}
 	return joinErrors(
 		route.ID.Validate("route id"),
 		validateDisplayName("route name", route.Name),
 		route.Source.Validate(),
 		route.OutboundID.Validate("outbound id"),
 		route.FailurePolicy.Validate(),
+		fallbackError,
 		route.DNSPolicy.Validate(),
+		route.IPv4Policy.Validate(),
 		route.IPv6Policy.Validate(),
+		mtuError,
+		mssError,
+		killSwitchError,
 	)
 }

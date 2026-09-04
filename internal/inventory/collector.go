@@ -61,6 +61,7 @@ func (collector Collector) Collect(ctx context.Context) (Inventory, error) {
 		GeneratedAt:  now().UTC(),
 		Interfaces:   []Interface{},
 		Routes:       []Route{},
+		PolicyRules:  []PolicyRule{},
 		Listeners:    []Listener{},
 		DNS:          DNSState{Source: "/etc/resolv.conf", Servers: []string{}, SearchDomains: []string{}},
 		Capabilities: []Capability{},
@@ -80,6 +81,13 @@ func (collector Collector) Collect(ctx context.Context) (Inventory, error) {
 		result.Warnings = append(result.Warnings, "route inventory malformed")
 	} else {
 		result.Routes = parsed
+	}
+	if output, err := collector.run(ctx, timeout, system.Command{Name: "ip", Args: []string{"-j", "rule", "show"}}); err != nil {
+		result.Warnings = append(result.Warnings, "policy rule inventory unavailable")
+	} else if parsed, err := parsePolicyRules(output); err != nil {
+		result.Warnings = append(result.Warnings, "policy rule inventory malformed")
+	} else {
+		result.PolicyRules = parsed
 	}
 	if output, err := collector.run(ctx, timeout, system.Command{Name: "ss", Args: []string{"-H", "-lntu", "-p"}}); err != nil {
 		result.Warnings = append(result.Warnings, "listener inventory unavailable")

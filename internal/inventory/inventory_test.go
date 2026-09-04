@@ -39,6 +39,14 @@ func TestParsersProduceTypedCanonicalInventory(t *testing.T) {
 		t.Fatalf("routes = %#v", routes)
 	}
 
+	rules, err := parsePolicyRules([]byte(`[{"priority":32766,"src":"all","table":"main"},{"priority":12000,"src":"10.8.0.0/24","table":20001,"iif":"tun0","fwmark":"0x1"}]`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rules) != 2 || rules[0].Priority != 12000 || rules[0].Table != "20001" || rules[0].Input != "tun0" {
+		t.Fatalf("policy rules = %#v", rules)
+	}
+
 	listeners, err := parseListeners([]byte("tcp LISTEN 0 4096 127.0.0.1:443 0.0.0.0:* users:((\"haproxy\",pid=42,fd=7))\nudp UNCONN 0 0 [::]:53 [::]:*\n"))
 	if err != nil {
 		t.Fatal(err)
@@ -61,6 +69,9 @@ func TestParsersRejectMalformedPrimaryDocuments(t *testing.T) {
 	}
 	if _, err := parseRoutes([]byte(`not-json`)); err == nil {
 		t.Fatal("parseRoutes() accepted malformed JSON")
+	}
+	if _, err := parsePolicyRules([]byte(`not-json`)); err == nil {
+		t.Fatal("parsePolicyRules() accepted malformed JSON")
 	}
 }
 
@@ -130,6 +141,7 @@ func TestCollectorReturnsPartialStateAndDetectsBackends(t *testing.T) {
 	runner := &fakeRunner{results: map[string]system.Result{
 		"ip -j address show":         {Stdout: []byte(`[{"ifname":"eth0","operstate":"UP","mtu":1500,"addr_info":[]}]`), ExitCode: 0},
 		"ip -j route show table all": {Stdout: []byte(`malformed`), ExitCode: 0},
+		"ip -j rule show":            {Stdout: []byte(`[{"priority":32766,"src":"all","table":"main"}]`), ExitCode: 0},
 		"ss -H -lntu -p":             {Stdout: []byte("tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:*\n"), ExitCode: 0},
 		"ps -eo comm=,args=":         {Stdout: []byte("haproxy /usr/sbin/haproxy -f /etc/haproxy/haproxy.cfg\npython /opt/marzban/main.py\n"), ExitCode: 0},
 		"nft --version":              {Stdout: []byte("nftables v1.0.9\n"), ExitCode: 0},
@@ -145,7 +157,7 @@ func TestCollectorReturnsPartialStateAndDetectsBackends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Interfaces) != 1 || len(result.Routes) != 0 || len(result.Listeners) != 1 {
+	if len(result.Interfaces) != 1 || len(result.Routes) != 0 || len(result.PolicyRules) != 1 || len(result.Listeners) != 1 {
 		t.Fatalf("inventory = %#v", result)
 	}
 	if !reflect.DeepEqual(result.Warnings, []string{"route inventory malformed"}) {
