@@ -161,6 +161,31 @@ func renderIPBatch(intents []RouteIntent, ipv4 bool) []byte {
 	return []byte(builder.String())
 }
 
+// BuildIPBatches reconstructs bounded project-owned policy state for rollback.
+func BuildIPBatches(intents []RouteIntent) ([]byte, []byte, error) {
+	if len(intents) > MaximumRoutes {
+		return nil, nil, fmt.Errorf("owned routing state exceeds %d routes", MaximumRoutes)
+	}
+	normalized := append([]RouteIntent{}, intents...)
+	sort.Slice(normalized, func(i, j int) bool { return normalized[i].ID < normalized[j].ID })
+	seen := make(map[domain.ID]struct{}, len(normalized))
+	for _, intent := range normalized {
+		if err := intent.Validate(); err != nil {
+			return nil, nil, err
+		}
+		if _, exists := seen[intent.ID]; exists {
+			return nil, nil, fmt.Errorf("owned routing state contains duplicate routes")
+		}
+		seen[intent.ID] = struct{}{}
+	}
+	ipv4 := renderIPBatch(normalized, true)
+	ipv6 := renderIPBatch(normalized, false)
+	if len(ipv4)+len(ipv6) > maximumNativeBytes {
+		return nil, nil, fmt.Errorf("owned IP batches exceed %d bytes", maximumNativeBytes)
+	}
+	return ipv4, ipv6, nil
+}
+
 func ParseNativeProtocol(value string) (uint8, error) {
 	parsed, err := strconv.ParseUint(value, 10, 8)
 	if err != nil || parsed == 0 {

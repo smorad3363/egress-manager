@@ -28,6 +28,7 @@ type Config struct {
 	HAProxyRuntimeSocketPath string         `json:"haproxy_runtime_socket_path"`
 	HAProxyPIDPath           string         `json:"haproxy_pid_path"`
 	SingBoxConfigPath        string         `json:"sing_box_config_path"`
+	RoutingStatePath         string         `json:"routing_state_path"`
 	SessionCookieName        string         `json:"session_cookie_name"`
 	SSHPorts                 []uint16       `json:"ssh_ports"`
 	ProtectedManagementCIDRs []netip.Prefix `json:"protected_management_cidrs"`
@@ -45,6 +46,7 @@ func Default(dataDirectory string) Config {
 		HAProxyRuntimeSocketPath: filepath.Join(dataDirectory, "haproxy-runtime.sock"),
 		HAProxyPIDPath:           filepath.Join(dataDirectory, "haproxy.pid"),
 		SingBoxConfigPath:        filepath.Join(dataDirectory, "sing-box.json"),
+		RoutingStatePath:         filepath.Join(dataDirectory, "routing.json"),
 		SessionCookieName:        defaultCookieName,
 		SSHPorts:                 []uint16{22},
 		ProtectedManagementCIDRs: []netip.Prefix{},
@@ -92,12 +94,13 @@ func (configuration Config) Validate() error {
 		"haproxy_runtime_socket_path": configuration.HAProxyRuntimeSocketPath,
 		"haproxy_pid_path":            configuration.HAProxyPIDPath,
 		"sing_box_config_path":        configuration.SingBoxConfigPath,
+		"routing_state_path":          configuration.RoutingStatePath,
 	} {
 		if strings.TrimSpace(path) == "" || !filepath.IsAbs(path) {
 			errs = append(errs, fmt.Errorf("%s must be absolute", name))
 		}
 	}
-	paths := []string{configuration.ControlSocketPath, configuration.HAProxyConfigPath, configuration.HAProxyRuntimeSocketPath, configuration.HAProxyPIDPath, configuration.SingBoxConfigPath}
+	paths := []string{configuration.ControlSocketPath, configuration.HAProxyConfigPath, configuration.HAProxyRuntimeSocketPath, configuration.HAProxyPIDPath, configuration.SingBoxConfigPath, configuration.RoutingStatePath}
 	seenPaths := map[string]struct{}{}
 	for _, path := range paths {
 		cleaned := filepath.Clean(path)
@@ -141,6 +144,9 @@ func Load(path string) (Config, error) {
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return Config{}, fmt.Errorf("decode configuration: trailing data")
+	}
+	if configuration.RoutingStatePath == "" && filepath.IsAbs(configuration.DataDirectory) {
+		configuration.RoutingStatePath = filepath.Join(configuration.DataDirectory, "routing.json")
 	}
 	if err := configuration.Validate(); err != nil {
 		return Config{}, fmt.Errorf("validate configuration: %w", err)

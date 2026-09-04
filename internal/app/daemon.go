@@ -21,6 +21,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/ipc"
 	"github.com/egress-manager/egress-manager/internal/nat"
+	"github.com/egress-manager/egress-manager/internal/routeengine"
 	"github.com/egress-manager/egress-manager/internal/secrets"
 	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
 	"github.com/egress-manager/egress-manager/internal/system"
@@ -78,6 +79,10 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	singboxExecutor := managedSingBox.Executor{Runner: runner, Journal: store, Protector: protector, ConfigPath: configuration.SingBoxConfigPath}
 	if err := singboxExecutor.Recover(ctx); err != nil {
 		return fmt.Errorf("recover interrupted sing-box operations: %w", err)
+	}
+	routeExecutor := routeengine.Executor{Runner: runner, Journal: store, Protector: protector, SingBoxConfigPath: configuration.SingBoxConfigPath, RoutingStatePath: configuration.RoutingStatePath}
+	if err := routeExecutor.Recover(ctx); err != nil {
+		return fmt.Errorf("recover interrupted coordinated route operations: %w", err)
 	}
 	collector := inventory.Collector{Runner: runner, Files: inventory.OSFiles{}, Timeout: 2 * time.Second}
 	server, err := ipc.NewServer(authenticator, logger)

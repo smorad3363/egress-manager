@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"crypto/rand"
+	"encoding/json"
 	"net"
 	"net/netip"
 	"os"
@@ -47,6 +48,30 @@ func TestLoadRejectsUnknownFields(t *testing.T) {
 	}
 	if _, err := Load(path); err == nil {
 		t.Fatal("Load() accepted unknown configuration field")
+	}
+}
+
+func TestLoadDefaultsRoutingStatePathForExistingConfigurations(t *testing.T) {
+	t.Parallel()
+
+	directory := t.TempDir()
+	path := filepath.Join(directory, "egress.json")
+	configuration := Default(directory)
+	configuration.ListenPort = 43127
+	configuration.RoutingStatePath = ""
+	data, err := json.Marshal(configuration)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.RoutingStatePath != filepath.Join(directory, "routing.json") {
+		t.Fatalf("routing state path = %q", loaded.RoutingStatePath)
 	}
 }
 

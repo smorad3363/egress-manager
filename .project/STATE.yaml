@@ -6,12 +6,12 @@ phase: 8
 phase_name: interface-subnet-egress-routing
 
 active_spec: specs/008-interface-subnet-egress-routing/spec.md
-active_task: route-coordinated-transaction-and-recovery
+active_task: route-authenticated-api-and-operations-ui
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: add one journaled coordinator for sing-box, nftables, iproute2, owned-state commit, verification, rollback, and interrupted recovery
+next_action: expose route CRUD, plan, apply, and status through authenticated IPC and CSRF-protected HTTP, then build the responsive operations UI and no-leak packet tests
 
 dirty_work_expected: false
 
@@ -69,7 +69,9 @@ recent_decisions:
   - Routed sing-box uses dedicated project-owned TUN inbounds with auto_route disabled; Egress Manager remains the sole owner of kernel routes and leak-control rules.
   - Policy routes and rules use protocol 242 as an ownership marker; verified prior owned resources are reusable, while foreign collisions force a different bounded slot.
   - The only routing firewall table is inet egm_egress; native candidates are validated and exercised inside the disposable privileged network lab.
+  - Route apply is one journaled transaction across sing-box, nftables, IPv4/IPv6 policy routing, and the owned routing state file; each recovery snapshot is independently authenticated.
+  - Apply installs the new kill-switch table before moving traffic, verifies TUN creation before policy rules, and restores prior sing-box, policy routes, nftables, and state after failure or restart.
 
 touched_areas:
-  - routing transaction executor
   - route API and operations UI
+  - isolated route kill-switch and leak tests
