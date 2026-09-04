@@ -13,7 +13,7 @@ require_command() {
 [ "$(uname -s)" = "Linux" ] || fail "network lab requires Linux"
 [ "$(id -u)" -eq 0 ] || fail "network lab requires root or a privileged container"
 
-for command_name in ip nft iptables iptables-save iptables-restore haproxy sing-box socat sysctl timeout grep awk; do
+for command_name in ip nft iptables iptables-save iptables-restore haproxy sing-box socat sysctl tcpdump timeout grep awk; do
     require_command "$command_name"
 done
 
@@ -29,6 +29,8 @@ haproxy_probe=${EGRESS_HAPROXY_PROBE:-/usr/local/bin/egress-haproxy-probe}
 [ -x "$haproxy_probe" ] || fail "HAProxy probe not executable: $haproxy_probe"
 singbox_probe=${EGRESS_SINGBOX_PROBE:-/usr/local/bin/egress-singbox-probe}
 [ -x "$singbox_probe" ] || fail "sing-box probe not executable: $singbox_probe"
+routing_probe=${EGRESS_ROUTING_PROBE:-/usr/local/bin/egress-routing-probe}
+[ -x "$routing_probe" ] || fail "routing probe not executable: $routing_probe"
 
 "$singbox_probe" /lab/singbox-fixtures
 
@@ -42,12 +44,15 @@ router_server_if="egrs$suffix"
 server_host_if="egs$suffix"
 tcp_pid=""
 udp_pid=""
+tcp6_pid=""
+dns_pid=""
 haproxy_primary_pid=""
 haproxy_secondary_pid=""
 haproxy_backup_pid=""
 candidate_path="/tmp/egm-nat-$suffix.nft"
 iptables_candidate_path="/tmp/egm-nat-$suffix.iptables"
 haproxy_candidate_path="/tmp/egm-haproxy-$suffix.cfg"
+route_candidate_dir="/tmp/egm-route-$suffix"
 
 namespace_exists() {
     ip netns list | awk '{print $1}' | grep -Fxq "$1"
@@ -55,12 +60,13 @@ namespace_exists() {
 
 cleanup() {
 	rm -f "$candidate_path" "$iptables_candidate_path" "$haproxy_candidate_path"
+	rm -rf "$route_candidate_dir"
     if [ -f /tmp/egm-haproxy.pid ]; then
         haproxy_pid=$(cat /tmp/egm-haproxy.pid 2>/dev/null || true)
         if [ -n "$haproxy_pid" ]; then kill "$haproxy_pid" 2>/dev/null || true; fi
     fi
     rm -f /tmp/egm-haproxy.pid /tmp/egm-haproxy-runtime.sock /tmp/egm-haproxy-managed.cfg
-    for process_id in "$tcp_pid" "$udp_pid" "$haproxy_primary_pid" "$haproxy_secondary_pid" "$haproxy_backup_pid"; do
+    for process_id in "$tcp_pid" "$udp_pid" "$tcp6_pid" "$dns_pid" "$haproxy_primary_pid" "$haproxy_secondary_pid" "$haproxy_backup_pid"; do
         if [ -n "$process_id" ] && kill -0 "$process_id" 2>/dev/null; then
             if ! kill "$process_id" 2>/dev/null; then
                 :
@@ -101,6 +107,11 @@ ip -n "$client_ns" address add 10.203.1.2/24 dev c0
 ip -n "$router_ns" address add 10.203.1.1/24 dev r0
 ip -n "$router_ns" address add 10.203.2.1/24 dev r1
 ip -n "$server_ns" address add 10.203.2.2/24 dev s0
+ip -n "$server_ns" address add 10.203.2.3/24 dev s0
+ip -n "$client_ns" -6 address add 2001:db8:203:1::2/64 dev c0 nodad
+ip -n "$router_ns" -6 address add 2001:db8:203:1::1/64 dev r0 nodad
+ip -n "$router_ns" -6 address add 2001:db8:203:2::1/64 dev r1 nodad
+ip -n "$server_ns" -6 address add 2001:db8:203:2::2/64 dev s0 nodad
 
 ip -n "$client_ns" link set c0 up
 ip -n "$router_ns" link set r0 up
@@ -109,7 +120,10 @@ ip -n "$server_ns" link set s0 up
 
 ip -n "$client_ns" route add default via 10.203.1.1
 ip -n "$server_ns" route add default via 10.203.2.1
+ip -n "$client_ns" -6 route add default via 2001:db8:203:1::1
+ip -n "$server_ns" -6 route add default via 2001:db8:203:2::1
 ip netns exec "$router_ns" sysctl -q -w net.ipv4.ip_forward=1
+ip netns exec "$router_ns" sysctl -q -w net.ipv6.conf.all.forwarding=1
 
 "$haproxy_probe" >"$haproxy_candidate_path"
 haproxy -c -f "$haproxy_candidate_path" >/dev/null
@@ -125,6 +139,8 @@ ip netns exec "$router_ns" nft --file "$candidate_path"
 
 tcp_pid=$(ip netns exec "$server_ns" sh -c 'socat TCP-LISTEN:8080,reuseaddr,fork EXEC:/bin/cat >/tmp/egm-tcp.log 2>&1 & echo $!')
 udp_pid=$(ip netns exec "$server_ns" sh -c 'socat -T2 UDP-RECVFROM:5353,reuseaddr,fork EXEC:/bin/cat >/tmp/egm-udp.log 2>&1 & echo $!')
+tcp6_pid=$(ip netns exec "$server_ns" sh -c 'socat TCP6-LISTEN:8081,reuseaddr,fork EXEC:/bin/cat >/tmp/egm-tcp6.log 2>&1 & echo $!')
+dns_pid=$(ip netns exec "$router_ns" sh -c 'socat -T2 UDP-RECVFROM:53,reuseaddr,fork EXEC:/bin/cat >/tmp/egm-dns.log 2>&1 & echo $!')
 
 sleep 0.2
 
@@ -201,6 +217,53 @@ iptables_state=$(ip netns exec "$router_ns" iptables-save)
 printf '%s\n' "$iptables_state" | grep -Fq ':FOREIGN_LAB - [0:0]' || fail "iptables rollback removed a foreign chain"
 if printf '%s\n' "$iptables_state" | grep -Fq ':EGM_PREROUTING - [0:0]'; then fail "iptables rollback left owned NAT chain"; fi
 if printf '%s\n' "$iptables_state" | grep -Fq ':EGM_FORWARD - [0:0]'; then fail "iptables rollback left owned filter chain"; fi
+
+baseline_v4=$(printf 'route-v4-baseline' | ip netns exec "$client_ns" timeout 3 socat - TCP:10.203.2.2:8080,connect-timeout=2)
+[ "$baseline_v4" = "route-v4-baseline" ] || fail "route lab IPv4 baseline failed"
+baseline_v6=$(printf 'route-v6-baseline' | ip netns exec "$client_ns" timeout 3 socat - TCP6:[2001:db8:203:2::2]:8081,connect-timeout=2)
+[ "$baseline_v6" = "route-v6-baseline" ] || fail "route lab IPv6 baseline failed"
+baseline_dns=$(printf 'route-dns-baseline' | ip netns exec "$client_ns" timeout 3 socat -T2 - UDP:10.203.1.1:53)
+[ "$baseline_dns" = "route-dns-baseline" ] || fail "route lab local DNS baseline failed"
+
+"$routing_probe" "$route_candidate_dir"
+route_tun=$(tr -d '\r\n' <"$route_candidate_dir/tun-name")
+route_table=$(tr -d '\r\n' <"$route_candidate_dir/table")
+route_priority=$(tr -d '\r\n' <"$route_candidate_dir/priority")
+ip -n "$router_ns" link add "$route_tun" type dummy
+ip -n "$router_ns" link set "$route_tun" up
+ip netns exec "$router_ns" nft --check --file "$route_candidate_dir/routing.nft"
+ip netns exec "$router_ns" nft --file "$route_candidate_dir/routing.nft"
+ip netns exec "$router_ns" ip -4 -batch "$route_candidate_dir/routing-v4.batch"
+ip netns exec "$router_ns" ip -6 -batch "$route_candidate_dir/routing-v6.batch"
+ip netns exec "$router_ns" ip -j -4 rule show priority "$route_priority" | grep -Fq '"protocol":"242"' || fail "owned IPv4 route rule marker missing"
+ip netns exec "$router_ns" ip -j -6 rule show priority "$route_priority" | grep -Fq '"protocol":"242"' || fail "owned IPv6 route rule marker missing"
+
+ip -n "$router_ns" link delete "$route_tun"
+endpoint_result=$(printf 'endpoint-main-ok' | ip netns exec "$router_ns" timeout 3 socat - TCP:10.203.2.3:8080,connect-timeout=2)
+[ "$endpoint_result" = "endpoint-main-ok" ] || fail "outbound endpoint main-table path was captured"
+
+capture_path="$route_candidate_dir/direct-leak.pcap"
+ip netns exec "$router_ns" timeout 8 tcpdump -U -n -i r1 -w "$capture_path" 'src host 10.203.1.2 or src host 2001:db8:203:1::2' >/dev/null 2>&1 &
+capture_pid=$!
+sleep 0.3
+if printf 'must-not-leak-v4' | ip netns exec "$client_ns" timeout 2 socat - TCP:10.203.2.2:8080,connect-timeout=1 >/dev/null 2>&1; then fail "killed outbound leaked IPv4 traffic to main routing"; fi
+if printf 'must-not-leak-v6' | ip netns exec "$client_ns" timeout 2 socat - TCP6:[2001:db8:203:2::2]:8081,connect-timeout=1 >/dev/null 2>&1; then fail "blocked IPv6 traffic bypassed the selected route"; fi
+dns_leak=$(printf 'must-not-leak-dns' | ip netns exec "$client_ns" timeout 2 socat -T1 - UDP:10.203.1.1:53 2>/dev/null || true)
+[ "$dns_leak" != "must-not-leak-dns" ] || fail "follow-outbound DNS reached the host resolver"
+if wait "$capture_pid"; then fail "client packet escaped through the direct egress interface"; fi
+captured_packets=$(ip netns exec "$router_ns" tcpdump -n -r "$capture_path" 2>/dev/null | wc -l)
+[ "$captured_packets" -eq 0 ] || fail "packet capture observed direct client egress"
+route_ruleset=$(ip netns exec "$router_ns" nft list table inet egm_egress)
+printf '%s\n' "$route_ruleset" | grep -E 'counter packets [1-9][0-9]* bytes [1-9][0-9]*.*egm_lab_route_ipv4_kill' >/dev/null || fail "IPv4 kill-switch counter did not increase"
+printf '%s\n' "$route_ruleset" | grep -E 'counter packets [1-9][0-9]* bytes [1-9][0-9]*.*egm_lab_route_dns_input' >/dev/null || fail "DNS input leak counter did not increase"
+
+ip netns exec "$router_ns" ip -4 rule delete priority "$route_priority" table "$route_table" protocol 242
+ip netns exec "$router_ns" ip -6 rule delete priority "$route_priority" table "$route_table" protocol 242
+ip netns exec "$router_ns" ip -4 route flush table "$route_table" proto 242
+ip netns exec "$router_ns" ip -6 route flush table "$route_table" proto 242
+ip netns exec "$router_ns" nft delete table inet egm_egress
+ip netns exec "$router_ns" nft list table inet foreign_lab >/dev/null || fail "route rollback removed a foreign nftables table"
+printf 'PASS: killed outbound blocks direct IPv4, DNS, and IPv6 leaks while endpoint and foreign state remain reachable\n'
 
 haproxy_primary_pid=$(ip netns exec "$server_ns" sh -c 'socat TCP-LISTEN:18081,reuseaddr,fork SYSTEM:"printf primary" >/tmp/egm-haproxy-primary.log 2>&1 & echo $!')
 haproxy_secondary_pid=$(ip netns exec "$server_ns" sh -c 'socat TCP-LISTEN:18082,reuseaddr,fork SYSTEM:"printf secondary" >/tmp/egm-haproxy-secondary.log 2>&1 & echo $!')

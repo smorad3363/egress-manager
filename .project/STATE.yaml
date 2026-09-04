@@ -2,16 +2,16 @@ schema_version: 1
 
 project: egress-manager
 
-phase: 8
-phase_name: interface-subnet-egress-routing
+phase: 9
+phase_name: xray-marzban-3x-ui-adapter
 
-active_spec: specs/008-interface-subnet-egress-routing/spec.md
-active_task: isolated-route-no-leak-packet-tests
+active_spec: specs/009-xray-panel-adapter/spec.md
+active_task: xray-panel-read-only-discovery-model
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: extend the disposable namespace lab to prove killed outbound, DNS, and IPv6 traffic cannot escape while management and outbound endpoint paths remain reachable
+next_action: implement bounded typed discovery for standalone Xray, Marzban, and 3x-ui installations, including version, service, config roots, tags, ownership, and supported mutation strategy
 
 dirty_work_expected: false
 
@@ -73,7 +73,10 @@ recent_decisions:
   - Apply installs the new kill-switch table before moving traffic, verifies TUN creation before policy rules, and restores prior sing-box, policy routes, nftables, and state after failure or restart.
   - Route plan and apply rebuild inside egressd; HTTP apply requires all six reviewed state/candidate hashes and never accepts a client-supplied native candidate.
   - Existing outbound-only apply preserves active routed TUN intents from the owned routing state instead of silently removing them.
+  - Phase 8 no-leak tests use a dual-stack source subnet, kill the generated TUN, and assert zero direct-egress client packets with tcpdump while DNS and IPv6 are blocked.
+  - Xray-family integrations begin read-only and remain read-only unless a native managed-fragment or documented API boundary is positively identified.
 
 touched_areas:
-  - route API and operations UI
-  - isolated route kill-switch and leak tests
+  - Xray, Marzban, and 3x-ui discovery
+  - native Xray routing adapter boundary
+  - external configuration change detection

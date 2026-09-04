@@ -4,7 +4,7 @@ tags:
   - egress-manager
   - specification
   - phase/8
-status: ready
+status: complete
 related:
   - "[[PROJECT_ROADMAP]]"
   - "[[CONSTITUTION]]"
@@ -81,3 +81,4 @@ Route traffic selected by ingress interface or source subnet through an enabled 
 - Apply installs leak controls before restarting the dedicated sing-box service, verifies every generated TUN, replaces only protocol-`242` policy state, commits the owned state atomically, and rolls back partial or interrupted operations in a safety-preserving order.
 - Authenticated IPC and CSRF-protected HTTP now expose revisioned route CRUD plus plan/apply; apply rebuilds desired state inside `egressd` and requires exact sing-box, routing, native, and combined review hashes.
 - The responsive route operations console supports interface/subnet sources, primary/fallback selection, explicit failure/DNS/IPv4/IPv6 policy, kill switch, MTU/MSS, enable/disable, editing, deletion, and public-only atomic review.
+- The disposable dual-stack namespace lab removes the selected TUN, confirms IPv4 cannot fall through to the main table, confirms follow-outbound DNS cannot reach the host resolver, confirms IPv6 block cannot bypass, and observes zero client packets on the direct egress with `tcpdump`; endpoint reachability and foreign nftables state survive, twice.
