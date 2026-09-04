@@ -1,0 +1,20 @@
+{
+  "inbounds": [
+    {
+      "tag": "inbound-443",
+      "listen": "127.0.0.1",
+      "port": 10443,
+      "protocol": "socks"
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "IPIfNonMatch",
+    "rules": []
+  }
+}

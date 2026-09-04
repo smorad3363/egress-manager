@@ -8,6 +8,7 @@ import { OutboundsManager } from "./components/OutboundsManager";
 import { HAProxyManager } from "./components/HAProxyManager";
 import { PortForwards } from "./components/PortForwards";
 import { RoutesManager } from "./components/RoutesManager";
+import { XrayManager } from "./components/XrayManager";
 import { Badge } from "./components/ui/Badge";
 import { Button } from "./components/ui/Button";
 import { Card } from "./components/ui/Card";
@@ -16,7 +17,7 @@ import { SelectField, TextField } from "./components/ui/Field";
 import { Toast } from "./components/ui/Toast";
 
 const navigation = [
-  ["Dashboard", "dashboard"], ["Outbounds", "globe"], ["Routes", "route"],
+  ["Dashboard", "dashboard"], ["Outbounds", "globe"], ["Routes", "route"], ["Xray", "network"],
   ["Port Forward", "arrow"], ["HAProxy", "balance"], ["Firewall", "firewall"],
   ["Network", "network"], ["Logs", "logs"], ["Settings", "settings"],
 ] as const;
@@ -41,6 +42,7 @@ function Dashboard() {
   const [newHAProxyRequest, setNewHAProxyRequest] = useState(0);
   const [newOutboundRequest, setNewOutboundRequest] = useState(0);
   const [newRouteRequest, setNewRouteRequest] = useState(0);
+  const [newXrayRequest, setNewXrayRequest] = useState(0);
   const reduceMotion = useReducedMotion();
 
   const notify = () => {
@@ -77,11 +79,11 @@ function Dashboard() {
           <Button className="mobile-menu" size="icon" variant="ghost" aria-label="Open navigation" onClick={() => setMobileNavigation(true)}><Icon name="menu" /></Button>
           <div><p className="breadcrumb">Console / {active}</p><h1>{active}</h1></div>
           <label className="command-search"><Icon name="search" /><span className="sr-only">Search console</span><input placeholder="Search" /><kbd>⌘ K</kbd></label>
-          <Button variant="primary" onClick={() => active === "Port Forward" ? setNewForwardRequest((value) => value + 1) : active === "HAProxy" ? setNewHAProxyRequest((value) => value + 1) : active === "Outbounds" ? setNewOutboundRequest((value) => value + 1) : active === "Routes" ? setNewRouteRequest((value) => value + 1) : setDialogOpen(true)}><Icon name="plus" />{active === "Port Forward" ? "New forward" : active === "HAProxy" ? "New frontend" : active === "Outbounds" ? "Import outbound" : "New route"}</Button>
+          <Button variant="primary" onClick={() => active === "Port Forward" ? setNewForwardRequest((value) => value + 1) : active === "HAProxy" ? setNewHAProxyRequest((value) => value + 1) : active === "Outbounds" ? setNewOutboundRequest((value) => value + 1) : active === "Routes" ? setNewRouteRequest((value) => value + 1) : active === "Xray" ? setNewXrayRequest((value) => value + 1) : setDialogOpen(true)}><Icon name="plus" />{active === "Port Forward" ? "New forward" : active === "HAProxy" ? "New frontend" : active === "Outbounds" ? "Import outbound" : active === "Xray" ? "New binding" : "New route"}</Button>
         </header>
 
         <div className="content">
-          {active === "Network" ? <NetworkInventory /> : active === "Port Forward" ? <PortForwards createRequest={newForwardRequest} /> : active === "HAProxy" ? <HAProxyManager createRequest={newHAProxyRequest} /> : active === "Outbounds" ? <OutboundsManager createRequest={newOutboundRequest} /> : active === "Routes" ? <RoutesManager createRequest={newRouteRequest} /> : <>
+          {active === "Network" ? <NetworkInventory /> : active === "Port Forward" ? <PortForwards createRequest={newForwardRequest} /> : active === "HAProxy" ? <HAProxyManager createRequest={newHAProxyRequest} /> : active === "Outbounds" ? <OutboundsManager createRequest={newOutboundRequest} /> : active === "Routes" ? <RoutesManager createRequest={newRouteRequest} /> : active === "Xray" ? <XrayManager createRequest={newXrayRequest} /> : <>
           <section className="page-heading" aria-labelledby="overview-title">
             <div><p className="eyebrow">LIVE OVERVIEW</p><h2 id="overview-title">Traffic is flowing normally.</h2><p>Policy and transport health across this gateway.</p></div>
             <div className="page-heading__meta"><span>Last reconciled</span><strong>12 seconds ago</strong></div>

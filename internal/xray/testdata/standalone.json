@@ -1,0 +1,30 @@
+{
+  "inbounds": [
+    {
+      "tag": "client-in",
+      "listen": "127.0.0.1",
+      "port": 10808,
+      "protocol": "socks"
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "direct",
+      "protocol": "freedom"
+    },
+    {
+      "tag": "blocked",
+      "protocol": "blackhole"
+    }
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "ip": ["geoip:private"],
+        "outboundTag": "blocked"
+      }
+    ]
+  }
+}

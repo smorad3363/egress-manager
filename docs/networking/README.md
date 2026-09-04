@@ -9,3 +9,7 @@ status: active
 # Networking Notes
 
 All test and implementation notes must preserve ownership boundaries and the transaction flow defined in [[PROJECT_ROADMAP#17. NETWORK SAFETY RULES]].
+
+## Operator guides
+
+- [[XRAY_INTEGRATION|Xray, Marzban, and 3x-ui integration]]

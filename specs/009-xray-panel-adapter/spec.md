@@ -4,7 +4,7 @@ tags:
   - egress-manager
   - specification
   - phase/9
-status: ready
+status: complete
 related:
   - "[[PROJECT_ROADMAP]]"
   - "[[CONSTITUTION]]"
@@ -71,6 +71,10 @@ Discover compatible Xray installations and safely bind existing inbound tags to 
 - Added native validation in a private temporary confdir, encrypted transaction snapshots, repeated foreign/owned change detection, atomic fragment replacement or removal, bounded `xray.service` restart and verification, rollback, and restart recovery.
 - Added revisioned native binding persistence with keyset pagination and a partial unique index enforcing one enabled binding per inbound tag.
 - Added privileged discovery and exact-three-hash plan/apply IPC, authenticated and CSRF-protected HTTP discovery/binding CRUD/plan/apply, and fail-closed daemon startup recovery against a freshly rediscovered standalone boundary.
+- Added the responsive Xray operations console with explicit standalone writable and Marzban/3x-ui read-only states, revisioned binding CRUD, private-candidate review, and exact-three-hash apply confirmation.
+- Added representative standalone Xray, Marzban, and 3x-ui fixtures and validated the generated fragment with the pinned official Xray v26.7.28 binary and published SHA-256 digest.
+- Added the operator runbook covering discovery, ownership, loader requirements, review/apply, rollback/recovery, and unsupported panel-managed mutations.
+- Phase 9 exit gate passed: Go test/vet, race checks, frontend typecheck/lint/build, nine Playwright scenarios with visual review, representative fixtures, and pinned native Xray validation are green.
 
 ## Integration References
 

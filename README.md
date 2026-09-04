@@ -21,3 +21,5 @@ pnpm --dir web build
 Project recovery state lives in `.project/STATE.yaml`.
 
 Runtime configuration and secure administrator provisioning are documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+
+Xray, Marzban, and 3x-ui ownership boundaries and operations are documented in [docs/networking/XRAY_INTEGRATION.md](docs/networking/XRAY_INTEGRATION.md).

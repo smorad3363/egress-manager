@@ -6,7 +6,7 @@ test("desktop shell exposes navigation, data, dialog, and keyboard focus", async
   if (process.env.VISUAL_QA) {
     await page.screenshot({ path: "test-results/dashboard.png", fullPage: true });
   }
-  await expect(page.getByLabel("Primary navigation").getByRole("button")).toHaveCount(9);
+  await expect(page.getByLabel("Primary navigation").getByRole("button")).toHaveCount(10);
   await expect(page.getByRole("table")).toBeVisible();
 
   await page.keyboard.press("Tab");
@@ -220,4 +220,47 @@ test("route console manages explicit policy and applies only reviewed hashes", a
   await review.getByRole("button", { name: "Apply atomically" }).click();
   await expect(review).toBeHidden();
   expect(calls).toContain("POST /api/v1/routes/apply");
+});
+
+test("Xray console separates panel read-only discovery from reviewed native apply", async ({ page }) => {
+  const calls: string[] = [];
+  const stored = { binding: { id: "vless_native", inbound_tag: "vless-in", outbound_tag: "proxy-de", enabled: true }, revision: 2 };
+  await page.addInitScript(() => window.sessionStorage.setItem("egress.csrf", "test-csrf-token"));
+  await page.route("**/api/v1/xray/**", async (route) => {
+    const request = route.request(); const url = new URL(request.url()); calls.push(`${request.method()} ${url.pathname}`);
+    if (request.method() !== "GET") expect(request.headers()["x-csrf-token"]).toBe("test-csrf-token");
+    if (url.pathname.endsWith("/discovery")) {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ installations: [
+        { kind: "standalone", config_path: "/etc/xray/config.json", config_hash: "standalone-config", config_bytes: 512, xray_executable: "xray", xray_version: "Xray 26.7.28", service_name: "xray.service", service_loaded: true, service_active: true, loader: "confdir", managed_path: "/etc/xray/zzzz-egress-manager-routing.json", inbound_tags: ["vless-in", "trojan-in"], outbound_tags: ["direct", "proxy-de"], ownership: "foreign", mutation_strategy: "managed_fragment", limitations: ["Only the dedicated Egress Manager routing fragment may be changed; all other Xray files remain foreign-owned."] },
+        { kind: "marzban", config_path: "/var/lib/marzban/xray_config.json", config_hash: "marzban-config", config_bytes: 1024, xray_version: "Xray 26.7.28", service_name: "marzban.service", service_loaded: true, service_active: true, loader: "single_file_or_unproven", inbound_tags: ["marzban-in"], outbound_tags: ["direct"], ownership: "foreign", mutation_strategy: "read_only", limitations: ["Marzban owns and may regenerate xray_config.json; direct file mutation is disabled."] },
+      ], warnings: [] }) }); return;
+    }
+    if (request.method() === "GET") { await route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [stored], next_cursor: "" }) }); return; }
+    if (url.pathname.endsWith("/plan")) { await route.fulfill({ contentType: "application/json", body: JSON.stringify({ engine: "xray", service_name: "xray.service", managed_path: "/etc/xray/zzzz-egress-manager-routing.json", foreign_state_hash: "foreign-hash", fragment_state_hash: "fragment-hash", candidate_hash: "candidate-hash", candidate_exists: true, enabled_bindings: 1, actions: [{ kind: "replace", resource: "/etc/xray/zzzz-egress-manager-routing.json", summary: "Atomically install the dedicated Xray routing fragment." }, { kind: "route", resource: "vless_native", summary: "Prepend one native inboundTag-to-outboundTag rule." }] }) }); return; }
+    if (url.pathname.endsWith("/apply")) { expect(await request.postDataJSON()).toEqual({ expected_foreign_state_hash: "foreign-hash", expected_fragment_state_hash: "fragment-hash", expected_candidate_hash: "candidate-hash" }); await route.fulfill({ contentType: "application/json", body: JSON.stringify({ transaction_id: "xray_test", state: "COMMITTED", candidate_hash: "candidate-hash" }) }); return; }
+    await route.fulfill({ status: request.method() === "POST" ? 201 : 200, contentType: "application/json", body: JSON.stringify(stored) });
+  });
+  await page.goto("/");
+  await page.getByLabel("Primary navigation").getByRole("button", { name: "Xray" }).click();
+  await expect(page.getByRole("heading", { name: "Native Xray routing" })).toBeVisible();
+  await expect(page.getByText("Marzban owns and may regenerate xray_config.json; direct file mutation is disabled.")).toBeVisible();
+  await expect(page.getByText("vless_native")).toBeVisible();
+  if (process.env.VISUAL_QA) await page.screenshot({ path: "test-results/xray.png", fullPage: true });
+  await page.locator(".topbar").getByRole("button", { name: "New binding" }).click();
+  const editor = page.getByRole("dialog");
+  await expect(editor.getByRole("heading", { name: "Create Xray binding" })).toBeVisible();
+  await editor.getByLabel("Binding ID").fill("trojan_native");
+  await editor.getByLabel("Inbound tag").selectOption("trojan-in");
+  await editor.getByLabel("Outbound tag").selectOption("direct");
+  await editor.getByRole("button", { name: "Save binding" }).click();
+  await expect(editor).toBeHidden();
+  expect(calls).toContain("POST /api/v1/xray/bindings");
+  await page.getByRole("button", { name: "Review & apply" }).click();
+  const review = page.getByRole("dialog");
+  await expect(review.getByRole("heading", { name: "Review native Xray plan" })).toBeVisible();
+  await expect(review.getByText("Foreign files stay untouched")).toBeVisible();
+  await expect(review.getByText("candidate-hash")).toHaveCount(0);
+  await review.getByRole("button", { name: "Apply & restart Xray" }).click();
+  await expect(review).toBeHidden();
+  expect(calls).toContain("POST /api/v1/xray/apply");
 });

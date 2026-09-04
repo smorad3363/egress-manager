@@ -194,6 +194,23 @@ td code { color: #b7c3d1; font-size: 0.66rem; }
 .outbound-health strong { color: var(--muted-strong); font-weight: 650; }
 .outbound-card .row-actions { flex-wrap: wrap; justify-content: flex-end; }
 .route-card header code { display: inline-block; margin-top: 0.35rem; color: var(--accent); font-size: 0.62rem; }
+.xray-layout { display: grid; grid-template-columns: minmax(17rem, 0.72fr) minmax(0, 1.28fr); gap: 0.8rem; margin-top: 0.8rem; }
+.xray-installations { display: grid; align-content: start; gap: 0.8rem; }
+.xray-installations > .card-header { padding: 0 0.1rem; }
+.xray-installation { min-width: 0; padding: 1rem; }
+.xray-installation > header { display: flex; align-items: start; justify-content: space-between; gap: 0.7rem; }
+.xray-installation h3 { margin-top: 0.25rem; font-size: 0.84rem; }
+.xray-path { display: block; overflow: hidden; margin-top: 0.7rem; color: var(--accent); font-size: 0.6rem; text-overflow: ellipsis; white-space: nowrap; }
+.xray-installation dl { display: grid; grid-template-columns: 1fr 1fr; margin: 0.8rem 0; border-block: 1px solid var(--border); }
+.xray-installation dl div { min-width: 0; padding: 0.55rem 0; }
+.xray-installation dt { color: var(--muted); font-size: 0.57rem; }
+.xray-installation dd { overflow: hidden; margin: 0.15rem 0 0; color: var(--muted-strong); font-size: 0.63rem; text-overflow: ellipsis; white-space: nowrap; }
+.xray-limitations { display: grid; gap: 0.45rem; }
+.xray-limitations p { display: grid; grid-template-columns: 0.8rem 1fr; gap: 0.45rem; color: var(--muted); font-size: 0.59rem; line-height: 1.45; }
+.xray-limitations svg { width: 0.75rem; margin-top: 0.05rem; color: var(--warning); }
+.xray-bindings { min-width: 0; margin-top: 0; }
+.xray-bindings > .card-header { margin-bottom: 1rem; }
+.xray-bindings .table-scroll { margin-inline: -1.05rem; }
 .route-toggles { display: flex; flex-wrap: wrap; gap: 1.1rem; color: var(--muted-strong); font-size: 0.68rem; }
 .route-toggles label { display: flex; align-items: center; gap: 0.45rem; }
 .route-toggles input { accent-color: var(--accent); }
@@ -285,6 +302,7 @@ td code { color: #b7c3d1; font-size: 0.66rem; }
   .capability-grid { grid-template-columns: repeat(2, 1fr); }
   .backend-grid { grid-template-columns: repeat(2, 1fr); }
   .outbound-grid { grid-template-columns: 1fr; }
+  .xray-layout { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 760px) {
