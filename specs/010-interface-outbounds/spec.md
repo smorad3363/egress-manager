@@ -99,3 +99,7 @@ Extend the generic outbound model with project-owned kernel WireGuard and OpenVP
 
 - Phase specification created from the authoritative English roadmap after Phase 9 acceptance passed.
 - Graphify confirmed that the generic outbound abstraction connects to interface/subnet routing through the safe network mutation transaction and native validation boundaries.
+- Extended the domain with the native interface adapter and OpenVPN type while preserving sing-box WireGuard compatibility and enforcing adapter/type combinations.
+- Added deterministic, bounded, secret-safe WireGuard and OpenVPN imports. WireGuard rejects hooks, automatic routing/DNS, multiple peers, and unsafe directives; OpenVPN accepts only TUN clients with one explicit remote, inline credentials, and a strict non-executable directive allowlist.
+- Normalized OpenVPN profiles force an owned deterministic TUN name, `nobind`, and `route-nopull`; normalized credentials and complete profiles remain in the existing encrypted credential boundary.
+- Reused the existing revisioned outbound table and `(enabled, adapter, id)` covering lookup index; no migration or additional write amplification is required for native adapter persistence.

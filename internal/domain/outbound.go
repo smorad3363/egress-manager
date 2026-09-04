@@ -23,6 +23,7 @@ const (
 	OutboundTUIC        OutboundType = "tuic"
 	OutboundSOCKS5      OutboundType = "socks5"
 	OutboundWireGuard   OutboundType = "wireguard"
+	OutboundOpenVPN     OutboundType = "openvpn"
 )
 
 var outboundTypes = []OutboundType{
@@ -34,14 +35,18 @@ var outboundTypes = []OutboundType{
 	OutboundTUIC,
 	OutboundSOCKS5,
 	OutboundWireGuard,
+	OutboundOpenVPN,
 }
 
 type OutboundAdapter string
 
-const OutboundAdapterSingBox OutboundAdapter = "sing-box"
+const (
+	OutboundAdapterSingBox   OutboundAdapter = "sing-box"
+	OutboundAdapterInterface OutboundAdapter = "interface"
+)
 
 func (adapter OutboundAdapter) Validate() error {
-	if adapter != OutboundAdapterSingBox {
+	if adapter != OutboundAdapterSingBox && adapter != OutboundAdapterInterface {
 		return fmt.Errorf("unsupported outbound adapter %q", adapter)
 	}
 	return nil
@@ -186,6 +191,17 @@ func (outbound Outbound) Validate() error {
 	if !outbound.Capabilities.TCP && !outbound.Capabilities.UDP {
 		capabilitiesError = fmt.Errorf("outbound must support TCP, UDP, or both")
 	}
+	var adapterTypeError error
+	switch outbound.Adapter {
+	case OutboundAdapterSingBox:
+		if outbound.Type == OutboundOpenVPN {
+			adapterTypeError = fmt.Errorf("openvpn outbound requires the interface adapter")
+		}
+	case OutboundAdapterInterface:
+		if outbound.Type != OutboundWireGuard && outbound.Type != OutboundOpenVPN {
+			adapterTypeError = fmt.Errorf("interface adapter supports only wireguard and openvpn outbounds")
+		}
+	}
 
 	return joinErrors(
 		outbound.ID.Validate("outbound id"),
@@ -195,6 +211,7 @@ func (outbound Outbound) Validate() error {
 		outbound.Server.Validate(),
 		outbound.Health.Validate(),
 		capabilitiesError,
+		adapterTypeError,
 		errorsFrom(secretErrors),
 	)
 }
@@ -209,6 +226,8 @@ func requiredOutboundSecrets(kind OutboundType) []string {
 		return []string{"uuid", "password"}
 	case OutboundWireGuard:
 		return []string{"private_key"}
+	case OutboundOpenVPN:
+		return []string{"profile"}
 	default:
 		return nil
 	}

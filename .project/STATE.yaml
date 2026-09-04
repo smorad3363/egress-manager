@@ -6,12 +6,12 @@ phase: 10
 phase_name: interface-outbounds
 
 active_spec: specs/010-interface-outbounds/spec.md
-active_task: interface-outbound-domain-and-import
+active_task: native-interface-lifecycle
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: extend the generic outbound model and add bounded secret-safe WireGuard and OpenVPN import parsers
+next_action: implement private native lifecycle plans and executors for kernel WireGuard and project-owned OpenVPN systemd clients
 
 dirty_work_expected: false
 
@@ -95,6 +95,9 @@ recent_decisions:
   - Native VPNs extend the generic outbound abstraction through a separate interface adapter instead of being forced through sing-box.
   - Interface-outbound imports reject configuration features that can mutate foreign routes, DNS, execute programs, or escape the owned lifecycle boundary.
   - Native interface lifecycle must be prepared before policy traffic moves and rolled back after owned route state in reverse dependency order.
+  - The existing outbound table and enabled-adapter-ID index already cover native adapter persistence, so Phase 10 adds no schema migration.
+  - WireGuard imports accept exactly one peer and reject wg-quick hooks, DNS, SaveConfig, and automatic table ownership.
+  - OpenVPN imports accept only one TUN client remote with inline credential material and normalize `nobind`, `route-nopull`, and a deterministic owned device name.
 
 touched_areas:
   - generic outbound abstraction

@@ -73,6 +73,33 @@ func TestOutboundHealthValidation(t *testing.T) {
 	}
 }
 
+func TestOutboundAdapterAndTypeCompatibility(t *testing.T) {
+	t.Parallel()
+	valid := validOutbound()
+	valid.Adapter = OutboundAdapterInterface
+	valid.Type = OutboundWireGuard
+	valid.SecretMetadata = []string{"private_key"}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("interface WireGuard rejected: %v", err)
+	}
+	valid.Type = OutboundOpenVPN
+	valid.SecretMetadata = []string{"profile"}
+	if err := valid.Validate(); err != nil {
+		t.Fatalf("interface OpenVPN rejected: %v", err)
+	}
+	valid.Type = OutboundVLESS
+	valid.SecretMetadata = []string{"uuid"}
+	if err := valid.Validate(); err == nil {
+		t.Fatal("interface VLESS accepted")
+	}
+	valid.Adapter = OutboundAdapterSingBox
+	valid.Type = OutboundOpenVPN
+	valid.SecretMetadata = []string{"profile"}
+	if err := valid.Validate(); err == nil {
+		t.Fatal("sing-box OpenVPN accepted")
+	}
+}
+
 func TestOutboundJSONContainsMetadataButNoSecretValues(t *testing.T) {
 	t.Parallel()
 
