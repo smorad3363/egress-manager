@@ -11,7 +11,7 @@ status: in_progress
 
 last_green_ref: HEAD
 
-next_action: add ownership-safe route runtime reconciliation to the shared recovery workflow and disposable reboot convergence tests; native-interface reconciliation now checks live runtime
+next_action: add exact route/rule and nftables runtime comparison before wiring ownership-safe route reconciliation into shared recovery; JSON inventory parsing is hardened, but protocol presence alone is not convergence proof
 
 dirty_work_expected: false
 
@@ -19,6 +19,7 @@ tests:
   last_run: 2026-09-05
   result: pass
   commands:
+    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test -race ./internal/routeengine && go vet ./internal/routeengine"
     - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test -race ./internal/interfaceoutbound ./internal/app ./internal/reliability"
     - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test ./... && go vet ./..."
     - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test -race ./..."

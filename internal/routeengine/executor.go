@@ -440,11 +440,13 @@ func (executor Executor) verify(ctx context.Context, plan Plan) error {
 		}
 		for _, family := range []string{"-4", "-6"} {
 			rules, err := executor.output(ctx, system.Command{Name: "ip", Args: []string{"-j", family, "rule", "show", "priority", strconv.FormatUint(uint64(intent.RulePriority), 10)}})
-			if err != nil || !containsOwnedProtocol(rules) {
+			ownedRules, rulesErr := inspectOwnedProtocol(rules)
+			if err != nil || rulesErr != nil || !ownedRules {
 				return fmt.Errorf("owned %s policy rule for route %q is missing", family, intent.ID)
 			}
 			routes, err := executor.output(ctx, system.Command{Name: "ip", Args: []string{"-j", family, "route", "show", "table", strconv.FormatUint(uint64(intent.RoutingTable), 10)}})
-			if err != nil || !containsOwnedProtocol(routes) {
+			ownedRoutes, routesErr := inspectOwnedProtocol(routes)
+			if err != nil || routesErr != nil || !ownedRoutes {
 				return fmt.Errorf("owned %s route table for route %q is missing", family, intent.ID)
 			}
 		}
@@ -467,14 +469,33 @@ func (executor Executor) verifyTUNs(ctx context.Context, candidate []byte) error
 
 func (executor Executor) verifyTUN(ctx context.Context, name string) error {
 	output, err := executor.output(ctx, system.Command{Name: "ip", Args: []string{"-j", "link", "show", "dev", name}})
-	if err != nil || !bytes.Contains(output, []byte(`"ifname":"`+name+`"`)) {
+	var links []struct {
+		Name string `json:"ifname"`
+	}
+	if err != nil || json.Unmarshal(output, &links) != nil || len(links) != 1 || links[0].Name != name {
 		return fmt.Errorf("owned TUN %q is missing", name)
 	}
 	return nil
 }
 
-func containsOwnedProtocol(output []byte) bool {
-	return bytes.Contains(output, []byte(`"protocol":"`+routing.OwnedRouteProtocol+`"`))
+func inspectOwnedProtocol(output []byte) (bool, error) {
+	var entries []struct {
+		Protocol json.RawMessage `json:"protocol"`
+	}
+	if err := json.Unmarshal(output, &entries); err != nil || entries == nil {
+		return false, fmt.Errorf("invalid policy routing inventory")
+	}
+	for _, entry := range entries {
+		var protocol string
+		if json.Unmarshal(entry.Protocol, &protocol) == nil && protocol == routing.OwnedRouteProtocol {
+			return true, nil
+		}
+		var number uint32
+		if json.Unmarshal(entry.Protocol, &number) == nil && strconv.FormatUint(uint64(number), 10) == routing.OwnedRouteProtocol {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (executor Executor) removeOwnedIP(ctx context.Context, intents []routing.RouteIntent) error {
@@ -488,11 +509,24 @@ func (executor Executor) removeOwnedIP(ctx context.Context, intents []routing.Ro
 			if err != nil {
 				return err
 			}
-			if containsOwnedProtocol(rules) {
+			ownedRules, err := inspectOwnedProtocol(rules)
+			if err != nil {
+				return err
+			}
+			if ownedRules {
 				return fmt.Errorf("owned %s policy rule at priority %s remains after removal", family, priority)
 			}
 			routes, routeErr := executor.output(ctx, system.Command{Name: "ip", Args: []string{"-j", family, "route", "show", "table", table}})
-			if routeErr == nil && containsOwnedProtocol(routes) {
+			if routeErr != nil {
+				// iproute2 can report an absent FIB table after its last route
+				// is removed. Preserve the existing empty-table handling.
+				continue
+			}
+			ownedRoutes, err := inspectOwnedProtocol(routes)
+			if err != nil {
+				return err
+			}
+			if ownedRoutes {
 				return fmt.Errorf("owned %s routes in table %s remain after removal", family, table)
 			}
 		}
