@@ -19,12 +19,14 @@ const (
 )
 
 type Config struct {
-	ListenAddress     string `json:"listen_address"`
-	ListenPort        uint16 `json:"listen_port"`
-	DataDirectory     string `json:"data_directory"`
-	DatabasePath      string `json:"database_path"`
-	ControlSocketPath string `json:"control_socket_path"`
-	SessionCookieName string `json:"session_cookie_name"`
+	ListenAddress      string `json:"listen_address"`
+	ListenPort         uint16 `json:"listen_port"`
+	DataDirectory      string `json:"data_directory"`
+	DatabasePath       string `json:"database_path"`
+	ControlSocketPath  string `json:"control_socket_path"`
+	SessionCookieName  string `json:"session_cookie_name"`
+	TLSCertificatePath string `json:"tls_certificate_path,omitempty"`
+	TLSPrivateKeyPath  string `json:"tls_private_key_path,omitempty"`
 }
 
 func Default(dataDirectory string) Config {
@@ -51,6 +53,15 @@ func (configuration Config) Validate() error {
 	}
 	if strings.TrimSpace(configuration.ControlSocketPath) == "" || !filepath.IsAbs(configuration.ControlSocketPath) {
 		errs = append(errs, fmt.Errorf("control_socket_path must be absolute"))
+	}
+	if (configuration.TLSCertificatePath == "") != (configuration.TLSPrivateKeyPath == "") {
+		errs = append(errs, fmt.Errorf("TLS certificate and private key paths must be configured together"))
+	}
+	if configuration.TLSCertificatePath != "" && (!filepath.IsAbs(configuration.TLSCertificatePath) || !filepath.IsAbs(configuration.TLSPrivateKeyPath)) {
+		errs = append(errs, fmt.Errorf("TLS certificate and private key paths must be absolute"))
+	}
+	if address.IsValid() && !address.IsLoopback() && configuration.TLSCertificatePath == "" {
+		errs = append(errs, fmt.Errorf("non-loopback listen_address requires TLS"))
 	}
 	if configuration.SessionCookieName == "" || len(configuration.SessionCookieName) > 64 {
 		errs = append(errs, fmt.Errorf("session_cookie_name must be 1 to 64 bytes"))

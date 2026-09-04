@@ -6,12 +6,12 @@ phase: 2
 phase_name: backend-foundation
 
 active_spec: specs/002-backend-foundation/spec.md
-active_task: logging-health-and-api-errors
+active_task: service-runtime-wiring
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: implement structured redacted logging, operation IDs, typed API errors, and health endpoint
+next_action: wire egressd and egress-web runtimes with authenticated IPC, TLS, graceful shutdown, and integration tests
 
 dirty_work_expected: true
 
@@ -19,7 +19,7 @@ tests:
   last_run: 2026-09-04
   result: pass
   commands:
-    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test ./internal/config ./internal/database && go vet ./internal/config ./internal/database"
+    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test ./internal/api ./internal/ipc ./internal/logging ./internal/config ./internal/auth ./internal/database && go vet ./internal/api ./internal/ipc ./internal/logging ./internal/config ./internal/auth ./internal/database"
 
 network_transaction:
   status: none
@@ -38,5 +38,7 @@ recent_decisions:
   - SQLite uses go-sqlite3 with CGO; rationale and build risk are recorded in ADR 0001.
 
 touched_areas:
-  - internal/auth
-  - internal/database session repository
+  - internal/api
+  - internal/ipc
+  - internal/logging
+  - internal/config TLS and shared key validation

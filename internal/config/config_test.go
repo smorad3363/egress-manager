@@ -2,6 +2,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/rand"
 	"net"
 	"net/netip"
 	"os"
@@ -74,5 +75,41 @@ func TestPortSelectorExcludesProtectedAndBusyPorts(t *testing.T) {
 	}
 	if selected != busyPort+1 {
 		t.Fatalf("Select() = %d, want %d", selected, busyPort+1)
+	}
+}
+
+func TestNonLoopbackConfigurationRequiresTLS(t *testing.T) {
+	t.Parallel()
+
+	configuration := Default(t.TempDir())
+	configuration.ListenAddress = "0.0.0.0"
+	configuration.ListenPort = 443
+	if err := configuration.Validate(); err == nil {
+		t.Fatal("Validate() accepted a non-loopback HTTP listener")
+	}
+	configuration.TLSCertificatePath = filepath.Join(configuration.DataDirectory, "tls.crt")
+	configuration.TLSPrivateKeyPath = filepath.Join(configuration.DataDirectory, "tls.key")
+	if err := configuration.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestGenerateAndLoadSharedKey(t *testing.T) {
+	t.Parallel()
+
+	encoded, err := GenerateSharedKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "ipc.key")
+	if err := os.WriteFile(path, []byte(encoded+"\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	key, err := LoadSharedKey(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key == [32]byte{} {
+		t.Fatal("LoadSharedKey() returned a zero key")
 	}
 }
