@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egress-manager/egress-manager/internal/domain"
 	"github.com/egress-manager/egress-manager/internal/system"
 )
 
@@ -322,15 +323,7 @@ func normalizeTags(items []taggedObject, kind string) ([]string, error) {
 }
 
 func validTag(tag string) bool {
-	if tag == "" || tag != strings.TrimSpace(tag) || len(tag) > 128 {
-		return false
-	}
-	for _, character := range tag {
-		if character < 0x20 || character == 0x7f {
-			return false
-		}
-	}
-	return true
+	return domain.ValidateXrayTag(tag) == nil
 }
 
 func limitations(kind InstallationKind, strategy MutationStrategy) []string {

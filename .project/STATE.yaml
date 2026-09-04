@@ -6,12 +6,12 @@ phase: 9
 phase_name: xray-marzban-3x-ui-adapter
 
 active_spec: specs/009-xray-panel-adapter/spec.md
-active_task: xray-binding-persistence-and-daemon-api
+active_task: xray-daemon-ipc
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: persist revisioned native Xray bindings, expose discovery and exact-hash plan/apply through privileged IPC and authenticated HTTP, and add the responsive operations UI
+next_action: expose Xray discovery and exact-hash native route plan/apply through privileged IPC, including startup transaction recovery for the currently discovered supported standalone installation
 
 dirty_work_expected: false
 
@@ -84,6 +84,7 @@ recent_decisions:
   - Xray native validation runs against a private 0700 temporary confdir containing byte-for-byte foreign snapshots plus only the candidate owned fragment; validation output is bounded and never persisted.
   - Xray fragment apply journals authenticated snapshots before mutation, rechecks both foreign and owned hashes, uses atomic replacement, restarts and verifies xray.service, and rolls back or recovers interrupted operations.
   - Rollback restores or removes only the reserved owned fragment; detected concurrent foreign changes are reported without overwriting any foreign file.
+  - Native Xray bindings use optimistic revisions and keyset pagination; a partial unique index permits at most one enabled binding per inbound tag.
 
 touched_areas:
   - Xray, Marzban, and 3x-ui discovery

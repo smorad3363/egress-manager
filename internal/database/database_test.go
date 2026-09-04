@@ -40,8 +40,49 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(version) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 6 {
-		t.Fatalf("migration count = %d, want 6", count)
+	if count != 7 {
+		t.Fatalf("migration count = %d, want 7", count)
+	}
+}
+
+func TestXrayBindingRepositoryUsesRevisionsKeysetsAndEnabledInboundUniqueness(t *testing.T) {
+	t.Parallel()
+	database := openTestDatabase(t)
+	store := NewStore(database)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	binding := domain.XrayBinding{ID: "native_route", InboundTag: "vless-in", OutboundTag: "proxy-de", Enabled: true}
+	created, err := store.CreateXrayBinding(ctx, binding, now)
+	if err != nil || created.Revision != 1 {
+		t.Fatalf("created binding = %#v, error = %v", created, err)
+	}
+	duplicate := domain.XrayBinding{ID: "duplicate", InboundTag: binding.InboundTag, OutboundTag: "direct", Enabled: true}
+	if _, err := store.CreateXrayBinding(ctx, duplicate, now); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate enabled inbound error = %v", err)
+	}
+	binding.OutboundTag = "direct"
+	updated, err := store.UpdateXrayBinding(ctx, binding, 1, now.Add(time.Second))
+	if err != nil || updated.Revision != 2 || updated.Binding.OutboundTag != "direct" {
+		t.Fatalf("updated binding = %#v, error = %v", updated, err)
+	}
+	if _, err := store.UpdateXrayBinding(ctx, binding, 1, now.Add(2*time.Second)); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale update error = %v", err)
+	}
+	items, err := store.ListXrayBindings(ctx, "", 10)
+	if err != nil || len(items) != 1 || items[0].Binding.ID != binding.ID {
+		t.Fatalf("binding list = %#v, error = %v", items, err)
+	}
+	after, err := store.ListXrayBindings(ctx, binding.ID, 10)
+	if err != nil || len(after) != 0 {
+		t.Fatalf("binding keyset page = %#v, error = %v", after, err)
+	}
+	var selectID, order, from int
+	var detail string
+	if err := database.QueryRow(`EXPLAIN QUERY PLAN SELECT id FROM xray_bindings WHERE outbound_tag = ? AND enabled = 1`, "direct").Scan(&selectID, &order, &from, &detail); err != nil || !strings.Contains(detail, "idx_xray_bindings_outbound") {
+		t.Fatalf("query plan = %q, error = %v", detail, err)
+	}
+	if err := store.DeleteXrayBinding(ctx, binding.ID, 2); err != nil {
+		t.Fatal(err)
 	}
 }
 

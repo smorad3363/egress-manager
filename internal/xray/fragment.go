@@ -19,25 +19,7 @@ const (
 	ownedRulePrefix = "egm-route-"
 )
 
-type Binding struct {
-	ID          domain.ID `json:"id"`
-	InboundTag  string    `json:"inbound_tag"`
-	OutboundTag string    `json:"outbound_tag"`
-	Enabled     bool      `json:"enabled"`
-}
-
-func (binding Binding) Validate() error {
-	if err := binding.ID.Validate("Xray binding id"); err != nil {
-		return err
-	}
-	if !validTag(binding.InboundTag) {
-		return fmt.Errorf("Xray binding inbound tag is invalid")
-	}
-	if !validTag(binding.OutboundTag) {
-		return fmt.Errorf("Xray binding outbound tag is invalid")
-	}
-	return nil
-}
+type Binding = domain.XrayBinding
 
 // ForeignRoutingState describes the effective foreign routing object after all
 // foreign confdir files have been merged, but before the owned fragment.
