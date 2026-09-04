@@ -39,3 +39,12 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm build
+
+  network-lab:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install isolated network test dependencies
+        run: sudo apt-get update && sudo apt-get install --no-install-recommends -y nftables socat
+      - name: Run repeatable namespace lab
+        run: sudo tests/network/run.sh

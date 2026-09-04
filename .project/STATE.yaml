@@ -2,18 +2,18 @@ schema_version: 1
 
 project: egress-manager
 
-phase: 1
-phase_name: architecture-and-network-test-lab
+phase: 2
+phase_name: backend-foundation
 
-active_spec: specs/001-network-lab/spec.md
-active_task: network-namespace-lab
-status: in_progress
+active_spec: specs/002-backend-foundation/spec.md
+active_task: configuration-and-storage
+status: ready
 
 last_green_ref: HEAD
 
-next_action: implement and run repeatable isolated TCP, UDP, NAT, routing, counter, and rollback lab
+next_action: implement validated configuration, embedded SQLite migrations, and repository storage
 
-dirty_work_expected: true
+dirty_work_expected: false
 
 tests:
   last_run: 2026-09-04
@@ -21,9 +21,7 @@ tests:
   commands:
     - docker run --rm --volume <repo>:/src --workdir /src golang:1.27.1 go test ./...
     - docker run --rm --volume <repo>:/src --workdir /src golang:1.27.1 go vet ./...
-    - pnpm --dir web typecheck
-    - pnpm --dir web lint
-    - pnpm --dir web build
+    - docker run --rm --privileged --dns 8.8.8.8 --volume <repo>/tests/network:/lab --workdir /lab golang:1.27.1 sh -c <install-deps-and-run-lab>
 
 network_transaction:
   status: none
@@ -38,7 +36,8 @@ recent_decisions:
   - English roadmap is authoritative; Persian copy is reference-only.
   - Git and STATE.yaml are the primary recovery mechanism.
   - Go 1.27.1 verification uses the official Docker image because the Windows download endpoint returned HTTP 404.
+  - Network integration runs entirely inside disposable namespaces and modifies no host firewall table.
 
 touched_areas:
-  - internal/domain
-  - internal/system
+  - tests/network
+  - continuous integration
