@@ -22,7 +22,7 @@ func renderNFT(family, table string, forwards []domain.PortForward, tableExisted
 			continue
 		}
 		for _, protocol := range forward.Protocols {
-			fmt.Fprintf(&output, "    %s counter dnat to %s comment \"egm_pf_%s\"\n", nftMatch(forward, protocol, false, false), nftDestination(forward), forward.ID)
+			fmt.Fprintf(&output, "    %s counter dnat to %s comment \"egm_pf_%s_dnat\"\n", nftMatch(forward, protocol, false, false), nftDestination(forward), forward.ID)
 		}
 	}
 	output.WriteString("  }\n")
@@ -33,7 +33,7 @@ func renderNFT(family, table string, forwards []domain.PortForward, tableExisted
 			continue
 		}
 		for _, protocol := range forward.Protocols {
-			fmt.Fprintf(&output, "    %s counter accept comment \"egm_pf_%s\"\n", nftMatch(forward, protocol, true, true), forward.ID)
+			fmt.Fprintf(&output, "    %s counter accept comment \"egm_pf_%s_allow\"\n", nftMatch(forward, protocol, true, true), forward.ID)
 		}
 	}
 	for _, forward := range forwards {
@@ -51,7 +51,7 @@ func renderNFT(family, table string, forwards []domain.PortForward, tableExisted
 			continue
 		}
 		for _, protocol := range forward.Protocols {
-			fmt.Fprintf(&output, "    %s counter masquerade comment \"egm_pf_%s\"\n", nftMatch(forward, protocol, true, true), forward.ID)
+			fmt.Fprintf(&output, "    %s counter masquerade comment \"egm_pf_%s_masquerade\"\n", nftMatch(forward, protocol, true, true), forward.ID)
 		}
 	}
 	output.WriteString("  }\n}\n")

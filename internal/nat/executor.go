@@ -32,6 +32,20 @@ type Executor struct {
 	Now      func() time.Time
 }
 
+func InspectOwnedTable(ctx context.Context, runner system.Runner, family AddressFamily, timeout time.Duration) (bool, error) {
+	if runner == nil {
+		return false, fmt.Errorf("NAT inspection runner is required")
+	}
+	nativeFamily, table, err := family.nativeName()
+	if err != nil {
+		return false, err
+	}
+	if timeout <= 0 || timeout > 10*time.Second {
+		timeout = 2 * time.Second
+	}
+	return inspectOwnedTablePresence(ctx, runner, timeout, nativeFamily, table)
+}
+
 func (executor Executor) Execute(ctx context.Context, id domain.ID, requestedChange string, plan Plan) error {
 	if executor.Runner == nil || executor.Journal == nil || executor.Verifier == nil {
 		return fmt.Errorf("NAT executor dependencies are required")
@@ -179,26 +193,16 @@ func (executor Executor) inspect(ctx context.Context, timeout time.Duration, pla
 	if len(parts) != 2 || (parts[0] != "ip" && parts[0] != "ip6") || (parts[1] != "egm_nat4" && parts[1] != "egm_nat6") {
 		return "", false, fmt.Errorf("invalid owned NAT table")
 	}
-	probeContext, cancel := context.WithTimeout(ctx, timeout)
-	result, err := executor.Runner.Run(probeContext, system.Command{Name: "nft", Args: []string{"list", "tables"}})
-	cancel()
-	if err != nil || result.ExitCode != 0 {
-		return "", false, errors.Join(err, fmt.Errorf("list nftables tables exited with code %d", result.ExitCode))
-	}
-	present := false
-	for _, line := range strings.Split(string(result.Stdout), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) >= 3 && fields[0] == "table" && fields[1] == parts[0] && fields[2] == parts[1] {
-			present = true
-			break
-		}
+	present, err := inspectOwnedTablePresence(ctx, executor.Runner, timeout, parts[0], parts[1])
+	if err != nil {
+		return "", false, err
 	}
 	if !present {
 		return "", false, nil
 	}
 	snapshotContext, snapshotCancel := context.WithTimeout(ctx, timeout)
 	defer snapshotCancel()
-	result, err = executor.Runner.Run(snapshotContext, system.Command{Name: "nft", Args: []string{"list", "table", parts[0], parts[1]}})
+	result, err := executor.Runner.Run(snapshotContext, system.Command{Name: "nft", Args: []string{"list", "table", parts[0], parts[1]}})
 	if err != nil || result.ExitCode != 0 {
 		return "", false, errors.Join(err, fmt.Errorf("snapshot owned NAT table exited with code %d", result.ExitCode))
 	}
@@ -206,6 +210,22 @@ func (executor Executor) inspect(ctx context.Context, timeout time.Duration, pla
 		return "", false, fmt.Errorf("owned NAT table snapshot is empty")
 	}
 	return string(result.Stdout), true, nil
+}
+
+func inspectOwnedTablePresence(ctx context.Context, runner system.Runner, timeout time.Duration, family, table string) (bool, error) {
+	probeContext, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	result, err := runner.Run(probeContext, system.Command{Name: "nft", Args: []string{"list", "tables"}})
+	if err != nil || result.ExitCode != 0 {
+		return false, errors.Join(err, fmt.Errorf("list nftables tables exited with code %d", result.ExitCode))
+	}
+	for _, line := range strings.Split(string(result.Stdout), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[0] == "table" && fields[1] == family && fields[2] == table {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (executor Executor) runNFT(ctx context.Context, timeout time.Duration, check bool, candidate string) error {

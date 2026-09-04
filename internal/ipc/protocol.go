@@ -36,11 +36,14 @@ type Operation string
 const (
 	OperationHealth    Operation = "health"
 	OperationInventory Operation = "network.inventory"
+	OperationNATPlan   Operation = "nat.plan"
+	OperationNATApply  Operation = "nat.apply"
+	OperationNATCount  Operation = "nat.counters"
 )
 
 func (operation Operation) Validate() error {
 	switch operation {
-	case OperationHealth, OperationInventory:
+	case OperationHealth, OperationInventory, OperationNATPlan, OperationNATApply, OperationNATCount:
 		return nil
 	default:
 		return ErrUnknownAction

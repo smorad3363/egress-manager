@@ -6,14 +6,14 @@ phase: 5
 phase_name: nat-port-forward-engine
 
 active_spec: specs/005-nat-port-forward-engine/spec.md
-active_task: nat-storage-ipc-and-api
+active_task: iptables-compatibility-adapter
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: persist port-forward intent and expose authenticated dry-run/apply operations through typed IPC and API
+next_action: implement and validate a namespaced iptables compatibility adapter without touching foreign rules
 
-dirty_work_expected: false
+dirty_work_expected: true
 
 tests:
   last_run: 2026-09-04
@@ -44,7 +44,8 @@ recent_decisions:
   - Inventory probes use fixed executables and arguments, bounded output, and per-command timeouts without a shell.
   - nftables candidates replace only egm_nat4 or egm_nat6 and are validated natively before apply.
   - NAT operations are journaled before mutation and interrupted operations recover by restoring the owned-table snapshot.
+  - Port-forward desired state uses revisioned SQLite rows and keyset pagination; mutation remains separate from privileged apply.
+  - Traffic counters are read from stable owned-rule comments through bounded nftables JSON output.
 
 touched_areas:
-  - internal NAT persistence
-  - authenticated NAT IPC and API
+  - iptables compatibility adapter

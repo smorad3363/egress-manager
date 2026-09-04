@@ -16,7 +16,9 @@ import (
 
 	"github.com/egress-manager/egress-manager/internal/auth"
 	"github.com/egress-manager/egress-manager/internal/database"
+	"github.com/egress-manager/egress-manager/internal/domain"
 	"github.com/egress-manager/egress-manager/internal/inventory"
+	"github.com/egress-manager/egress-manager/internal/nat"
 )
 
 const (
@@ -37,6 +39,16 @@ type SessionService interface {
 type ControlService interface {
 	Health(context.Context) error
 	Inventory(context.Context) (inventory.Inventory, error)
+	PlanNAT(context.Context, nat.PlanRequest) (nat.Plan, error)
+	ApplyNAT(context.Context, nat.ApplyRequest) (nat.ApplyResponse, error)
+	NATCounters(context.Context, nat.CounterRequest) (nat.CounterSnapshot, error)
+}
+
+type ForwardRepository interface {
+	CreatePortForward(context.Context, domain.PortForward, time.Time) (database.StoredPortForward, error)
+	UpdatePortForward(context.Context, domain.PortForward, int64, time.Time) (database.StoredPortForward, error)
+	DeletePortForward(context.Context, domain.ID, int64) error
+	ListPortForwards(context.Context, domain.ID, int) ([]database.StoredPortForward, error)
 }
 
 type ServerConfig struct {
@@ -50,15 +62,16 @@ type Server struct {
 	login    LoginService
 	sessions SessionService
 	control  ControlService
+	forwards ForwardRepository
 	health   http.Handler
 	now      func() time.Time
 }
 
-func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, sessions SessionService, control ControlService, health http.Handler) (*Server, error) {
+func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, sessions SessionService, control ControlService, forwards ForwardRepository, health http.Handler) (*Server, error) {
 	if config.SessionCookieName == "" || !config.SecureCookies {
 		return nil, fmt.Errorf("secure session cookie configuration is required")
 	}
-	if logger == nil || login == nil || sessions == nil || control == nil || health == nil {
+	if logger == nil || login == nil || sessions == nil || control == nil || forwards == nil || health == nil {
 		return nil, fmt.Errorf("API dependencies are required")
 	}
 	return &Server{
@@ -67,6 +80,7 @@ func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, ses
 		login:    login,
 		sessions: sessions,
 		control:  control,
+		forwards: forwards,
 		health:   health,
 		now:      time.Now,
 	}, nil
@@ -80,6 +94,10 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("/api/v1/session", server.method(http.MethodGet, server.requireSession(http.HandlerFunc(server.sessionHandler))))
 	mux.Handle("/api/v1/control/health", server.method(http.MethodGet, server.requireSession(http.HandlerFunc(server.controlHealthHandler))))
 	mux.Handle("/api/v1/network/inventory", server.method(http.MethodGet, server.requireSession(http.HandlerFunc(server.networkInventoryHandler))))
+	mux.Handle("/api/v1/port-forwards/plan", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.planPortForwardsHandler))))
+	mux.Handle("/api/v1/port-forwards/apply", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.applyPortForwardsHandler))))
+	mux.Handle("/api/v1/port-forwards/counters", server.method(http.MethodGet, server.requireSession(http.HandlerFunc(server.portForwardCountersHandler))))
+	mux.Handle("/api/v1/port-forwards", server.requireSession(http.HandlerFunc(server.portForwardsHandler)))
 	mux.Handle("/api/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		WriteError(writer, request, NewError(http.StatusNotFound, CodeNotFound, "Endpoint not found.", nil))
 	}))

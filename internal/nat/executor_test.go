@@ -159,6 +159,66 @@ func TestExecutorNativeValidationFailureDoesNotApply(t *testing.T) {
 	runner.assertDone()
 }
 
+func TestExecutorApplyFailureRollsBackWithoutDeletingForeignState(t *testing.T) {
+	t.Parallel()
+
+	store := testExecutorStore(t)
+	plan := executableTestPlan(t)
+	runner := &scriptedRunner{t: t, steps: []runnerStep{
+		{command: "nft list tables", result: system.Result{Stdout: []byte("table inet foreign\n"), ExitCode: 0}},
+		{command: "nft --check --file -", result: system.Result{ExitCode: 0}},
+		{command: "nft --file -", result: system.Result{ExitCode: 1}, err: errors.New("interrupted apply")},
+		{command: "nft list tables", result: system.Result{Stdout: []byte("table inet foreign\n"), ExitCode: 0}},
+	}}
+	executor := Executor{Runner: runner, Journal: store, Verifier: &fakeVerifier{}}
+	if err := executor.Execute(context.Background(), "nat_apply_fail", `{}`, plan); err == nil || !strings.Contains(err.Error(), "interrupted apply") {
+		t.Fatalf("Execute() error = %v", err)
+	}
+	operation, err := store.Operation(context.Background(), "nat_apply_fail")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if operation.State != domain.TransactionRolledBack || operation.FailureDetail != "apply_failed" {
+		t.Fatalf("operation = %#v", operation)
+	}
+	runner.assertDone()
+}
+
+func TestExecutorRestoresPreviousOwnedTableSnapshot(t *testing.T) {
+	t.Parallel()
+
+	store := testExecutorStore(t)
+	forward := testForward()
+	forward.RemotePortStart = 0
+	plan, err := BuildNFTPlan(IPv4, []domain.PortForward{forward}, nil, testPolicy(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := "table ip egm_nat4 {\n  comment \"old marker\"\n}\n"
+	runner := &scriptedRunner{t: t, steps: []runnerStep{
+		{command: "nft list tables", result: system.Result{Stdout: []byte("table ip egm_nat4\ntable inet foreign\n"), ExitCode: 0}},
+		{command: "nft list table ip egm_nat4", result: system.Result{Stdout: []byte(previous), ExitCode: 0}},
+		{command: "nft --check --file -", result: system.Result{ExitCode: 0}},
+		{command: "nft --file -", result: system.Result{ExitCode: 0}},
+		{command: "nft list tables", result: system.Result{Stdout: []byte("table ip egm_nat4\ntable inet foreign\n"), ExitCode: 0}},
+		{command: "nft list table ip egm_nat4", result: system.Result{Stdout: []byte("table ip egm_nat4 { comment \"new\" }\n"), ExitCode: 0}},
+		{command: "nft --check --file -", stdin: "old marker", result: system.Result{ExitCode: 0}},
+		{command: "nft --file -", stdin: "old marker", result: system.Result{ExitCode: 0}},
+	}}
+	executor := Executor{Runner: runner, Journal: store, Verifier: &fakeVerifier{err: errors.New("verification failed")}}
+	if err := executor.Execute(context.Background(), "nat_restore", `{}`, plan); err == nil {
+		t.Fatal("Execute() succeeded despite verification failure")
+	}
+	operation, err := store.Operation(context.Background(), "nat_restore")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if operation.State != domain.TransactionRolledBack || operation.PreviousSnapshot != previous {
+		t.Fatalf("operation = %#v", operation)
+	}
+	runner.assertDone()
+}
+
 func TestExecutorRecoversInterruptedApplyAfterRestart(t *testing.T) {
 	t.Parallel()
 

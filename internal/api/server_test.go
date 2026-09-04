@@ -16,7 +16,9 @@ import (
 
 	"github.com/egress-manager/egress-manager/internal/auth"
 	"github.com/egress-manager/egress-manager/internal/database"
+	"github.com/egress-manager/egress-manager/internal/domain"
 	"github.com/egress-manager/egress-manager/internal/inventory"
+	"github.com/egress-manager/egress-manager/internal/nat"
 )
 
 type healthyControl struct {
@@ -31,6 +33,21 @@ func (control *healthyControl) Health(context.Context) error {
 func (control *healthyControl) Inventory(context.Context) (inventory.Inventory, error) {
 	control.calls++
 	return inventory.Inventory{Interfaces: []inventory.Interface{}, Routes: []inventory.Route{}, Listeners: []inventory.Listener{}, Capabilities: []inventory.Capability{}, Warnings: []string{}}, nil
+}
+
+func (control *healthyControl) PlanNAT(context.Context, nat.PlanRequest) (nat.Plan, error) {
+	control.calls++
+	return nat.Plan{Engine: "nftables", Family: nat.IPv4, OwnedTable: "ip egm_nat4", Actions: []nat.Action{}, Targets: []nat.VerificationTarget{}, Candidate: "table ip egm_nat4 {}"}, nil
+}
+
+func (control *healthyControl) ApplyNAT(_ context.Context, request nat.ApplyRequest) (nat.ApplyResponse, error) {
+	control.calls++
+	return nat.ApplyResponse{TransactionID: request.TransactionID, State: domain.TransactionCommitted}, nil
+}
+
+func (control *healthyControl) NATCounters(_ context.Context, request nat.CounterRequest) (nat.CounterSnapshot, error) {
+	control.calls++
+	return nat.CounterSnapshot{Family: request.Family, Items: []nat.ForwardCounters{{ForwardID: "web_tls", AcceptedPackets: 5, AcceptedBytes: 400}}}, nil
 }
 
 func newTestAPIServer(t *testing.T) (*Server, *healthyControl) {
@@ -66,6 +83,7 @@ func newTestAPIServer(t *testing.T) (*Server, *healthyControl) {
 		authService,
 		sessions,
 		control,
+		store,
 		health,
 	)
 	if err != nil {

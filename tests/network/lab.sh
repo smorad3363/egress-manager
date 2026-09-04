@@ -21,6 +21,8 @@ inventory_probe=${EGRESS_INVENTORY_PROBE:-/usr/local/bin/egress-inventory-probe}
 [ -x "$inventory_probe" ] || fail "inventory probe not executable: $inventory_probe"
 nat_probe=${EGRESS_NAT_PROBE:-/usr/local/bin/egress-nat-probe}
 [ -x "$nat_probe" ] || fail "NAT probe not executable: $nat_probe"
+counter_probe=${EGRESS_COUNTER_PROBE:-/usr/local/bin/egress-counter-probe}
+[ -x "$counter_probe" ] || fail "counter probe not executable: $counter_probe"
 
 suffix=$$
 client_ns="egm-c-$suffix"
@@ -118,15 +120,28 @@ tcp_result=$(printf 'tcp-ok' | ip netns exec "$client_ns" socat - TCP:10.203.1.1
 udp_result=$(printf 'udp-ok' | ip netns exec "$client_ns" timeout 3 socat -T2 - UDP:10.203.1.1:19053)
 [ "$udp_result" = "udp-ok" ] || fail "UDP DNAT echo failed"
 
+EGRESS_NAT_TABLE_EXISTS=1 "$nat_probe" >"$candidate_path"
+ip netns exec "$router_ns" nft --check --file "$candidate_path"
+ip netns exec "$router_ns" nft --file "$candidate_path"
+
+tcp_result=$(printf 'tcp-reload-ok' | ip netns exec "$client_ns" socat - TCP:10.203.1.1:19080,connect-timeout=2)
+[ "$tcp_result" = "tcp-reload-ok" ] || fail "TCP DNAT failed after owned-table replacement"
+udp_result=$(printf 'udp-reload-ok' | ip netns exec "$client_ns" timeout 3 socat -T2 - UDP:10.203.1.1:19053)
+[ "$udp_result" = "udp-reload-ok" ] || fail "UDP DNAT failed after owned-table replacement"
+
 ip -n "$client_ns" address add 10.204.1.2/24 dev c0
 if printf 'must-drop' | ip netns exec "$client_ns" timeout 2 socat - TCP:10.203.1.1:19080,bind=10.204.1.2 >/dev/null 2>&1; then
     fail "source-CIDR restriction accepted a disallowed source"
 fi
 
 ruleset=$(ip netns exec "$router_ns" nft list table ip egm_nat4)
-printf '%s\n' "$ruleset" | grep -E 'counter packets [1-9][0-9]* bytes [1-9][0-9]*.*egm_pf_lab_tcp' >/dev/null || fail "TCP counter did not increase"
-printf '%s\n' "$ruleset" | grep -E 'counter packets [1-9][0-9]* bytes [1-9][0-9]*.*egm_pf_lab_udp' >/dev/null || fail "UDP counter did not increase"
+printf '%s\n' "$ruleset" | grep -E 'counter packets [1-9][0-9]* bytes [1-9][0-9]*.*egm_pf_lab_tcp_allow' >/dev/null || fail "TCP counter did not increase"
+printf '%s\n' "$ruleset" | grep -E 'counter packets [1-9][0-9]* bytes [1-9][0-9]*.*egm_pf_lab_udp_allow' >/dev/null || fail "UDP counter did not increase"
 printf '%s\n' "$ruleset" | grep -E 'counter packets [1-9][0-9]* bytes [1-9][0-9]*.*egm_pf_lab_tcp_source_drop' >/dev/null || fail "source restriction drop counter did not increase"
+counter_result=$(ip netns exec "$router_ns" "$counter_probe")
+printf '%s\n' "$counter_result" | grep -Eq '"forward_id":"lab_tcp","accepted_packets":[1-9][0-9]*' || fail "typed TCP counter reader did not report traffic"
+printf '%s\n' "$counter_result" | grep -Eq '"forward_id":"lab_tcp".*"dropped_packets":[1-9][0-9]*' || fail "typed drop counter reader did not report traffic"
+printf '%s\n' "$counter_result" | grep -Eq '"forward_id":"lab_udp","accepted_packets":[1-9][0-9]*' || fail "typed UDP counter reader did not report traffic"
 
 ip netns exec "$router_ns" nft delete table ip egm_nat4
 if ip netns exec "$router_ns" nft list table ip egm_nat4 >/dev/null 2>&1; then

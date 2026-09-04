@@ -11,6 +11,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -73,6 +74,13 @@ func TestAuthenticatedUnixRoundTripAndReplayRejection(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	var mutationCalled atomic.Bool
+	if err := server.Handle(OperationNATApply, func(context.Context, json.RawMessage) (any, error) {
+		mutationCalled.Store(true)
+		return map[string]string{"state": "COMMITTED"}, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
 	socketPath := filepath.Join(t.TempDir(), "egressd.sock")
 	listener, err := ListenUnix(socketPath)
 	if err != nil {
@@ -89,6 +97,14 @@ func TestAuthenticatedUnixRoundTripAndReplayRejection(t *testing.T) {
 	defer cancel()
 	serverResult := make(chan error, 1)
 	go func() { serverResult <- server.Serve(ctx, listener) }()
+	unsignedMutation := Request{
+		Version: ProtocolVersion, OperationID: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Timestamp: time.Now().UTC().Unix(),
+		Nonce: base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{0x7}, nonceBytes)), Operation: OperationNATApply, Payload: json.RawMessage(`{}`),
+	}
+	unsignedResponse := rawCall(t, socketPath, unsignedMutation)
+	if unsignedResponse.Success || unsignedResponse.ErrorCode != "unauthorized" || mutationCalled.Load() {
+		t.Fatalf("unsigned mutation response = %#v; called = %v", unsignedResponse, mutationCalled.Load())
+	}
 
 	client := Client{
 		SocketPath:    socketPath,

@@ -19,23 +19,27 @@ const (
 )
 
 type Config struct {
-	ListenAddress      string `json:"listen_address"`
-	ListenPort         uint16 `json:"listen_port"`
-	DataDirectory      string `json:"data_directory"`
-	DatabasePath       string `json:"database_path"`
-	ControlSocketPath  string `json:"control_socket_path"`
-	SessionCookieName  string `json:"session_cookie_name"`
-	TLSCertificatePath string `json:"tls_certificate_path,omitempty"`
-	TLSPrivateKeyPath  string `json:"tls_private_key_path,omitempty"`
+	ListenAddress            string         `json:"listen_address"`
+	ListenPort               uint16         `json:"listen_port"`
+	DataDirectory            string         `json:"data_directory"`
+	DatabasePath             string         `json:"database_path"`
+	ControlSocketPath        string         `json:"control_socket_path"`
+	SessionCookieName        string         `json:"session_cookie_name"`
+	SSHPorts                 []uint16       `json:"ssh_ports"`
+	ProtectedManagementCIDRs []netip.Prefix `json:"protected_management_cidrs"`
+	TLSCertificatePath       string         `json:"tls_certificate_path,omitempty"`
+	TLSPrivateKeyPath        string         `json:"tls_private_key_path,omitempty"`
 }
 
 func Default(dataDirectory string) Config {
 	return Config{
-		ListenAddress:     defaultListenAddress,
-		DataDirectory:     dataDirectory,
-		DatabasePath:      filepath.Join(dataDirectory, "egress-manager.db"),
-		ControlSocketPath: filepath.Join(dataDirectory, "egressd.sock"),
-		SessionCookieName: defaultCookieName,
+		ListenAddress:            defaultListenAddress,
+		DataDirectory:            dataDirectory,
+		DatabasePath:             filepath.Join(dataDirectory, "egress-manager.db"),
+		ControlSocketPath:        filepath.Join(dataDirectory, "egressd.sock"),
+		SessionCookieName:        defaultCookieName,
+		SSHPorts:                 []uint16{22},
+		ProtectedManagementCIDRs: []netip.Prefix{},
 	}
 }
 
@@ -47,6 +51,24 @@ func (configuration Config) Validate() error {
 	}
 	if configuration.ListenPort == 0 {
 		errs = append(errs, fmt.Errorf("listen_port must be selected before use"))
+	}
+	if len(configuration.SSHPorts) == 0 {
+		errs = append(errs, fmt.Errorf("at least one SSH port is required"))
+	}
+	protectedPorts := map[uint16]struct{}{configuration.ListenPort: {}}
+	for _, port := range configuration.SSHPorts {
+		if port == 0 {
+			errs = append(errs, fmt.Errorf("SSH ports must be nonzero"))
+		}
+		if _, exists := protectedPorts[port]; exists {
+			errs = append(errs, fmt.Errorf("protected port %d is duplicated", port))
+		}
+		protectedPorts[port] = struct{}{}
+	}
+	for _, prefix := range configuration.ProtectedManagementCIDRs {
+		if !prefix.IsValid() || prefix != prefix.Masked() {
+			errs = append(errs, fmt.Errorf("protected_management_cidrs must contain canonical prefixes"))
+		}
 	}
 	if strings.TrimSpace(configuration.DataDirectory) == "" || !filepath.IsAbs(configuration.DataDirectory) {
 		errs = append(errs, fmt.Errorf("data_directory must be absolute"))

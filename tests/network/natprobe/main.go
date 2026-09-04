@@ -24,7 +24,8 @@ func main() {
 			SourceCIDRs: []netip.Prefix{netip.MustParsePrefix("10.203.1.0/24")}, Enabled: true,
 		},
 	}
-	plan, err := nat.BuildNFTPlan(nat.IPv4, forwards, nil, nat.SafetyPolicy{SSHPorts: []uint16{22}, PanelPort: 43127}, false)
+	tableExisted := os.Getenv("EGRESS_NAT_TABLE_EXISTS") == "1"
+	plan, err := nat.BuildNFTPlan(nat.IPv4, forwards, nil, nat.SafetyPolicy{SSHPorts: []uint16{22}, PanelPort: 43127}, tableExisted)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "NAT plan generation failed")
 		os.Exit(1)

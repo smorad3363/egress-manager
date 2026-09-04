@@ -6,6 +6,7 @@ import (
 
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/ipc"
+	"github.com/egress-manager/egress-manager/internal/nat"
 )
 
 type IPCControl struct {
@@ -31,4 +32,28 @@ func (control IPCControl) Health(ctx context.Context) error {
 		return fmt.Errorf("egressd returned an unhealthy status")
 	}
 	return nil
+}
+
+func (control IPCControl) PlanNAT(ctx context.Context, request nat.PlanRequest) (nat.Plan, error) {
+	var response nat.Plan
+	if err := control.Client.Call(ctx, ipc.OperationNATPlan, request, &response); err != nil {
+		return nat.Plan{}, err
+	}
+	return response, nil
+}
+
+func (control IPCControl) ApplyNAT(ctx context.Context, request nat.ApplyRequest) (nat.ApplyResponse, error) {
+	var response nat.ApplyResponse
+	if err := control.Client.Call(ctx, ipc.OperationNATApply, request, &response); err != nil {
+		return nat.ApplyResponse{}, err
+	}
+	return response, nil
+}
+
+func (control IPCControl) NATCounters(ctx context.Context, request nat.CounterRequest) (nat.CounterSnapshot, error) {
+	var response nat.CounterSnapshot
+	if err := control.Client.Call(ctx, ipc.OperationNATCount, request, &response); err != nil {
+		return nat.CounterSnapshot{}, err
+	}
+	return response, nil
 }

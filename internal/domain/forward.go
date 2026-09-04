@@ -50,6 +50,11 @@ type PortForward struct {
 	Enabled         bool                `json:"enabled"`
 }
 
+const (
+	maximumPortRanges  = 64
+	maximumSourceCIDRs = 64
+)
+
 func (forward PortForward) Validate() error {
 	errs := []error{
 		forward.ID.Validate("port forward id"),
@@ -82,6 +87,9 @@ func (forward PortForward) Validate() error {
 	if len(forward.ListenPorts) > 0 && len(forward.AllPortsExcept) > 0 {
 		errs = append(errs, fmt.Errorf("listen ports and all-ports-except mode are mutually exclusive"))
 	}
+	if len(forward.ListenPorts) > maximumPortRanges || len(forward.AllPortsExcept) > maximumPortRanges {
+		errs = append(errs, fmt.Errorf("port forward must not contain more than %d port ranges", maximumPortRanges))
+	}
 	for _, portRange := range append(slices.Clone(forward.ListenPorts), forward.AllPortsExcept...) {
 		errs = append(errs, portRange.Validate())
 	}
@@ -96,6 +104,9 @@ func (forward PortForward) Validate() error {
 		}
 	}
 
+	if len(forward.SourceCIDRs) > maximumSourceCIDRs {
+		errs = append(errs, fmt.Errorf("port forward must not contain more than %d source CIDRs", maximumSourceCIDRs))
+	}
 	for _, prefix := range forward.SourceCIDRs {
 		if !prefix.IsValid() || prefix != prefix.Masked() {
 			errs = append(errs, fmt.Errorf("source CIDR %q is not canonical", prefix))

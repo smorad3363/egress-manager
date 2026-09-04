@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"errors"
+	"net/netip"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -38,8 +39,8 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(version) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 2 {
-		t.Fatalf("migration count = %d, want 2", count)
+	if count != 3 {
+		t.Fatalf("migration count = %d, want 3", count)
 	}
 }
 
@@ -131,6 +132,56 @@ func TestSettingsUpsert(t *testing.T) {
 	}
 	if value != "43128" {
 		t.Fatalf("Setting() = %q, want 43128", value)
+	}
+}
+
+func TestPortForwardRepositoryUsesOptimisticRevisionAndKeysetPagination(t *testing.T) {
+	t.Parallel()
+
+	store := NewStore(openTestDatabase(t))
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	forward := domain.PortForward{
+		ID: "forward_a", Name: "Forward A", Protocols: []domain.TransportProtocol{domain.ProtocolTCP},
+		ListenAddress: netip.MustParseAddr("203.0.113.10"), ListenPorts: []domain.PortRange{{From: 8443, To: 8443}},
+		RemoteAddress: netip.MustParseAddr("10.10.0.5"), RemotePortStart: 443, Enabled: false,
+	}
+	created, err := store.CreatePortForward(ctx, forward, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Revision != 1 {
+		t.Fatalf("created revision = %d", created.Revision)
+	}
+	forward.Enabled = true
+	updated, err := store.UpdatePortForward(ctx, forward, 1, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Revision != 2 || !updated.Forward.Enabled {
+		t.Fatalf("updated = %#v", updated)
+	}
+	if _, err := store.UpdatePortForward(ctx, forward, 1, now.Add(2*time.Second)); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale update error = %v, want ErrConflict", err)
+	}
+	second := forward
+	second.ID = "forward_b"
+	second.Name = "Forward B"
+	if _, err := store.CreatePortForward(ctx, second, now); err != nil {
+		t.Fatal(err)
+	}
+	page, err := store.ListPortForwards(ctx, "forward_a", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page) != 1 || page[0].Forward.ID != "forward_b" {
+		t.Fatalf("keyset page = %#v", page)
+	}
+	if err := store.DeletePortForward(ctx, forward.ID, 1); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale delete error = %v, want ErrConflict", err)
+	}
+	if err := store.DeletePortForward(ctx, forward.ID, 2); err != nil {
+		t.Fatal(err)
 	}
 }
 

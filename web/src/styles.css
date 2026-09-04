@@ -148,6 +148,32 @@ td code { color: #b7c3d1; font-size: 0.66rem; }
 .inventory-loading { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.8rem; margin-top: 1.7rem; }
 .inventory-loading .skeleton { height: 8rem; }
 
+.forward-heading { align-items: end; }
+.forward-actions, .row-actions { display: flex; gap: 0.45rem; }
+.forward-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; margin-top: 1.7rem; }
+.forward-summary .card { display: flex; min-height: 6.2rem; flex-direction: column; justify-content: center; padding: 0.9rem 1rem; }
+.forward-summary span, .forward-summary small { color: var(--muted); font-size: 0.64rem; }
+.forward-summary strong { margin: 0.2rem 0; font-size: 1.35rem; }
+.forward-card { margin-top: 0.8rem; padding: 1.05rem; }
+.forward-card .table-scroll { margin-top: -1.05rem; }
+.forward-card td .badge + .badge { margin-left: 0.3rem; }
+.forward-name { color: var(--text); font-size: 0.72rem; }
+.forward-loading { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.8rem; margin-top: 1.7rem; }
+.forward-loading .skeleton { height: 10rem; }
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
+.protocol-field { display: flex; gap: 1rem; margin: 0; padding: 0.75rem; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.protocol-field legend { padding: 0 0.3rem; color: #c7d1dc; font-size: 0.68rem; font-weight: 620; }
+.protocol-field label { display: flex; align-items: center; gap: 0.4rem; color: var(--muted-strong); font-size: 0.7rem; }
+.protocol-field input { accent-color: var(--accent-strong); }
+.plan-review { display: grid; gap: 1rem; padding: 1.2rem; }
+.plan-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; color: var(--muted); font-size: 0.65rem; }
+.plan-review ol { display: grid; gap: 0.5rem; margin: 0; padding: 0; list-style: none; }
+.plan-review li { display: grid; grid-template-columns: 4rem minmax(0, 1fr) auto; gap: 0.6rem; align-items: center; padding: 0.65rem; border: 1px solid var(--border); border-radius: var(--radius-sm); background: #0b1219; font-size: 0.64rem; }
+.plan-review li strong { color: var(--accent); text-transform: uppercase; }.plan-review li span { color: var(--muted-strong); }.plan-review li code { color: var(--muted); }
+.plan-review details { border: 1px solid var(--border); border-radius: var(--radius-sm); background: #080e14; }
+.plan-review summary { padding: 0.7rem; color: var(--muted-strong); cursor: pointer; font-size: 0.68rem; }
+.plan-review pre { max-height: 17rem; overflow: auto; margin: 0; padding: 0.8rem; border-top: 1px solid var(--border); color: #aebdca; font-size: 0.6rem; line-height: 1.55; white-space: pre; }
+
 .button { display: inline-flex; min-width: 0; align-items: center; justify-content: center; gap: 0.45rem; border: 1px solid transparent; border-radius: var(--radius-sm); font-weight: 650; cursor: pointer; transition: border-color 120ms ease, background 120ms ease, color 120ms ease, transform 120ms ease; white-space: nowrap; }
 .button:active:not(:disabled) { transform: translateY(1px); }
 .button:disabled { cursor: not-allowed; opacity: 0.45; }
@@ -229,6 +255,7 @@ td code { color: #b7c3d1; font-size: 0.66rem; }
   .health-card { min-height: auto; }
   .service-list { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0 1rem; }
   .inventory-summary { grid-template-columns: repeat(2, 1fr); }
+  .forward-summary { grid-template-columns: repeat(2, 1fr); }
   .inventory-grid { grid-template-columns: 1fr; }
   .capability-grid { grid-template-columns: repeat(2, 1fr); }
 }
@@ -251,6 +278,8 @@ td code { color: #b7c3d1; font-size: 0.66rem; }
   .showcase__header { align-items: start; flex-direction: column; }
   .showcase__fields, .state-grid { grid-template-columns: 1fr; }
   .inventory-heading .page-heading__meta { display: none; }
+  .forward-heading { align-items: start; flex-direction: column; }.forward-actions { width: 100%; }.forward-actions .button { flex: 1; }
+  .form-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 470px) {
@@ -260,7 +289,7 @@ td code { color: #b7c3d1; font-size: 0.66rem; }
   .metric { min-height: 5.8rem; }
   .service-list { grid-template-columns: 1fr; }
   .swatches { grid-template-columns: repeat(2, 1fr); }
-  .inventory-summary, .interface-list, .capability-grid, .inventory-loading { grid-template-columns: 1fr; }
+  .inventory-summary, .interface-list, .capability-grid, .inventory-loading, .forward-summary, .forward-loading { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

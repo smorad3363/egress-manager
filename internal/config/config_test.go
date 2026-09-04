@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -24,7 +25,7 @@ func TestSaveAndLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded != configuration {
+	if !reflect.DeepEqual(loaded, configuration) {
 		t.Fatalf("Load() = %#v, want %#v", loaded, configuration)
 	}
 	info, err := os.Stat(path)

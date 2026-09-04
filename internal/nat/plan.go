@@ -12,7 +12,10 @@ import (
 	"github.com/egress-manager/egress-manager/internal/inventory"
 )
 
-const maximumForwards = 512
+const (
+	MaximumForwards       = 16
+	maximumCandidateBytes = 20 << 10
+)
 
 type AddressFamily string
 
@@ -99,8 +102,8 @@ func BuildNFTPlan(family AddressFamily, desired []domain.PortForward, listeners 
 	if err := policy.Validate(); err != nil {
 		return Plan{}, fmt.Errorf("validate NAT safety policy: %w", err)
 	}
-	if len(desired) > maximumForwards {
-		return Plan{}, fmt.Errorf("NAT configuration exceeds %d forwards", maximumForwards)
+	if len(desired) > MaximumForwards {
+		return Plan{}, fmt.Errorf("NAT configuration exceeds %d forwards", MaximumForwards)
 	}
 
 	normalized := make([]domain.PortForward, 0, len(desired))
@@ -143,6 +146,9 @@ func BuildNFTPlan(family AddressFamily, desired []domain.PortForward, listeners 
 		}
 	}
 	plan.Candidate = renderNFT(nativeFamily, table, normalized, tableExisted)
+	if len(plan.Candidate) > maximumCandidateBytes {
+		return Plan{}, fmt.Errorf("nftables candidate exceeds %d bytes", maximumCandidateBytes)
+	}
 	return plan, nil
 }
 

@@ -41,10 +41,10 @@ func TestBuildNFTPlanIsOwnedDeterministicAndNormalized(t *testing.T) {
 	for _, fragment := range []string{
 		"delete table ip egm_nat4",
 		"table ip egm_nat4 {",
-		"ip daddr 203.0.113.10 tcp dport 8443-8446 counter dnat to 10.10.0.5:9443-9446 comment \"egm_pf_web_forward\"",
-		"ct original daddr 203.0.113.10 ip daddr 10.10.0.5 ip saddr 198.51.100.0/24 udp dport 9443-9446 counter accept comment \"egm_pf_web_forward\"",
+		"ip daddr 203.0.113.10 tcp dport 8443-8446 counter dnat to 10.10.0.5:9443-9446 comment \"egm_pf_web_forward_dnat\"",
+		"ct original daddr 203.0.113.10 ip daddr 10.10.0.5 ip saddr 198.51.100.0/24 udp dport 9443-9446 counter accept comment \"egm_pf_web_forward_allow\"",
 		"ct original daddr 203.0.113.10 ip daddr 10.10.0.5 tcp dport 9443-9446 counter drop comment \"egm_pf_web_forward_source_drop\"",
-		"counter masquerade comment \"egm_pf_web_forward\"",
+		"counter masquerade comment \"egm_pf_web_forward_masquerade\"",
 	} {
 		if !strings.Contains(plan.Candidate, fragment) {
 			t.Fatalf("candidate omitted %q:\n%s", fragment, plan.Candidate)
@@ -157,7 +157,7 @@ func TestBuildNFTPlanOmitsDisabledRulesAndRendersIPv6(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(plan.Candidate, "egm_pf_web_forward") || plan.EnabledRules != 0 {
+	if strings.Contains(plan.Candidate, "egm_pf_web_forward_") || plan.EnabledRules != 0 {
 		t.Fatalf("disabled rule rendered:\n%s", plan.Candidate)
 	}
 

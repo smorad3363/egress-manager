@@ -21,11 +21,15 @@ Both services read the same strict JSON configuration and IPC shared key. Unknow
   "data_directory": "/var/lib/egress-manager",
   "database_path": "/var/lib/egress-manager/egress-manager.db",
   "control_socket_path": "/run/egress-manager/egressd.sock",
-  "session_cookie_name": "egress_session"
+  "session_cookie_name": "egress_session",
+  "ssh_ports": [22],
+  "protected_management_cidrs": []
 }
 ```
 
 Non-loopback listeners require absolute `tls_certificate_path` and `tls_private_key_path` values. Session cookies are always `Secure`, `HttpOnly`, and `SameSite=Strict`.
+
+Every active SSH listener and the panel port are excluded from NAT capture. Add canonical local management networks to `protected_management_cidrs`; a forward whose listen address is inside one of these networks is rejected.
 
 The IPC key file contains exactly 32 random bytes encoded as 64 hexadecimal characters. It must be a regular file and must not grant permissions to other users. The intended mode is `0640`; the Unix socket mode is `0660`.
 
