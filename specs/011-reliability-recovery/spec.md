@@ -1,0 +1,110 @@
+---
+title: Phase 11 Reliability and Recovery
+tags:
+  - egress-manager
+  - specification
+  - phase/11
+  - reliability
+  - recovery
+status: ready
+related:
+  - "[[PROJECT_ROADMAP]]"
+  - "[[CONSTITUTION]]"
+  - "[[010-interface-outbounds/spec|Phase 10 Interface Outbounds]]"
+---
+
+# Phase 11 Reliability and Recovery
+
+## Goal
+
+Make every project-owned runtime mutation predictable across validation failure, daemon or dependency crashes, service restarts, and host reboot. Recovery must compose the existing subsystem journals and ownership boundaries instead of adding a second mutation path.
+
+## Recovery Model
+
+- Define one typed recovery inventory for NAT, HAProxy, sing-box, routing, native interface outbounds, and writable Xray fragments.
+- Preserve each subsystem's authenticated journal and rollback semantics; a coordinator orders them by dependency and reports their state without copying secret snapshots into public models.
+- Treat desired state in SQLite plus authenticated project-owned state and journals as authoritative. Treat live kernel, process, service, and foreign configuration state as evidence that must be rediscovered.
+- Recovery order follows dependencies: recover interrupted component mutations, restore required outbound runtimes, restore proxy/runtime configuration, then reconcile routing and interception last.
+- Recovery must be idempotent. Repeating it against the same desired and observed state produces no additional mutations.
+- Any ambiguous ownership, corrupt journal, stale reviewed hash, or changed foreign resource fails closed and remains visible to the operator.
+
+## Configuration Snapshots and Restore
+
+- Create bounded metadata for recoverable snapshots: component, operation ID, schema version, creation time, authenticated content hash, previous-state presence, and restore status.
+- Keep secret or native candidate bytes inside the existing encrypted journal boundary; public status exposes metadata and hashes only.
+- Verify authentication, schema, size, ownership, and current-state preconditions before restore.
+- Restore only project-owned files, rules, routes, interfaces, services, and reserved fragments. Never overwrite concurrently changed foreign state.
+- Retain a bounded, documented snapshot history and remove superseded material without deleting the active recovery point.
+
+## Runtime Journal and Crash Recovery
+
+- Standardize operation phases across subsystem journals: prepared, applying, verifying, committed, rolling_back, rolled_back, and failed.
+- Persist the recovery record before the first mutation and advance it durably after each dependency-safe checkpoint.
+- On daemon startup, inspect every journal before accepting mutating requests. Resolve recoverable interrupted work or enter an explicit degraded state.
+- A corrupt or unauthenticated journal must never be ignored, executed, or silently replaced.
+- Crash recovery records a bounded public outcome while keeping candidates, credentials, and foreign configuration bytes private.
+
+## Operation Locking
+
+- Allow only one host-network mutation transaction at a time across HTTP, IPC, startup recovery, and emergency CLI paths.
+- Use an OS-visible project-owned lock with bounded acquisition and typed busy diagnostics.
+- Record owner PID, process start identity, operation ID, component, and acquisition time without secrets.
+- Reclaim a stale lock only after positively proving the recorded process identity no longer exists; PID reuse or unreadable evidence must fail safe.
+- Read-only inventory, health, and status operations remain available while a mutation lock is held.
+
+## Restart and Reboot Persistence
+
+- Daemon startup completes journal recovery before normal mutation service becomes ready.
+- Reconcile desired enabled outbounds, HAProxy runtime, native interfaces, routing, and interception in dependency order after reboot.
+- Missing optional dependencies produce explicit degraded health. Missing required dependencies block only affected managed traffic and never enable direct fallback implicitly.
+- Repeated daemon or dependency restart must converge without duplicate rules, routes, processes, transient units, or state files.
+
+## Dependency Health Monitoring
+
+- Poll fixed, bounded probes for HAProxy, sing-box, native WireGuard/OpenVPN lifecycle, writable Xray, nftables/iproute2 ownership, and required executables.
+- Track configuration validity, process/service state, transport evidence, internet reachability when safely testable, last success, consecutive failures, and bounded diagnostic detail separately.
+- Apply debounced state transitions so one transient probe does not trigger mutation loops.
+- Monitoring is observational by default. Automated reconciliation must acquire the global mutation lock and use the same journaled apply path as operator actions.
+- Never change the host default route or bypass reviewed policy to perform a health probe.
+
+## Emergency CLI
+
+Provide a privileged local CLI with stable machine-readable and human-readable output:
+
+```text
+egressctl status
+egressctl recover
+egressctl bypass
+egressctl rollback
+```
+
+- `status` is read-only and reports daemon readiness, lock ownership, journal state, component health, and the last recovery outcome.
+- `recover` runs the same ordered, idempotent recovery coordinator used at daemon startup.
+- `bypass` disables only Egress Manager-managed interception and routing, preserving desired state and all unrelated firewall, route, service, and panel configuration.
+- `rollback` restores the latest authenticated eligible project-owned snapshot after checking current-state and foreign-state preconditions.
+- Mutating commands require local privilege, acquire the global operation lock, emit no secret material, and return distinct stable exit codes.
+- The CLI must still provide emergency recovery when the HTTP service is unavailable; it communicates only through the privileged daemon boundary or an explicitly offline-safe recovery boundary.
+
+## Failure Injection
+
+- Kill `egressd` after journal prepare and after each major mutation checkpoint.
+- Kill HAProxy, sing-box, WireGuard/OpenVPN runtime, and writable Xray during or after apply.
+- Corrupt candidate input, truncate or alter a journal, disconnect an outbound, and simulate DNS failure.
+- Restart dependencies and the daemon repeatedly, then reboot a disposable Linux host or equivalent isolated VM fixture.
+- Assert deterministic recovery result, bounded time, idempotent second run, fail-closed traffic, preserved foreign state, no secret exposure, and no orphaned project-owned resources.
+
+## Acceptance Criteria
+
+- Configuration snapshots are authenticated, bounded, restorable, and ownership-safe.
+- Every mutating entry point shares one cross-component operation lock with safe stale-lock handling.
+- Startup, manual recovery, rollback, and bypass are deterministic, idempotent, and auditable.
+- Dependency failures remain visible and do not silently weaken routing or leak policy traffic.
+- `bypass` removes only Egress Manager-managed interception/routing and preserves unrelated firewall configuration.
+- All roadmap failure injections recover predictably in disposable integration environments.
+- Go test/vet/race, frontend typecheck/lint/build, Playwright, and the repeatable privileged network lab remain green.
+
+## Progress
+
+- Phase specification created from the authoritative English roadmap after the Phase 10 native WireGuard/OpenVPN exit gate passed.
+- Graphify connected Phase 11 to the existing runtime transaction journal, safe network mutation transaction, native validation, interface/subnet routing, and checkpointed interruption recovery boundaries.
+

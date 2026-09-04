@@ -2,16 +2,16 @@ schema_version: 1
 
 project: egress-manager
 
-phase: 10
-phase_name: interface-outbounds
+phase: 11
+phase_name: reliability-recovery
 
-active_spec: specs/010-interface-outbounds/spec.md
-active_task: phase-10-exit-gate
-status: complete
+active_spec: specs/011-reliability-recovery/spec.md
+active_task: recovery-inventory-and-contracts
+status: in_progress
 
-last_green_ref: HEAD
+last_green_ref: ed91258
 
-next_action: create the Phase 11 reliability and recovery specification from the authoritative English roadmap
+next_action: inventory existing subsystem journals, startup recovery order, and mutation entry points; then implement the shared recovery status and operation-lock contracts
 
 dirty_work_expected: false
 
@@ -110,10 +110,12 @@ recent_decisions:
   - WireGuard endpoint bypasses use throw routes so outer packets continue through the host route while the owned nftables kill switch prevents client fallback leaks.
   - Native OpenVPN validation uses the standalone --show-tls configuration parser; --test-crypto is intentionally excluded because OpenVPN 2.6 requires a shared-secret key for that mode.
   - The disposable lab uses kernel WireGuard end to end on standard Linux; on WSL2 it validates kernel interface and peer lifecycle, then uses isolated point-to-point transport for routing assertions because kernel-created UDP sockets cannot use mirrored networking reliably.
+  - Phase 11 composes existing authenticated subsystem journals and ownership-safe mutation paths rather than replacing them with a parallel recovery mechanism.
+  - Emergency bypass removes only Egress Manager-owned interception and routing; it never flushes foreign firewall or route state.
 
 touched_areas:
-  - generic outbound abstraction
-  - WireGuard and OpenVPN import boundaries
-  - native interface lifecycle
-  - coordinated egress routing transaction
-  - disposable native VPN integration
+  - runtime transaction journals
+  - startup and reboot recovery
+  - cross-component operation locking
+  - dependency health monitoring
+  - emergency recovery CLI
