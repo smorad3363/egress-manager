@@ -6,12 +6,12 @@ phase: 10
 phase_name: interface-outbounds
 
 active_spec: specs/010-interface-outbounds/spec.md
-active_task: native-interface-executor
+active_task: interface-outbound-operations
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: implement journaled native validation, apply, verification, rollback, cleanup, and restart recovery for interface outbound lifecycle plans
+next_action: expose native interface import, plan, apply, health, and lifecycle through privileged IPC and authenticated HTTP operations
 
 dirty_work_expected: false
 
@@ -100,6 +100,8 @@ recent_decisions:
   - OpenVPN imports accept only one TUN client remote with inline credential material and normalize `nobind`, `route-nopull`, and a deterministic owned device name.
   - Native lifecycle state stores only owned IDs, interface/service names, addresses, MTU, and authenticated configuration hashes; runtime secret files remain private.
   - sing-box plans validate but omit interface-adapter outbounds, preventing native VPN credentials or definitions from entering sing-box candidates.
+  - Native interface lifecycle uses encrypted journal snapshots, authenticated runtime configuration hashes, atomic files, fixed commands, bounded waits, reverse rollback, and restart recovery.
+  - OpenVPN clients run as hardened project-named transient systemd services and are recreated from encrypted desired state after reboot; no plaintext profile is persisted outside the private runtime directory.
 
 touched_areas:
   - generic outbound abstraction

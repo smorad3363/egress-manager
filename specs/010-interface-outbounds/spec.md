@@ -105,3 +105,5 @@ Extend the generic outbound model with project-owned kernel WireGuard and OpenVP
 - Reused the existing revisioned outbound table and `(enabled, adapter, id)` covering lookup index; no migration or additional write amplification is required for native adapter persistence.
 - Added deterministic native lifecycle plans with secret-free owned state, authenticated runtime-config hashes, foreign interface collision rejection, and create/reconcile/verify/remove action reviews.
 - Updated sing-box planning to validate but ignore native interface outbounds, keeping adapter candidates isolated while preserving duplicate-ID detection.
+- Added the journaled native lifecycle executor: private native validation, authenticated recovery snapshots, exact state rechecks, atomic runtime configuration, kernel WireGuard creation, hardened transient OpenVPN systemd services, bounded verification, reverse rollback, cleanup, and restart recovery.
+- Executor tests cover successful mixed WireGuard/OpenVPN apply, stale plans, validation failure without mutation, partial OpenVPN failure with WireGuard restoration, and recovery of an interrupted applying transaction.
