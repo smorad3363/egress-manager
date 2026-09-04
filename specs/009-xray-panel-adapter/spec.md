@@ -68,6 +68,7 @@ Discover compatible Xray installations and safely bind existing inbound tags to 
 - Added a conservative managed-fragment boundary: only a loaded standalone `xray.service` with one absolute `-confdir` matching the discovered root and no explicit `-config` input is writable. Marzban and 3x-ui remain read-only.
 - Added bounded all-JSON confdir snapshots that hash every foreign filename and byte, collect effective tags and routing, reject unsafe entries and unsupported merge layouts, and authenticate the owned fragment separately.
 - Added private candidate composition that prepends deterministic project-owned native `inboundTag` to `outboundTag` rules while preserving the effective foreign routing object. Public review exposes only actions, counts, paths, and state/candidate hashes.
+- Added native validation in a private temporary confdir, encrypted transaction snapshots, repeated foreign/owned change detection, atomic fragment replacement or removal, bounded `xray.service` restart and verification, rollback, and restart recovery.
 
 ## Integration References
 

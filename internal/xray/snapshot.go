@@ -24,6 +24,13 @@ type ConfdirSnapshot struct {
 	Fragment     FragmentState
 	InboundTags  []string
 	OutboundTags []string
+	foreignFiles []confdirFile
+	fragmentData []byte
+}
+
+type confdirFile struct {
+	name    string
+	content []byte
 }
 
 func (snapshot ConfdirSnapshot) InstallationWithEffectiveTags(installation Installation) Installation {
@@ -53,6 +60,8 @@ func SnapshotConfdir(installation Installation) (ConfdirSnapshot, error) {
 	_, _ = foreignHash.Write([]byte("xray-foreign-confdir-v1\x00"))
 	var effectiveRouting []byte
 	fragment := FragmentState{}
+	foreignFiles := []confdirFile{}
+	var fragmentData []byte
 	for _, entry := range entries {
 		if !xrayConfigName(entry.Name()) {
 			continue
@@ -84,9 +93,11 @@ func SnapshotConfdir(installation Installation) (ConfdirSnapshot, error) {
 			if err != nil {
 				return ConfdirSnapshot{}, err
 			}
+			fragmentData = append([]byte{}, content...)
 			continue
 		}
 		writeHashPart(foreignHash, entry.Name(), content)
+		foreignFiles = append(foreignFiles, confdirFile{name: entry.Name(), content: append([]byte{}, content...)})
 		document, err := decodeConfdirDocument(content)
 		if err != nil {
 			return ConfdirSnapshot{}, fmt.Errorf("decode Xray confdir file %q: %w", entry.Name(), err)
@@ -122,6 +133,8 @@ func SnapshotConfdir(installation Installation) (ConfdirSnapshot, error) {
 		Fragment:     fragment,
 		InboundTags:  sortedKeys(inboundTags),
 		OutboundTags: sortedKeys(outboundTags),
+		foreignFiles: foreignFiles,
+		fragmentData: fragmentData,
 	}, nil
 }
 

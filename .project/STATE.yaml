@@ -6,12 +6,12 @@ phase: 9
 phase_name: xray-marzban-3x-ui-adapter
 
 active_spec: specs/009-xray-panel-adapter/spec.md
-active_task: xray-managed-fragment-transaction
+active_task: xray-binding-persistence-and-daemon-api
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: implement native Xray candidate validation plus journaled atomic fragment apply, bounded systemd reload or restart verification, rollback, and interrupted-operation recovery
+next_action: persist revisioned native Xray bindings, expose discovery and exact-hash plan/apply through privileged IPC and authenticated HTTP, and add the responsive operations UI
 
 dirty_work_expected: false
 
@@ -81,6 +81,9 @@ recent_decisions:
   - Managed fragments are allowed only for a loaded standalone xray.service whose simple ExecStart positively proves one absolute -confdir matching the discovered configuration root and no explicit -config input.
   - Safe Xray composition supports bounded all-JSON confdirs only, rejects files ordered after the reserved fragment, and hashes every foreign filename and byte before planning.
   - The owned Xray fragment prepends exact native inboundTag-to-outboundTag rules while copying the effective foreign routing object; the foreign rules and routing fields remain in their original order and content model.
+  - Xray native validation runs against a private 0700 temporary confdir containing byte-for-byte foreign snapshots plus only the candidate owned fragment; validation output is bounded and never persisted.
+  - Xray fragment apply journals authenticated snapshots before mutation, rechecks both foreign and owned hashes, uses atomic replacement, restarts and verifies xray.service, and rolls back or recovers interrupted operations.
+  - Rollback restores or removes only the reserved owned fragment; detected concurrent foreign changes are reported without overwriting any foreign file.
 
 touched_areas:
   - Xray, Marzban, and 3x-ui discovery
