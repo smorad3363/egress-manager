@@ -6,12 +6,12 @@ phase: 2
 phase_name: backend-foundation
 
 active_spec: specs/002-backend-foundation/spec.md
-active_task: authentication-and-sessions
+active_task: logging-health-and-api-errors
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: implement Argon2id credentials, opaque sessions, CSRF, and login throttling
+next_action: implement structured redacted logging, operation IDs, typed API errors, and health endpoint
 
 dirty_work_expected: true
 
@@ -38,6 +38,5 @@ recent_decisions:
   - SQLite uses go-sqlite3 with CGO; rationale and build risk are recorded in ADR 0001.
 
 touched_areas:
-  - internal/config
-  - internal/database
-  - database migration 0001
+  - internal/auth
+  - internal/database session repository
