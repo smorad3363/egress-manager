@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { DesignSystem } from "./DesignSystem";
 import { Icon } from "./components/Icon";
 import { NetworkInventory } from "./components/NetworkInventory";
+import { OutboundsManager } from "./components/OutboundsManager";
 import { HAProxyManager } from "./components/HAProxyManager";
 import { PortForwards } from "./components/PortForwards";
 import { Badge } from "./components/ui/Badge";
@@ -37,6 +38,7 @@ function Dashboard() {
   const [toast, setToast] = useState<string | null>(null);
   const [newForwardRequest, setNewForwardRequest] = useState(0);
   const [newHAProxyRequest, setNewHAProxyRequest] = useState(0);
+  const [newOutboundRequest, setNewOutboundRequest] = useState(0);
   const reduceMotion = useReducedMotion();
 
   const notify = () => {
@@ -73,11 +75,11 @@ function Dashboard() {
           <Button className="mobile-menu" size="icon" variant="ghost" aria-label="Open navigation" onClick={() => setMobileNavigation(true)}><Icon name="menu" /></Button>
           <div><p className="breadcrumb">Console / {active}</p><h1>{active}</h1></div>
           <label className="command-search"><Icon name="search" /><span className="sr-only">Search console</span><input placeholder="Search" /><kbd>⌘ K</kbd></label>
-          <Button variant="primary" onClick={() => active === "Port Forward" ? setNewForwardRequest((value) => value + 1) : active === "HAProxy" ? setNewHAProxyRequest((value) => value + 1) : setDialogOpen(true)}><Icon name="plus" />{active === "Port Forward" ? "New forward" : active === "HAProxy" ? "New frontend" : "New route"}</Button>
+          <Button variant="primary" onClick={() => active === "Port Forward" ? setNewForwardRequest((value) => value + 1) : active === "HAProxy" ? setNewHAProxyRequest((value) => value + 1) : active === "Outbounds" ? setNewOutboundRequest((value) => value + 1) : setDialogOpen(true)}><Icon name="plus" />{active === "Port Forward" ? "New forward" : active === "HAProxy" ? "New frontend" : active === "Outbounds" ? "Import outbound" : "New route"}</Button>
         </header>
 
         <div className="content">
-          {active === "Network" ? <NetworkInventory /> : active === "Port Forward" ? <PortForwards createRequest={newForwardRequest} /> : active === "HAProxy" ? <HAProxyManager createRequest={newHAProxyRequest} /> : <>
+          {active === "Network" ? <NetworkInventory /> : active === "Port Forward" ? <PortForwards createRequest={newForwardRequest} /> : active === "HAProxy" ? <HAProxyManager createRequest={newHAProxyRequest} /> : active === "Outbounds" ? <OutboundsManager createRequest={newOutboundRequest} /> : <>
           <section className="page-heading" aria-labelledby="overview-title">
             <div><p className="eyebrow">LIVE OVERVIEW</p><h2 id="overview-title">Traffic is flowing normally.</h2><p>Policy and transport health across this gateway.</p></div>
             <div className="page-heading__meta"><span>Last reconciled</span><strong>12 seconds ago</strong></div>

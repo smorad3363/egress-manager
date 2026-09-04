@@ -8,12 +8,45 @@ import (
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/ipc"
 	"github.com/egress-manager/egress-manager/internal/nat"
+	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
 )
 
 func (control IPCControl) PlanHAProxy(ctx context.Context, request managedHAProxy.PlanRequest) (managedHAProxy.Plan, error) {
 	var response managedHAProxy.Plan
 	if err := control.Client.Call(ctx, ipc.OperationHAProxyPlan, request, &response); err != nil {
 		return managedHAProxy.Plan{}, err
+	}
+	return response, nil
+}
+
+func (control IPCControl) ImportSingBox(ctx context.Context, request managedSingBox.ImportRequest) (managedSingBox.ImportResponse, error) {
+	var response managedSingBox.ImportResponse
+	if err := control.Client.Call(ctx, ipc.OperationSingBoxImport, request, &response); err != nil {
+		return managedSingBox.ImportResponse{}, err
+	}
+	return response, nil
+}
+
+func (control IPCControl) TestSingBox(ctx context.Context, request managedSingBox.TestRequest) (managedSingBox.TestResponse, error) {
+	var response managedSingBox.TestResponse
+	if err := control.Client.Call(ctx, ipc.OperationSingBoxTest, request, &response); err != nil {
+		return managedSingBox.TestResponse{}, err
+	}
+	return response, nil
+}
+
+func (control IPCControl) PlanSingBox(ctx context.Context) (managedSingBox.Plan, error) {
+	var response managedSingBox.Plan
+	if err := control.Client.Call(ctx, ipc.OperationSingBoxPlan, struct{}{}, &response); err != nil {
+		return managedSingBox.Plan{}, err
+	}
+	return response, nil
+}
+
+func (control IPCControl) ApplySingBox(ctx context.Context, request managedSingBox.ApplyRequest) (managedSingBox.ApplyResponse, error) {
+	var response managedSingBox.ApplyResponse
+	if err := control.Client.Call(ctx, ipc.OperationSingBoxApply, request, &response); err != nil {
+		return managedSingBox.ApplyResponse{}, err
 	}
 	return response, nil
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"strings"
 	"sync"
@@ -232,6 +233,144 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		haproxyMutex.Lock()
 		defer haproxyMutex.Unlock()
 		return haproxyRuntime.Snapshot(ctx)
+	}); err != nil {
+		return err
+	}
+
+	var singboxMutex sync.Mutex
+	singboxTester := managedSingBox.Tester{
+		Validator: managedSingBox.NativeValidator{Runner: runner, TempDirectory: configuration.DataDirectory, Timeout: 5 * time.Second},
+		Dialer:    &net.Dialer{Timeout: 2 * time.Second},
+		Probe:     managedSingBox.LocalProxyProbe{TempDirectory: configuration.DataDirectory, Timeout: 10 * time.Second},
+		Timeout:   15 * time.Second,
+	}
+	loadSingBoxPlan := func(ctx context.Context) (managedSingBox.ExecutionPlan, error) {
+		stored, err := store.ListOutbounds(ctx, "", managedSingBox.MaximumOutbounds+1)
+		if err != nil {
+			return managedSingBox.ExecutionPlan{}, err
+		}
+		if len(stored) > managedSingBox.MaximumOutbounds {
+			return managedSingBox.ExecutionPlan{}, fmt.Errorf("sing-box desired state exceeds %d outbounds", managedSingBox.MaximumOutbounds)
+		}
+		outbounds := make([]domain.Outbound, 0, len(stored))
+		credentials := make(map[domain.ID][]byte)
+		for _, item := range stored {
+			outbounds = append(outbounds, item.Outbound)
+			if item.Outbound.Enabled {
+				document, credentialErr := store.OutboundCredential(ctx, item.Outbound.ID)
+				if credentialErr != nil {
+					return managedSingBox.ExecutionPlan{}, credentialErr
+				}
+				credentials[item.Outbound.ID] = document
+			}
+		}
+		state, err := managedSingBox.InspectState(configuration.SingBoxConfigPath)
+		if err != nil {
+			return managedSingBox.ExecutionPlan{}, err
+		}
+		return managedSingBox.BuildPlan(outbounds, credentials, state)
+	}
+	if err := server.Handle(ipc.OperationSingBoxImport, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		var request managedSingBox.ImportRequest
+		if err := decodePayload(payload, &request); err != nil {
+			return nil, err
+		}
+		singboxMutex.Lock()
+		defer singboxMutex.Unlock()
+		parsed, err := managedSingBox.ParseImport(request.Input)
+		if err != nil {
+			return nil, err
+		}
+		inputs := make([]database.NewOutbound, 0, len(parsed))
+		for _, item := range parsed {
+			inputs = append(inputs, database.NewOutbound{Outbound: item.Outbound, CredentialDocument: item.CredentialDocument})
+		}
+		stored, err := store.CreateOutbounds(ctx, inputs, time.Now().UTC())
+		if err != nil {
+			return nil, err
+		}
+		response := managedSingBox.ImportResponse{Outbounds: make([]domain.Outbound, 0, len(stored))}
+		for _, item := range stored {
+			response.Outbounds = append(response.Outbounds, item.Outbound)
+		}
+		return response, nil
+	}); err != nil {
+		return err
+	}
+	if err := server.Handle(ipc.OperationSingBoxTest, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		var request managedSingBox.TestRequest
+		if err := decodePayload(payload, &request); err != nil {
+			return nil, err
+		}
+		singboxMutex.Lock()
+		defer singboxMutex.Unlock()
+		if (request.ID == "") == (request.Input == "") {
+			return nil, fmt.Errorf("exactly one stored outbound ID or import input is required")
+		}
+		if request.ID != "" {
+			if request.ExpectedRevision < 1 {
+				return nil, fmt.Errorf("expected revision is required")
+			}
+			stored, err := store.Outbound(ctx, request.ID)
+			if err != nil {
+				return nil, err
+			}
+			if stored.Revision != request.ExpectedRevision {
+				return nil, database.ErrConflict
+			}
+			credential, err := store.OutboundCredential(ctx, request.ID)
+			if err != nil {
+				return nil, err
+			}
+			health := singboxTester.Test(ctx, stored.Outbound, credential)
+			stored.Outbound.Health = health
+			updated, err := store.UpdateOutbound(ctx, stored.Outbound, request.ExpectedRevision, nil, time.Now().UTC())
+			if err != nil {
+				return nil, err
+			}
+			return managedSingBox.TestResponse{Results: []managedSingBox.TestResult{{Outbound: updated.Outbound, Health: health}}}, nil
+		}
+		parsed, err := managedSingBox.ParseImport(request.Input)
+		if err != nil {
+			return nil, err
+		}
+		if len(parsed) != 1 {
+			return nil, fmt.Errorf("connection test requires exactly one outbound")
+		}
+		health := singboxTester.Test(ctx, parsed[0].Outbound, parsed[0].CredentialDocument)
+		return managedSingBox.TestResponse{Results: []managedSingBox.TestResult{{Outbound: parsed[0].Outbound, Health: health}}}, nil
+	}); err != nil {
+		return err
+	}
+	if err := server.Handle(ipc.OperationSingBoxPlan, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		if err := decodeEmptyPayload(payload); err != nil {
+			return nil, err
+		}
+		singboxMutex.Lock()
+		defer singboxMutex.Unlock()
+		plan, err := loadSingBoxPlan(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return plan.Plan, nil
+	}); err != nil {
+		return err
+	}
+	if err := server.Handle(ipc.OperationSingBoxApply, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		var request managedSingBox.ApplyRequest
+		if err := decodePayload(payload, &request); err != nil {
+			return nil, err
+		}
+		singboxMutex.Lock()
+		defer singboxMutex.Unlock()
+		plan, err := loadSingBoxPlan(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if request.ExpectedStateHash == "" || request.ExpectedCandidateHash == "" || plan.Plan.StateHash != request.ExpectedStateHash || plan.Plan.CandidateHash != request.ExpectedCandidateHash {
+			return nil, managedSingBox.ErrStateChanged
+		}
+		return singboxExecutor.Execute(ctx, request.TransactionID, plan)
 	}); err != nil {
 		return err
 	}

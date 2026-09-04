@@ -72,7 +72,7 @@ func RunWeb(ctx context.Context, options WebOptions) error {
 	control := api.IPCControl{Client: ipc.Client{
 		SocketPath:    configuration.ControlSocketPath,
 		Authenticator: ipcAuthenticator,
-		Timeout:       3 * time.Second,
+		Timeout:       25 * time.Second,
 	}}
 	health := api.HealthHandler{
 		Version: buildinfo.Version,
@@ -85,7 +85,7 @@ func RunWeb(ctx context.Context, options WebOptions) error {
 	apiServer, err := api.NewServer(api.ServerConfig{
 		SessionCookieName: configuration.SessionCookieName,
 		SecureCookies:     true,
-	}, logger, authentication, sessions, control, store, store, health)
+	}, logger, authentication, sessions, control, store, store, store, health)
 	if err != nil {
 		return err
 	}

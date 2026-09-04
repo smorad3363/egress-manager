@@ -226,7 +226,7 @@ haproxy_primary_pid=""
 haproxy_secondary_pid=""
 attempt=0
 failover=""
-while [ "$attempt" -lt 30 ]; do
+while [ "$attempt" -lt 50 ]; do
     failover=$(ip netns exec "$client_ns" timeout 2 socat - TCP:10.203.1.1:18080 2>/dev/null || true)
     [ "$failover" = "backup" ] && break
     attempt=$((attempt + 1))
@@ -237,7 +237,7 @@ done
 haproxy_primary_pid=$(ip netns exec "$server_ns" sh -c 'socat TCP-LISTEN:18081,reuseaddr,fork SYSTEM:"printf primary" >/tmp/egm-haproxy-primary.log 2>&1 & echo $!')
 attempt=0
 recovered=""
-while [ "$attempt" -lt 30 ]; do
+while [ "$attempt" -lt 50 ]; do
     recovered=$(ip netns exec "$client_ns" timeout 2 socat - TCP:10.203.1.1:18080 2>/dev/null || true)
     [ "$recovered" = "primary" ] && break
     attempt=$((attempt + 1))

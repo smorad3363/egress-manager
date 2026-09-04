@@ -4,7 +4,7 @@ tags:
   - egress-manager
   - specification
   - phase/7
-status: ready
+status: complete
 related:
   - "[[PROJECT_ROADMAP]]"
   - "[[CONSTITUTION]]"
@@ -88,3 +88,7 @@ Support URI and structured-configuration import where practical, with fixture-ba
 - Current-version WireGuard endpoint conversion at the adapter boundary while preserving the generic WireGuard outbound domain type.
 - Layered health testing for configuration validity, direct transport reachability, proxied internet reachability, external IP, TCP, UDP testability, and latency.
 - Repeatable integration against the official pinned sing-box `v1.13.20` binary for all parser fixtures and an isolated chained SOCKS5 connectivity probe.
+- Authenticated IPC and CSRF-protected HTTP APIs for import, unsaved and stored tests, revisioned updates, clone, delete, public dry-run plans, and transactional apply.
+- Reviewed state and candidate hashes are required at apply time, so a changed desired or owned state rejects stale UI plans.
+- Responsive operations UI for protected import, granular health, latency, external IP, capabilities, enable/disable, clone, delete, dry-run review, and apply.
+- API, database, and browser tests prove atomic batch import, optimistic concurrency, strict payloads, CSRF enforcement, and secret-free responses.

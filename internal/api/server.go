@@ -20,6 +20,7 @@ import (
 	managedHAProxy "github.com/egress-manager/egress-manager/internal/haproxy"
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/nat"
+	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
 )
 
 const (
@@ -46,6 +47,10 @@ type ControlService interface {
 	PlanHAProxy(context.Context, managedHAProxy.PlanRequest) (managedHAProxy.Plan, error)
 	ApplyHAProxy(context.Context, managedHAProxy.ApplyRequest) (managedHAProxy.ApplyResponse, error)
 	HAProxyStats(context.Context) (managedHAProxy.RuntimeSnapshot, error)
+	ImportSingBox(context.Context, managedSingBox.ImportRequest) (managedSingBox.ImportResponse, error)
+	TestSingBox(context.Context, managedSingBox.TestRequest) (managedSingBox.TestResponse, error)
+	PlanSingBox(context.Context) (managedSingBox.Plan, error)
+	ApplySingBox(context.Context, managedSingBox.ApplyRequest) (managedSingBox.ApplyResponse, error)
 }
 
 type ForwardRepository interface {
@@ -66,40 +71,50 @@ type HAProxyRepository interface {
 	ListHAProxyFrontends(context.Context, domain.ID, int) ([]database.StoredHAProxyFrontend, error)
 }
 
+type OutboundRepository interface {
+	Outbound(context.Context, domain.ID) (database.StoredOutbound, error)
+	UpdateOutbound(context.Context, domain.Outbound, int64, []byte, time.Time) (database.StoredOutbound, error)
+	DeleteOutbound(context.Context, domain.ID, int64) error
+	CloneOutbound(context.Context, domain.ID, int64, domain.Outbound, time.Time) (database.StoredOutbound, error)
+	ListOutbounds(context.Context, domain.ID, int) ([]database.StoredOutbound, error)
+}
+
 type ServerConfig struct {
 	SessionCookieName string
 	SecureCookies     bool
 }
 
 type Server struct {
-	config   ServerConfig
-	logger   *slog.Logger
-	login    LoginService
-	sessions SessionService
-	control  ControlService
-	forwards ForwardRepository
-	haproxy  HAProxyRepository
-	health   http.Handler
-	now      func() time.Time
+	config    ServerConfig
+	logger    *slog.Logger
+	login     LoginService
+	sessions  SessionService
+	control   ControlService
+	forwards  ForwardRepository
+	haproxy   HAProxyRepository
+	outbounds OutboundRepository
+	health    http.Handler
+	now       func() time.Time
 }
 
-func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, sessions SessionService, control ControlService, forwards ForwardRepository, haproxy HAProxyRepository, health http.Handler) (*Server, error) {
+func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, sessions SessionService, control ControlService, forwards ForwardRepository, haproxy HAProxyRepository, outbounds OutboundRepository, health http.Handler) (*Server, error) {
 	if config.SessionCookieName == "" || !config.SecureCookies {
 		return nil, fmt.Errorf("secure session cookie configuration is required")
 	}
-	if logger == nil || login == nil || sessions == nil || control == nil || forwards == nil || haproxy == nil || health == nil {
+	if logger == nil || login == nil || sessions == nil || control == nil || forwards == nil || haproxy == nil || outbounds == nil || health == nil {
 		return nil, fmt.Errorf("API dependencies are required")
 	}
 	return &Server{
-		config:   config,
-		logger:   logger,
-		login:    login,
-		sessions: sessions,
-		control:  control,
-		forwards: forwards,
-		haproxy:  haproxy,
-		health:   health,
-		now:      time.Now,
+		config:    config,
+		logger:    logger,
+		login:     login,
+		sessions:  sessions,
+		control:   control,
+		forwards:  forwards,
+		haproxy:   haproxy,
+		outbounds: outbounds,
+		health:    health,
+		now:       time.Now,
 	}, nil
 }
 
@@ -120,6 +135,12 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("/api/v1/haproxy/plan", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.haproxyPlanHandler))))
 	mux.Handle("/api/v1/haproxy/apply", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.haproxyApplyHandler))))
 	mux.Handle("/api/v1/haproxy/stats", server.method(http.MethodGet, server.requireSession(http.HandlerFunc(server.haproxyStatsHandler))))
+	mux.Handle("/api/v1/outbounds/import", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.importOutboundsHandler))))
+	mux.Handle("/api/v1/outbounds/test", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.testOutboundsHandler))))
+	mux.Handle("/api/v1/outbounds/clone", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.cloneOutboundHandler))))
+	mux.Handle("/api/v1/outbounds/plan", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.planOutboundsHandler))))
+	mux.Handle("/api/v1/outbounds/apply", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.applyOutboundsHandler))))
+	mux.Handle("/api/v1/outbounds", server.requireSession(http.HandlerFunc(server.outboundsHandler)))
 	mux.Handle("/api/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		WriteError(writer, request, NewError(http.StatusNotFound, CodeNotFound, "Endpoint not found.", nil))
 	}))

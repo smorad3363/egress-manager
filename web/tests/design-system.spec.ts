@@ -138,3 +138,46 @@ test("HAProxy console shows health outcomes and graceful apply review", async ({
   await dialog.getByRole("button", { name: "Apply & reload" }).click();
   await expect(dialog).toBeHidden();
 });
+
+test("outbound console tests, stores, manages, and applies without exposing credentials", async ({ page }) => {
+  const secret = "browser-fixture-password";
+  const stored = { outbound: { id: "ams_socks", name: "Amsterdam SOCKS", adapter: "sing-box", type: "socks5", server: { host: "192.0.2.30", port: 1080 }, capabilities: { tcp: true, udp: true }, health: { status: "healthy", checked_at: "2026-09-04T08:00:00Z", configuration_valid: "passed", transport_reachable: "passed", internet_reachable: "passed", external_ip: "203.0.113.40", tcp: "passed", udp: "untestable", latency: 24000000 }, enabled: true, secret_metadata: ["username", "password"] }, revision: 3, created_at: "2026-09-04T08:00:00Z", updated_at: "2026-09-04T08:05:00Z" };
+  const calls: string[] = [];
+  await page.addInitScript(() => window.sessionStorage.setItem("egress.csrf", "test-csrf-token"));
+  await page.route("**/api/v1/outbounds**", async (route) => {
+    const request = route.request(); const url = new URL(request.url()); calls.push(`${request.method()} ${url.pathname}`);
+    if (request.method() !== "GET") expect(request.headers()["x-csrf-token"]).toBe("test-csrf-token");
+    if (request.method() === "GET") { await route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [stored], next_cursor: "" }) }); return; }
+    if (url.pathname.endsWith("/test")) { expect((await request.postDataJSON()).input).toContain(secret); await route.fulfill({ contentType: "application/json", body: JSON.stringify({ results: [{ outbound: stored.outbound, health: stored.outbound.health }] }) }); return; }
+    if (url.pathname.endsWith("/import")) { expect((await request.postDataJSON()).input).toContain(secret); await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ outbounds: [stored.outbound] }) }); return; }
+    if (url.pathname.endsWith("/plan")) { await route.fulfill({ contentType: "application/json", body: JSON.stringify({ engine: "sing-box", state_hash: "state-hash", candidate_hash: "candidate-hash", enabled_outbounds: 1, actions: [{ kind: "replace", resource: "owned sing-box configuration", summary: "Atomically replace the project-owned sing-box configuration." }, { kind: "outbound", resource: "ams_socks", summary: "Configure an enabled sing-box outbound." }] }) }); return; }
+    if (url.pathname.endsWith("/apply")) { expect(await request.postDataJSON()).toEqual({ expected_state_hash: "state-hash", expected_candidate_hash: "candidate-hash" }); await route.fulfill({ contentType: "application/json", body: JSON.stringify({ transaction_id: "singbox_test", state: "COMMITTED", candidate_hash: "candidate-hash" }) }); return; }
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify(stored) });
+  });
+  await page.goto("/");
+  await page.getByLabel("Primary navigation").getByRole("button", { name: "Outbounds" }).click();
+  await expect(page.getByRole("heading", { name: "Outbound connections" })).toBeVisible();
+  await expect(page.getByText("Amsterdam SOCKS")).toBeVisible();
+  await expect(page.getByText("203.0.113.40")).toBeVisible();
+  await expect(page.getByText("TCP + UDP")).toBeVisible();
+  if (process.env.VISUAL_QA) await page.screenshot({ path: "test-results/outbounds.png", fullPage: true });
+
+  await page.getByRole("button", { name: "Import outbound" }).first().click();
+  const importDialog = page.getByRole("dialog");
+  await importDialog.getByLabel("URI or sing-box JSON").fill(`socks5://operator:${secret}@192.0.2.31:1080#Imported`);
+  await importDialog.getByRole("button", { name: "Test connection" }).click();
+  await expect(importDialog.getByLabel("Health healthy")).toBeVisible();
+  await importDialog.getByRole("button", { name: "Save outbound" }).click();
+  await expect(importDialog).toBeHidden();
+  await expect(page.getByText(secret)).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Disable" }).click();
+  expect(calls).toContain("PUT /api/v1/outbounds");
+  await page.getByRole("button", { name: "Review & apply" }).click();
+  const plan = page.getByRole("dialog");
+  await expect(plan.getByRole("heading", { name: "Review sing-box plan" })).toBeVisible();
+  await expect(plan.getByText("candidate-hash")).toHaveCount(0);
+  await plan.getByRole("button", { name: "Apply atomically" }).click();
+  await expect(plan).toBeHidden();
+  expect(calls).toContain("POST /api/v1/outbounds/apply");
+});

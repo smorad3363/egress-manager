@@ -16,11 +16,12 @@ import (
 	"strings"
 
 	"github.com/egress-manager/egress-manager/internal/domain"
+	"github.com/egress-manager/egress-manager/internal/secrets"
 )
 
 const (
 	MaximumOutbounds = 128
-	maximumCandidate = 512 << 10
+	maximumCandidate = secrets.MaximumDocumentBytes
 	ownedTagPrefix   = "egm_out_"
 	ownedSchema      = "https://sing-box.sagernet.org/schema.json#egress-manager-owned"
 )

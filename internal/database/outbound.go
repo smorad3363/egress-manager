@@ -22,6 +22,58 @@ type StoredOutbound struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 }
 
+type NewOutbound struct {
+	Outbound           domain.Outbound
+	CredentialDocument []byte
+}
+
+func (store *Store) CreateOutbounds(ctx context.Context, inputs []NewOutbound, at time.Time) ([]StoredOutbound, error) {
+	if len(inputs) == 0 || len(inputs) > 128 || at.IsZero() {
+		return nil, fmt.Errorf("between 1 and 128 outbounds and a creation time are required")
+	}
+	type preparedOutbound struct {
+		input      NewOutbound
+		definition []byte
+		envelope   secrets.Envelope
+	}
+	prepared := make([]preparedOutbound, 0, len(inputs))
+	for _, input := range inputs {
+		definition, envelope, err := store.prepareOutbound(input.Outbound, input.CredentialDocument)
+		if err != nil {
+			return nil, err
+		}
+		prepared = append(prepared, preparedOutbound{input: input, definition: definition, envelope: envelope})
+	}
+	at = at.UTC().Truncate(time.Second)
+	transaction, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin outbound batch creation: %w", err)
+	}
+	rollback := func(operationErr error) ([]StoredOutbound, error) {
+		_ = transaction.Rollback()
+		return nil, operationErr
+	}
+	stored := make([]StoredOutbound, 0, len(prepared))
+	for _, item := range prepared {
+		outbound := item.input.Outbound
+		_, err := transaction.ExecContext(ctx, `
+            INSERT INTO outbounds(id, name, adapter, protocol, server_host, server_port, definition, enabled, revision, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+        `, string(outbound.ID), outbound.Name, string(outbound.Adapter), string(outbound.Type), outbound.Server.Host, outbound.Server.Port, string(item.definition), outbound.Enabled, at.Unix(), at.Unix())
+		if err := mapWriteError("create outbound batch", err); err != nil {
+			return rollback(err)
+		}
+		if _, err := transaction.ExecContext(ctx, `INSERT INTO outbound_credentials(outbound_id, nonce, ciphertext, updated_at) VALUES (?, ?, ?, ?)`, string(outbound.ID), item.envelope.Nonce, item.envelope.Ciphertext, at.Unix()); err != nil {
+			return rollback(mapWriteError("create outbound batch credential", err))
+		}
+		stored = append(stored, StoredOutbound{Outbound: outbound, Revision: 1, CreatedAt: at, UpdatedAt: at})
+	}
+	if err := transaction.Commit(); err != nil {
+		return nil, fmt.Errorf("commit outbound batch creation: %w", err)
+	}
+	return stored, nil
+}
+
 func (store *Store) CreateOutbound(ctx context.Context, outbound domain.Outbound, credentialDocument []byte, at time.Time) (StoredOutbound, error) {
 	definition, envelope, err := store.prepareOutbound(outbound, credentialDocument)
 	if err != nil {

@@ -2,16 +2,16 @@ schema_version: 1
 
 project: egress-manager
 
-phase: 7
-phase_name: sing-box-outbound-engine
+phase: 8
+phase_name: interface-subnet-egress-routing
 
-active_spec: specs/007-sing-box-outbound-engine/spec.md
-active_task: outbound-api-ipc-and-ui
+active_spec: specs/008-interface-subnet-egress-routing/spec.md
+active_task: route-domain-persistence-and-planner
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: expose outbound import, test, save, clone, enable, disable, delete, dry-run, apply, and health through authenticated IPC/API and UI
+next_action: implement adapter-neutral interface/subnet egress-route desired state, protected outbound references, explicit failure and IP/DNS policies, and deterministic safety planning
 
 dirty_work_expected: false
 
@@ -59,7 +59,11 @@ recent_decisions:
   - Public sing-box plans expose only actions and hashes; candidate and recovery snapshots are encrypted in the operation journal.
   - WireGuard imports use the generic outbound model but render as sing-box endpoints because legacy WireGuard outbounds were removed in sing-box 1.13.
   - Native integration is pinned to official sing-box v1.13.20 by manifest digest.
+  - sing-box apply requires the exact reviewed owned-state and candidate hashes; stale UI plans are rejected.
+  - Generated sing-box candidates share the 128 KiB encrypted-journal bound so every valid plan is journalable before mutation.
+  - Egress-route failure policy defaults to block; direct routing is permitted only when explicitly configured.
 
 touched_areas:
-  - authenticated outbound IPC and API
-  - outbound operations UI
+  - interface and subnet route domain model
+  - route persistence and outbound references
+  - route safety planner

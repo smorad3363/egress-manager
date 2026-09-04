@@ -20,10 +20,18 @@ import (
 	managedHAProxy "github.com/egress-manager/egress-manager/internal/haproxy"
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/nat"
+	"github.com/egress-manager/egress-manager/internal/secrets"
+	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
 )
 
 type healthyControl struct {
-	calls int
+	calls            int
+	lastImport       managedSingBox.ImportRequest
+	lastTest         managedSingBox.TestRequest
+	lastSingBoxApply managedSingBox.ApplyRequest
+	singBoxImport    managedSingBox.ImportResponse
+	singBoxTest      managedSingBox.TestResponse
+	singBoxPlan      managedSingBox.Plan
 }
 
 func (control *healthyControl) Health(context.Context) error {
@@ -66,6 +74,29 @@ func (control *healthyControl) HAProxyStats(context.Context) (managedHAProxy.Run
 	return managedHAProxy.RuntimeSnapshot{Info: managedHAProxy.RuntimeInfo{Name: "HAProxy", Version: "test", PID: 42}, Stats: []managedHAProxy.RuntimeStat{}}, nil
 }
 
+func (control *healthyControl) ImportSingBox(_ context.Context, request managedSingBox.ImportRequest) (managedSingBox.ImportResponse, error) {
+	control.calls++
+	control.lastImport = request
+	return control.singBoxImport, nil
+}
+
+func (control *healthyControl) TestSingBox(_ context.Context, request managedSingBox.TestRequest) (managedSingBox.TestResponse, error) {
+	control.calls++
+	control.lastTest = request
+	return control.singBoxTest, nil
+}
+
+func (control *healthyControl) PlanSingBox(context.Context) (managedSingBox.Plan, error) {
+	control.calls++
+	return control.singBoxPlan, nil
+}
+
+func (control *healthyControl) ApplySingBox(_ context.Context, request managedSingBox.ApplyRequest) (managedSingBox.ApplyResponse, error) {
+	control.calls++
+	control.lastSingBoxApply = request
+	return managedSingBox.ApplyResponse{TransactionID: request.TransactionID, State: domain.TransactionCommitted}, nil
+}
+
 func newTestAPIServer(t *testing.T) (*Server, *healthyControl) {
 	t.Helper()
 	connection, err := database.Open(context.Background(), filepath.Join(t.TempDir(), "api.db"))
@@ -73,7 +104,15 @@ func newTestAPIServer(t *testing.T) (*Server, *healthyControl) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = connection.Close() })
-	store := database.NewStore(connection)
+	secretKey := sha256.Sum256([]byte("api-test-secret-key"))
+	protector, err := secrets.NewProtector(secretKey, bytes.NewReader(bytes.Repeat([]byte{0x42}, 4096)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := database.NewProtectedStore(connection, protector)
+	if err != nil {
+		t.Fatal(err)
+	}
 	hasher := auth.PasswordHasher{
 		Params: auth.Argon2Params{MemoryKiB: 64, Time: 1, Threads: 1, SaltBytes: 16, KeyBytes: 32},
 		Random: bytes.NewReader(bytes.Repeat([]byte{0x21}, 4096)),
@@ -99,6 +138,7 @@ func newTestAPIServer(t *testing.T) (*Server, *healthyControl) {
 		authService,
 		sessions,
 		control,
+		store,
 		store,
 		store,
 		health,

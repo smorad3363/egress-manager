@@ -120,6 +120,16 @@ func TestOutboundRepositoryEncryptsCredentialsAndUsesOptimisticRevision(t *testi
 	if err := database.QueryRow(`SELECT COUNT(*) FROM outbound_credentials`).Scan(&credentials); err != nil || credentials != 0 {
 		t.Fatalf("credential rows = %d, error = %v", credentials, err)
 	}
+	batchOutbound := outbound
+	batchOutbound.ID = "batch_atomic"
+	batchOutbound.Name = "Batch atomic"
+	if _, err := store.CreateOutbounds(ctx, []NewOutbound{{Outbound: batchOutbound, CredentialDocument: document}, {Outbound: batchOutbound, CredentialDocument: document}}, now.Add(4*time.Second)); !errors.Is(err, ErrConflict) {
+		t.Fatalf("duplicate batch error = %v", err)
+	}
+	var batchRows int
+	if err := database.QueryRow(`SELECT COUNT(*) FROM outbounds WHERE id = ?`, string(batchOutbound.ID)).Scan(&batchRows); err != nil || batchRows != 0 {
+		t.Fatalf("rolled-back batch rows = %d, error = %v", batchRows, err)
+	}
 }
 
 func TestHAProxyRepositoriesEnforceReferencesAndOptimisticRevision(t *testing.T) {

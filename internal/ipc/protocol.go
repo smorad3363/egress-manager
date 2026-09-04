@@ -34,19 +34,23 @@ var (
 type Operation string
 
 const (
-	OperationHealth       Operation = "health"
-	OperationInventory    Operation = "network.inventory"
-	OperationNATPlan      Operation = "nat.plan"
-	OperationNATApply     Operation = "nat.apply"
-	OperationNATCount     Operation = "nat.counters"
-	OperationHAProxyPlan  Operation = "haproxy.plan"
-	OperationHAProxyApply Operation = "haproxy.apply"
-	OperationHAProxyStats Operation = "haproxy.stats"
+	OperationHealth        Operation = "health"
+	OperationInventory     Operation = "network.inventory"
+	OperationNATPlan       Operation = "nat.plan"
+	OperationNATApply      Operation = "nat.apply"
+	OperationNATCount      Operation = "nat.counters"
+	OperationHAProxyPlan   Operation = "haproxy.plan"
+	OperationHAProxyApply  Operation = "haproxy.apply"
+	OperationHAProxyStats  Operation = "haproxy.stats"
+	OperationSingBoxImport Operation = "singbox.import"
+	OperationSingBoxTest   Operation = "singbox.test"
+	OperationSingBoxPlan   Operation = "singbox.plan"
+	OperationSingBoxApply  Operation = "singbox.apply"
 )
 
 func (operation Operation) Validate() error {
 	switch operation {
-	case OperationHealth, OperationInventory, OperationNATPlan, OperationNATApply, OperationNATCount, OperationHAProxyPlan, OperationHAProxyApply, OperationHAProxyStats:
+	case OperationHealth, OperationInventory, OperationNATPlan, OperationNATApply, OperationNATCount, OperationHAProxyPlan, OperationHAProxyApply, OperationHAProxyStats, OperationSingBoxImport, OperationSingBoxTest, OperationSingBoxPlan, OperationSingBoxApply:
 		return nil
 	default:
 		return ErrUnknownAction
