@@ -10,3 +10,4 @@ All notable changes will be documented here.
 - Validated SQLite storage, Argon2id authentication, secure sessions, CSRF, and login throttling.
 - Authenticated typed Unix-socket IPC between the web process and privileged daemon.
 - Hardened API runtime with TLS policy, health checks, operation IDs, redacted structured logs, and graceful shutdown.
+- Dark-first responsive application shell, reusable UI primitives, ECharts traffic visualization, and Playwright coverage.

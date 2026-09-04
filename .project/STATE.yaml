@@ -2,16 +2,16 @@ schema_version: 1
 
 project: egress-manager
 
-phase: 3
-phase_name: frontend-design-system
+phase: 4
+phase_name: read-only-network-inventory
 
-active_spec: specs/003-frontend-design-system/spec.md
-active_task: design-tokens-and-application-shell
+active_spec: specs/004-read-only-network-inventory/spec.md
+active_task: typed-host-probes
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: implement accessible dark-first tokens, reusable primitives, responsive navigation, and browser coverage
+next_action: implement bounded read-only Linux probes and typed inventory parsers behind authenticated IPC and API
 
 dirty_work_expected: false
 
@@ -19,8 +19,10 @@ tests:
   last_run: 2026-09-04
   result: pass
   commands:
-    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test ./... && go vet ./..."
-    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test -race ./..."
+    - pnpm --dir web typecheck
+    - pnpm --dir web lint
+    - pnpm --dir web build
+    - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=<installed-chrome> pnpm --dir web test:e2e
 
 network_transaction:
   status: none
@@ -41,5 +43,5 @@ recent_decisions:
   - The IPC key is domain-separated before use for login-throttle buckets.
 
 touched_areas:
-  - specs/003-frontend-design-system
-  - web/src
+  - specs/004-read-only-network-inventory
+  - internal inventory probes
