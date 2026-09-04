@@ -6,14 +6,14 @@ phase: 1
 phase_name: architecture-and-network-test-lab
 
 active_spec: specs/001-network-lab/spec.md
-active_task: core-domain-models
-status: ready
+active_task: network-namespace-lab
+status: in_progress
 
 last_green_ref: HEAD
 
-next_action: implement validated core typed models with unit tests
+next_action: implement and run repeatable isolated TCP, UDP, NAT, routing, counter, and rollback lab
 
-dirty_work_expected: false
+dirty_work_expected: true
 
 tests:
   last_run: 2026-09-04
@@ -40,4 +40,5 @@ recent_decisions:
   - Go 1.27.1 verification uses the official Docker image because the Windows download endpoint returned HTTP 404.
 
 touched_areas:
-  - phase 0 baseline
+  - internal/domain
+  - internal/system
