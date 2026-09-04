@@ -1,0 +1,11 @@
+.git
+.tools
+.cache
+graphify-out
+web/node_modules
+web/dist
+web/coverage
+data
+backups
+.project/logs
+.project/recovery

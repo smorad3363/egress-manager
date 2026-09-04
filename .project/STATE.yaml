@@ -1,0 +1,43 @@
+schema_version: 1
+
+project: egress-manager
+
+phase: 1
+phase_name: architecture-and-network-test-lab
+
+active_spec: specs/001-network-lab/spec.md
+active_task: core-domain-models
+status: ready
+
+last_green_ref: HEAD
+
+next_action: implement validated core typed models with unit tests
+
+dirty_work_expected: false
+
+tests:
+  last_run: 2026-09-04
+  result: pass
+  commands:
+    - docker run --rm --volume <repo>:/src --workdir /src golang:1.27.1 go test ./...
+    - docker run --rm --volume <repo>:/src --workdir /src golang:1.27.1 go vet ./...
+    - pnpm --dir web typecheck
+    - pnpm --dir web lint
+    - pnpm --dir web build
+
+network_transaction:
+  status: none
+  id: null
+
+speckit:
+  run_id: null
+
+blockers: []
+
+recent_decisions:
+  - English roadmap is authoritative; Persian copy is reference-only.
+  - Git and STATE.yaml are the primary recovery mechanism.
+  - Go 1.27.1 verification uses the official Docker image because the Windows download endpoint returned HTTP 404.
+
+touched_areas:
+  - phase 0 baseline

@@ -1,0 +1,37 @@
+.tools/
+.cache/
+.env
+.env.*
+!.env.example
+
+# Go
+bin/
+coverage.out
+*.test
+
+# Frontend
+web/node_modules/
+web/dist/
+web/coverage/
+web/playwright-report/
+web/test-results/
+
+# Editors and OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Runtime data
+data/
+backups/
+*.db
+*.db-shm
+*.db-wal
+.project/logs/*
+!.project/logs/.gitkeep
+.project/recovery/*
+!.project/recovery/.gitkeep
+
+# Generated knowledge graph
+graphify-out/
