@@ -87,7 +87,15 @@ func (executor Executor) VerifyRuntime(ctx context.Context, plan Plan) error {
 	if err != nil {
 		return err
 	}
-	if currentRoutes.Hash != plan.Review.RoutingCandidateHash || currentSingBox.Hash != plan.Review.SingBoxCandidateHash || currentInterfaces.Hash != plan.Review.InterfaceStateHash {
+	expectedRoutes, err := routing.ParseState(plan.routing.Candidate(), true)
+	if err != nil {
+		return err
+	}
+	expectedSingBox, err := singbox.ParseState(plan.singBox.Candidate(), true)
+	if err != nil {
+		return err
+	}
+	if currentRoutes.Hash != expectedRoutes.Hash || currentSingBox.Hash != expectedSingBox.Hash || currentInterfaces.Hash != plan.Review.InterfaceStateHash {
 		return ErrStateChanged
 	}
 	if err := executor.verify(ctx, plan); err != nil {

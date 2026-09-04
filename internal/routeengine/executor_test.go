@@ -32,6 +32,18 @@ type routeEngineRunner struct {
 	ipv6Batch      string
 }
 
+type runtimeInspectionRunner struct {
+	*routeEngineRunner
+	failure error
+}
+
+func (runner runtimeInspectionRunner) Run(ctx context.Context, command system.Command) (system.Result, error) {
+	if command.Name == "nft" && strings.Join(command.Args, " ") == "-j list table inet egm_egress" {
+		return system.Result{ExitCode: 1}, runner.failure
+	}
+	return runner.routeEngineRunner.Run(ctx, command)
+}
+
 func (runner *routeEngineRunner) Run(_ context.Context, command system.Command) (system.Result, error) {
 	runner.t.Helper()
 	joined := command.Name + " " + strings.Join(command.Args, " ")
@@ -186,6 +198,13 @@ func TestExecutorCommitsCoordinatedCandidates(t *testing.T) {
 	}
 	if _, err := routing.ParseState(stateContent, true); err != nil {
 		t.Fatal(err)
+	}
+	// State hashes include an existence prefix; candidate hashes do not.
+	// A matching applied file must reach the live NFT inspection, not fail as stale.
+	inspectionFailure := errors.New("test nft inspection unavailable")
+	executor.Runner = runtimeInspectionRunner{routeEngineRunner: runner, failure: inspectionFailure}
+	if err := executor.VerifyRuntime(context.Background(), plan); !errors.Is(err, inspectionFailure) {
+		t.Fatalf("runtime inspection error=%v", err)
 	}
 }
 

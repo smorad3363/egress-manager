@@ -184,11 +184,29 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		{Component: "interface_reconcile", Recover: reconcileInterfaces},
 		{Component: "journal_final", Recover: verifyRecoveryJournal},
 	}}
-	if _, err := recoveryCoordinator.Run(ctx); err != nil {
-		return fmt.Errorf("startup recovery failed: %w", err)
+	recoveryTracker := &reliability.Tracker{}
+	startupReport, startupErr := recoveryCoordinator.Run(ctx)
+	recoveryTracker.Record(startupReport)
+	if startupErr != nil {
+		logger.ErrorContext(ctx, "startup recovery degraded", "component", startupReport.FailedComponent)
 	}
 	if err := startupLease.Release(); err != nil {
 		return fmt.Errorf("release startup recovery lock: %w", err)
+	}
+	mutate := func(ctx context.Context, transactionID domain.ID, component string, action func() (any, error)) (any, error) {
+		return withMutationLock(mutationLock, transactionID, component, func() (any, error) {
+			if !recoveryTracker.Ready() {
+				return nil, reliability.RecoveryRequiredError{}
+			}
+			unfinished, err := store.UnfinishedOperations(ctx, 1)
+			if err != nil {
+				return nil, err
+			}
+			if len(unfinished) != 0 {
+				return nil, reliability.RecoveryRequiredError{}
+			}
+			return action()
+		})
 	}
 	server, err := ipc.NewServer(authenticator, logger)
 	if err != nil {
@@ -201,7 +219,11 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		if err := databaseConnection.PingContext(ctx); err != nil {
 			return nil, fmt.Errorf("database health check failed")
 		}
-		return map[string]string{"status": "ok", "version": buildinfo.Version}, nil
+		status := "ok"
+		if !recoveryTracker.Ready() {
+			status = "degraded"
+		}
+		return map[string]string{"status": status, "version": buildinfo.Version}, nil
 	}); err != nil {
 		return err
 	}
@@ -209,7 +231,16 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		if err := decodeEmptyPayload(payload); err != nil {
 			return nil, err
 		}
-		return reliability.Inspect(ctx, store, mutationLock, time.Now().UTC())
+		status, err := reliability.Inspect(ctx, store, mutationLock, time.Now().UTC())
+		if err != nil {
+			return nil, err
+		}
+		status.LastRecovery = recoveryTracker.Last()
+		if !recoveryTracker.Ready() {
+			status.Ready = false
+			status.RecoveryRequired = true
+		}
+		return status, nil
 	}); err != nil {
 		return err
 	}
@@ -219,8 +250,9 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}
 		return withMutationLock(mutationLock, domain.ID(logging.OperationID(ctx)), "recovery", func() (any, error) {
 			report, recoveryErr := recoveryCoordinator.Run(ctx)
+			recoveryTracker.Record(report)
 			if recoveryErr != nil {
-				logger.ErrorContext(ctx, "manual recovery failed", "component", report.FailedComponent, "error", recoveryErr)
+				logger.ErrorContext(ctx, "manual recovery failed", "component", report.FailedComponent)
 			}
 			return report, nil
 		})
@@ -280,7 +312,7 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}
 		natMutex.Lock()
 		defer natMutex.Unlock()
-		return withMutationLock(mutationLock, request.TransactionID, "nat", func() (any, error) {
+		return mutate(ctx, request.TransactionID, "nat", func() (any, error) {
 			plan, err := buildPlan(ctx, nat.PlanRequest{Family: request.Family, Forwards: request.Forwards})
 			if err != nil {
 				return nil, err
@@ -352,7 +384,7 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}
 		haproxyMutex.Lock()
 		defer haproxyMutex.Unlock()
-		return withMutationLock(mutationLock, request.TransactionID, "haproxy", func() (any, error) {
+		return mutate(ctx, request.TransactionID, "haproxy", func() (any, error) {
 			plan, err := buildHAProxyPlan(ctx, managedHAProxy.PlanRequest{Frontends: request.Frontends, Backends: request.Backends})
 			if err != nil {
 				return nil, err
@@ -503,7 +535,7 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}
 		outboundMutex.Lock()
 		defer outboundMutex.Unlock()
-		return withMutationLock(mutationLock, request.TransactionID, "singbox", func() (any, error) {
+		return mutate(ctx, request.TransactionID, "singbox", func() (any, error) {
 			plan, err := loadSingBoxPlan(ctx)
 			if err != nil {
 				return nil, err
@@ -606,7 +638,7 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}
 		outboundMutex.Lock()
 		defer outboundMutex.Unlock()
-		return withMutationLock(mutationLock, request.TransactionID, "interface", func() (any, error) {
+		return mutate(ctx, request.TransactionID, "interface", func() (any, error) {
 			plan, err := loadInterfacePlan(ctx)
 			if err != nil {
 				return nil, err
@@ -744,7 +776,7 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}
 		outboundMutex.Lock()
 		defer outboundMutex.Unlock()
-		return withMutationLock(mutationLock, request.TransactionID, "routing", func() (any, error) {
+		return mutate(ctx, request.TransactionID, "routing", func() (any, error) {
 			plan, err := loadRoutePlan(ctx)
 			if err != nil {
 				return nil, err
@@ -820,7 +852,7 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}
 		xrayMutex.Lock()
 		defer xrayMutex.Unlock()
-		return withMutationLock(mutationLock, request.TransactionID, "xray", func() (any, error) {
+		return mutate(ctx, request.TransactionID, "xray", func() (any, error) {
 			plan, installation, err := loadXrayPlan(ctx)
 			if err != nil {
 				return nil, err

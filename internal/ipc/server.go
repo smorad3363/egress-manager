@@ -144,6 +144,10 @@ func (server *Server) serveConnection(ctx context.Context, connection net.Conn) 
 			code = "busy"
 			message = "Host mutation is already in progress."
 		}
+		if errors.As(err, &coded) && coded.IPCErrorCode() == "recovery_required" {
+			code = "recovery_required"
+			message = "Host recovery is required before mutation."
+		}
 		server.writeFailure(connection, request.OperationID, code, message)
 		return
 	}

@@ -23,6 +23,7 @@ type OperationSummary struct {
 }
 
 type RecoveryStatus struct {
+	LastRecovery     *RecoveryReport    `json:"last_recovery,omitempty"`
 	Ready            bool               `json:"ready"`
 	RecoveryRequired bool               `json:"recovery_required"`
 	MutationLock     Status             `json:"mutation_lock"`

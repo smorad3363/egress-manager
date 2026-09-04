@@ -80,6 +80,10 @@ func WriteJSON(writer http.ResponseWriter, status int, value any) error {
 }
 
 func WriteMutationError(writer http.ResponseWriter, request *http.Request, failureMessage string, err error) {
+	if ipc.IsRemoteError(err, "recovery_required") {
+		WriteError(writer, request, NewError(http.StatusServiceUnavailable, CodeUnavailable, "Host recovery is required before mutation.", err))
+		return
+	}
 	if ipc.IsRemoteError(err, "busy") {
 		WriteError(writer, request, NewError(http.StatusConflict, CodeConflict, "Another host mutation is in progress.", err))
 		return

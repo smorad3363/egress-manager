@@ -13,3 +13,4 @@ Create sequential records named `NNNN-short-title.md` from [[0000-template]]. Ac
 ## Records
 
 - [[0001-sqlite-driver|ADR 0001: Use go-sqlite3 for SQLite]]
+- [[0002-degraded-recovery|ADR 0002: Keep Emergency Recovery Available During Degraded Startup]]
