@@ -127,6 +127,23 @@ func TestBuildPlanRejectsCredentialMismatchAndDuplicateIDs(t *testing.T) {
 	}
 }
 
+func TestBuildPlanIgnoresNativeInterfaceOutbounds(t *testing.T) {
+	t.Parallel()
+	state, _ := ParseState(nil, false)
+	outbound := domain.Outbound{
+		ID: "native_wg", Name: "Native WireGuard", Adapter: domain.OutboundAdapterInterface, Type: domain.OutboundWireGuard,
+		Server: domain.Endpoint{Host: "vpn.example.com", Port: 51820}, Capabilities: domain.Capabilities{TCP: true, UDP: true},
+		Health: domain.UnknownOutboundHealth(), Enabled: true, SecretMetadata: []string{"private_key"},
+	}
+	plan, err := BuildPlan([]domain.Outbound{outbound}, nil, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Plan.EnabledOutbounds != 0 || strings.Contains(string(plan.Candidate()), "native_wg") {
+		t.Fatalf("native interface outbound entered sing-box candidate: %s", plan.Candidate())
+	}
+}
+
 func TestParseStateRejectsForeignConfiguration(t *testing.T) {
 	t.Parallel()
 	foreign := []byte(`{"$schema":"https://sing-box.sagernet.org/schema.json#egress-manager-owned","log":{"disabled":true},"outbounds":[{"type":"direct","tag":"foreign"}]}`)

@@ -103,3 +103,5 @@ Extend the generic outbound model with project-owned kernel WireGuard and OpenVP
 - Added deterministic, bounded, secret-safe WireGuard and OpenVPN imports. WireGuard rejects hooks, automatic routing/DNS, multiple peers, and unsafe directives; OpenVPN accepts only TUN clients with one explicit remote, inline credentials, and a strict non-executable directive allowlist.
 - Normalized OpenVPN profiles force an owned deterministic TUN name, `nobind`, and `route-nopull`; normalized credentials and complete profiles remain in the existing encrypted credential boundary.
 - Reused the existing revisioned outbound table and `(enabled, adapter, id)` covering lookup index; no migration or additional write amplification is required for native adapter persistence.
+- Added deterministic native lifecycle plans with secret-free owned state, authenticated runtime-config hashes, foreign interface collision rejection, and create/reconcile/verify/remove action reviews.
+- Updated sing-box planning to validate but ignore native interface outbounds, keeping adapter candidates isolated while preserving duplicate-ID detection.

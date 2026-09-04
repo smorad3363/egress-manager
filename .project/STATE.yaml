@@ -6,12 +6,12 @@ phase: 10
 phase_name: interface-outbounds
 
 active_spec: specs/010-interface-outbounds/spec.md
-active_task: native-interface-lifecycle
+active_task: native-interface-executor
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: implement private native lifecycle plans and executors for kernel WireGuard and project-owned OpenVPN systemd clients
+next_action: implement journaled native validation, apply, verification, rollback, cleanup, and restart recovery for interface outbound lifecycle plans
 
 dirty_work_expected: false
 
@@ -98,6 +98,8 @@ recent_decisions:
   - The existing outbound table and enabled-adapter-ID index already cover native adapter persistence, so Phase 10 adds no schema migration.
   - WireGuard imports accept exactly one peer and reject wg-quick hooks, DNS, SaveConfig, and automatic table ownership.
   - OpenVPN imports accept only one TUN client remote with inline credential material and normalize `nobind`, `route-nopull`, and a deterministic owned device name.
+  - Native lifecycle state stores only owned IDs, interface/service names, addresses, MTU, and authenticated configuration hashes; runtime secret files remain private.
+  - sing-box plans validate but omit interface-adapter outbounds, preventing native VPN credentials or definitions from entering sing-box candidates.
 
 touched_areas:
   - generic outbound abstraction

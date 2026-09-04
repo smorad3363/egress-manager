@@ -99,13 +99,13 @@ func BuildPlan(outbounds []domain.Outbound, credentials map[domain.ID][]byte, st
 		if err := outbound.Validate(); err != nil {
 			return ExecutionPlan{}, fmt.Errorf("validate outbound %q: %w", outbound.ID, err)
 		}
-		if outbound.Adapter != domain.OutboundAdapterSingBox {
-			return ExecutionPlan{}, fmt.Errorf("outbound %q does not use the sing-box adapter", outbound.ID)
-		}
 		if _, exists := seen[outbound.ID]; exists {
 			return ExecutionPlan{}, fmt.Errorf("duplicate outbound %q", outbound.ID)
 		}
 		seen[outbound.ID] = struct{}{}
+		if outbound.Adapter != domain.OutboundAdapterSingBox {
+			continue
+		}
 		if !outbound.Enabled {
 			continue
 		}
