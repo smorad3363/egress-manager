@@ -6,12 +6,12 @@ phase: 9
 phase_name: xray-marzban-3x-ui-adapter
 
 active_spec: specs/009-xray-panel-adapter/spec.md
-active_task: xray-panel-read-only-discovery-model
+active_task: xray-native-managed-fragment-plan
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: implement bounded typed discovery for standalone Xray, Marzban, and 3x-ui installations, including version, service, config roots, tags, ownership, and supported mutation strategy
+next_action: define the positively proven standalone Xray managed-fragment boundary and build stale-safe native inboundTag-to-outboundTag route plans while keeping Marzban and 3x-ui read-only
 
 dirty_work_expected: false
 
@@ -75,6 +75,9 @@ recent_decisions:
   - Existing outbound-only apply preserves active routed TUN intents from the owned routing state instead of silently removing them.
   - Phase 8 no-leak tests use a dual-stack source subnet, kill the generated TUN, and assert zero direct-egress client packets with tcpdump while DNS and IPv6 are blocked.
   - Xray-family integrations begin read-only and remain read-only unless a native managed-fragment or documented API boundary is positively identified.
+  - Xray discovery inspects only fixed standalone, Marzban, and 3x-ui paths; every discovered configuration remains foreign-owned and read-only.
+  - Multiple configuration candidates for one service are rejected as ambiguous instead of selecting a path heuristically.
+  - Version probes use only fixed Xray executable candidates and service probes use fixed systemctl arguments without invoking a shell.
 
 touched_areas:
   - Xray, Marzban, and 3x-ui discovery

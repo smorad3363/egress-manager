@@ -62,3 +62,6 @@ Discover compatible Xray installations and safely bind existing inbound tags to 
 ## Progress
 
 - Phase specification created from the authoritative English roadmap after Phase 8 no-leak acceptance passed.
+- Added deterministic, bounded, read-only discovery for fixed standalone Xray, Marzban, and 3x-ui layouts.
+- Discovery records configuration roots and hashes, explicit tags, fixed executable/version evidence, systemd state, foreign ownership, read-only strategy, and limitations without returning foreign configuration contents.
+- Unsafe files, symlinks, malformed input, duplicate or unsafe tags, unstable reads, and ambiguous candidates for one service are rejected.
