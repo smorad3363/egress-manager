@@ -72,7 +72,7 @@ func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, ses
 
 func (server *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.Handle("/api/v1/health", server.method(http.MethodGet, server.health))
+	mux.Handle("/api/v1/health", server.methods([]string{http.MethodGet, http.MethodHead}, server.health))
 	mux.Handle("/api/v1/auth/login", server.method(http.MethodPost, http.HandlerFunc(server.loginHandler)))
 	mux.Handle("/api/v1/auth/logout", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.logoutHandler))))
 	mux.Handle("/api/v1/session", server.method(http.MethodGet, server.requireSession(http.HandlerFunc(server.sessionHandler))))
@@ -84,9 +84,20 @@ func (server *Server) Handler() http.Handler {
 }
 
 func (server *Server) method(method string, next http.Handler) http.Handler {
+	return server.methods([]string{method}, next)
+}
+
+func (server *Server) methods(methods []string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.Method != method {
-			writer.Header().Set("Allow", method)
+		allowed := false
+		for _, method := range methods {
+			if request.Method == method {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			writer.Header().Set("Allow", strings.Join(methods, ", "))
 			WriteError(writer, request, NewError(http.StatusMethodNotAllowed, CodeMethodNotAllow, "Method not allowed.", nil))
 			return
 		}

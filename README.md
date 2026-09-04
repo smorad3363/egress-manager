@@ -19,3 +19,5 @@ pnpm --dir web build
 ```
 
 Project recovery state lives in `.project/STATE.yaml`.
+
+Runtime configuration and secure administrator provisioning are documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).

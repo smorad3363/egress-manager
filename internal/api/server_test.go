@@ -84,6 +84,21 @@ func TestUnauthenticatedControlEndpointIsRejected(t *testing.T) {
 	}
 }
 
+func TestHealthSupportsHead(t *testing.T) {
+	t.Parallel()
+
+	server, _ := newTestAPIServer(t)
+	request := httptest.NewRequest(http.MethodHead, "/api/v1/health", nil)
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d", response.Code)
+	}
+	if response.Body.Len() != 0 {
+		t.Fatalf("HEAD response contained a body: %q", response.Body.String())
+	}
+}
+
 func TestLoginSessionCSRFControlAndLogoutFlow(t *testing.T) {
 	t.Parallel()
 

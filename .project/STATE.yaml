@@ -2,24 +2,25 @@ schema_version: 1
 
 project: egress-manager
 
-phase: 2
-phase_name: backend-foundation
+phase: 3
+phase_name: frontend-design-system
 
-active_spec: specs/002-backend-foundation/spec.md
-active_task: service-runtime-wiring
+active_spec: specs/003-frontend-design-system/spec.md
+active_task: design-tokens-and-application-shell
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: wire egressd and egress-web runtimes with authenticated IPC, TLS, graceful shutdown, and integration tests
+next_action: implement accessible dark-first tokens, reusable primitives, responsive navigation, and browser coverage
 
-dirty_work_expected: true
+dirty_work_expected: false
 
 tests:
   last_run: 2026-09-04
   result: pass
   commands:
-    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test ./internal/api ./internal/ipc ./internal/logging ./internal/config ./internal/auth ./internal/database && go vet ./internal/api ./internal/ipc ./internal/logging ./internal/config ./internal/auth ./internal/database"
+    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test ./... && go vet ./..."
+    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test -race ./..."
 
 network_transaction:
   status: none
@@ -36,9 +37,9 @@ recent_decisions:
   - Go 1.27.1 verification uses the official Docker image because the Windows download endpoint returned HTTP 404.
   - Network integration runs entirely inside disposable namespaces and modifies no host firewall table.
   - SQLite uses go-sqlite3 with CGO; rationale and build risk are recorded in ADR 0001.
+  - Non-loopback panel listeners require TLS; browser sessions always use secure cookies.
+  - The IPC key is domain-separated before use for login-throttle buckets.
 
 touched_areas:
-  - internal/api
-  - internal/ipc
-  - internal/logging
-  - internal/config TLS and shared key validation
+  - specs/003-frontend-design-system
+  - web/src

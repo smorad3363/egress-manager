@@ -45,6 +45,9 @@ func (configuration Config) Validate() error {
 	if err != nil || !address.IsValid() {
 		errs = append(errs, fmt.Errorf("listen_address must be an IP address"))
 	}
+	if configuration.ListenPort == 0 {
+		errs = append(errs, fmt.Errorf("listen_port must be selected before use"))
+	}
 	if strings.TrimSpace(configuration.DataDirectory) == "" || !filepath.IsAbs(configuration.DataDirectory) {
 		errs = append(errs, fmt.Errorf("data_directory must be absolute"))
 	}
