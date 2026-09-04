@@ -41,9 +41,11 @@ type healthyControl struct {
 	xrayPlan            managedXray.FragmentReview
 	lastXrayApply       managedXray.FragmentApplyRequest
 	interfaceImport     managedInterface.ImportResponse
+	interfaceTest       managedInterface.TestResponse
 	interfacePlan       managedInterface.Review
 	lastInterfaceApply  managedInterface.ApplyRequest
 	lastInterfaceImport managedInterface.ImportRequest
+	lastInterfaceTest   managedInterface.TestRequest
 }
 
 func (control *healthyControl) Health(context.Context) error {
@@ -140,6 +142,12 @@ func (control *healthyControl) ImportInterfaceOutbound(_ context.Context, reques
 	control.calls++
 	control.lastInterfaceImport = request
 	return control.interfaceImport, nil
+}
+
+func (control *healthyControl) TestInterfaceOutbound(_ context.Context, request managedInterface.TestRequest) (managedInterface.TestResponse, error) {
+	control.calls++
+	control.lastInterfaceTest = request
+	return control.interfaceTest, nil
 }
 
 func (control *healthyControl) PlanInterfaceOutbounds(context.Context) (managedInterface.Review, error) {

@@ -22,6 +22,14 @@ func (control IPCControl) ImportInterfaceOutbound(ctx context.Context, request m
 	return response, nil
 }
 
+func (control IPCControl) TestInterfaceOutbound(ctx context.Context, request managedInterface.TestRequest) (managedInterface.TestResponse, error) {
+	var response managedInterface.TestResponse
+	if err := control.Client.Call(ctx, ipc.OperationInterfaceTest, request, &response); err != nil {
+		return managedInterface.TestResponse{}, err
+	}
+	return response, nil
+}
+
 func (control IPCControl) PlanInterfaceOutbounds(ctx context.Context) (managedInterface.Review, error) {
 	var response managedInterface.Review
 	if err := control.Client.Call(ctx, ipc.OperationInterfacePlan, struct{}{}, &response); err != nil {

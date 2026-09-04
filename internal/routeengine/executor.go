@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/egress-manager/egress-manager/internal/domain"
+	managedInterface "github.com/egress-manager/egress-manager/internal/interfaceoutbound"
 	"github.com/egress-manager/egress-manager/internal/routing"
 	"github.com/egress-manager/egress-manager/internal/secrets"
 	"github.com/egress-manager/egress-manager/internal/singbox"
@@ -40,13 +41,15 @@ type JournalProtector interface {
 }
 
 type Executor struct {
-	Runner            system.Runner
-	Journal           Journal
-	Protector         JournalProtector
-	SingBoxConfigPath string
-	RoutingStatePath  string
-	Timeout           time.Duration
-	Now               func() time.Time
+	Runner                    system.Runner
+	Journal                   Journal
+	Protector                 JournalProtector
+	SingBoxConfigPath         string
+	RoutingStatePath          string
+	InterfaceStatePath        string
+	InterfaceRuntimeDirectory string
+	Timeout                   time.Duration
+	Now                       func() time.Time
 }
 
 type ApplyResponse struct {
@@ -70,7 +73,14 @@ func (executor Executor) Execute(ctx context.Context, id domain.ID, plan Plan) (
 	if err := executor.validate(); err != nil {
 		return ApplyResponse{}, err
 	}
-	validatedPlan, err := BuildPlan(plan.singBox, plan.routing, plan.native)
+	interfaceState, err := managedInterface.InspectState(executor.InterfaceStatePath, executor.InterfaceRuntimeDirectory)
+	if err != nil {
+		return ApplyResponse{}, err
+	}
+	if interfaceState.Hash != plan.Review.InterfaceStateHash {
+		return ApplyResponse{}, ErrStateChanged
+	}
+	validatedPlan, err := BuildPlan(plan.singBox, plan.routing, plan.native, interfaceState)
 	if err != nil {
 		return ApplyResponse{}, err
 	}
@@ -560,8 +570,12 @@ func (executor Executor) protectSnapshot(id domain.ID, snapshots ...fileSnapshot
 }
 
 func (executor Executor) validate() error {
-	if executor.Runner == nil || executor.Journal == nil || executor.Protector == nil || !filepath.IsAbs(executor.SingBoxConfigPath) || !filepath.IsAbs(executor.RoutingStatePath) || filepath.Clean(executor.SingBoxConfigPath) == filepath.Clean(executor.RoutingStatePath) {
-		return fmt.Errorf("route-engine executor dependencies and distinct absolute paths are required")
+	if executor.Runner == nil || executor.Journal == nil || executor.Protector == nil || !filepath.IsAbs(executor.SingBoxConfigPath) || !filepath.IsAbs(executor.RoutingStatePath) || !filepath.IsAbs(executor.InterfaceStatePath) || !filepath.IsAbs(executor.InterfaceRuntimeDirectory) || filepath.Clean(executor.SingBoxConfigPath) == filepath.Clean(executor.RoutingStatePath) {
+		return fmt.Errorf("route-engine executor dependencies and absolute owned paths are required")
+	}
+	interfaceRelative, err := filepath.Rel(filepath.Clean(executor.InterfaceRuntimeDirectory), filepath.Clean(executor.InterfaceStatePath))
+	if err != nil || interfaceRelative == "." || interfaceRelative == ".." || strings.HasPrefix(interfaceRelative, ".."+string(filepath.Separator)) || filepath.IsAbs(interfaceRelative) {
+		return fmt.Errorf("route-engine interface state must be inside its runtime directory")
 	}
 	return nil
 }

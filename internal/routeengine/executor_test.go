@@ -2,7 +2,9 @@ package routeengine
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/egress-manager/egress-manager/internal/database"
 	"github.com/egress-manager/egress-manager/internal/domain"
+	managedInterface "github.com/egress-manager/egress-manager/internal/interfaceoutbound"
 	"github.com/egress-manager/egress-manager/internal/routing"
 	"github.com/egress-manager/egress-manager/internal/secrets"
 	"github.com/egress-manager/egress-manager/internal/system"
@@ -121,6 +124,7 @@ func TestExecutorCommitsCoordinatedCandidates(t *testing.T) {
 	executor := Executor{
 		Runner: runner, Journal: store, Protector: routeEngineProtector(t),
 		SingBoxConfigPath: filepath.Join(directory, "sing-box.json"), RoutingStatePath: filepath.Join(directory, "routing.json"),
+		InterfaceStatePath: filepath.Join(directory, "interfaces", "state.json"), InterfaceRuntimeDirectory: filepath.Join(directory, "interfaces"),
 		Now: func() time.Time { return time.Unix(1_800_000_000, 0) },
 	}
 	response, err := executor.Execute(context.Background(), "route_success", plan)
@@ -152,7 +156,7 @@ func TestExecutorRejectsNativeValidationBeforeMutation(t *testing.T) {
 	store, _ := routeEngineStore(t)
 	directory := t.TempDir()
 	runner := &routeEngineRunner{t: t, failValidation: true}
-	executor := Executor{Runner: runner, Journal: store, Protector: routeEngineProtector(t), SingBoxConfigPath: filepath.Join(directory, "sing-box.json"), RoutingStatePath: filepath.Join(directory, "routing.json")}
+	executor := Executor{Runner: runner, Journal: store, Protector: routeEngineProtector(t), SingBoxConfigPath: filepath.Join(directory, "sing-box.json"), RoutingStatePath: filepath.Join(directory, "routing.json"), InterfaceStatePath: filepath.Join(directory, "interfaces", "state.json"), InterfaceRuntimeDirectory: filepath.Join(directory, "interfaces")}
 	if _, err := executor.Execute(context.Background(), "route_invalid", plan); err == nil {
 		t.Fatal("Execute() accepted failed native validation")
 	}
@@ -165,13 +169,43 @@ func TestExecutorRejectsNativeValidationBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestExecutorRejectsChangedInterfaceStateBeforeMutation(t *testing.T) {
+	t.Parallel()
+	plan := coordinatedTestPlan(t)
+	store, _ := routeEngineStore(t)
+	directory := t.TempDir()
+	runtimeDirectory := filepath.Join(directory, "interfaces")
+	if err := os.MkdirAll(runtimeDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	interfaceName, err := managedInterface.InterfaceName(domain.OutboundWireGuard, "changed_wg")
+	if err != nil {
+		t.Fatal(err)
+	}
+	configuration := []byte("changed native configuration")
+	digest := sha256.Sum256(configuration)
+	state := []byte(`{"schema":"egress-manager/interface-outbounds/v1","entries":[{"id":"changed_wg","kind":"wireguard","interface_name":"` + interfaceName + `","config_hash":"` + hex.EncodeToString(digest[:]) + `","addresses":["10.0.0.2/32"]}]}`)
+	if err := os.WriteFile(filepath.Join(runtimeDirectory, "changed_wg.wg.conf"), configuration, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	statePath := filepath.Join(runtimeDirectory, "state.json")
+	if err := os.WriteFile(statePath, state, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	runner := &routeEngineRunner{t: t}
+	executor := Executor{Runner: runner, Journal: store, Protector: routeEngineProtector(t), SingBoxConfigPath: filepath.Join(directory, "sing-box.json"), RoutingStatePath: filepath.Join(directory, "routing.json"), InterfaceStatePath: statePath, InterfaceRuntimeDirectory: runtimeDirectory}
+	if _, err := executor.Execute(context.Background(), "route_stale_interface", plan); !errors.Is(err, ErrStateChanged) {
+		t.Fatalf("Execute() error = %v, want ErrStateChanged", err)
+	}
+}
+
 func TestExecutorRollsBackPartialIPApply(t *testing.T) {
 	t.Parallel()
 	plan := coordinatedTestPlan(t)
 	store, _ := routeEngineStore(t)
 	directory := t.TempDir()
 	runner := &routeEngineRunner{t: t, failIPv6: true}
-	executor := Executor{Runner: runner, Journal: store, Protector: routeEngineProtector(t), SingBoxConfigPath: filepath.Join(directory, "sing-box.json"), RoutingStatePath: filepath.Join(directory, "routing.json")}
+	executor := Executor{Runner: runner, Journal: store, Protector: routeEngineProtector(t), SingBoxConfigPath: filepath.Join(directory, "sing-box.json"), RoutingStatePath: filepath.Join(directory, "routing.json"), InterfaceStatePath: filepath.Join(directory, "interfaces", "state.json"), InterfaceRuntimeDirectory: filepath.Join(directory, "interfaces")}
 	if _, err := executor.Execute(context.Background(), "route_rollback", plan); err == nil || !strings.Contains(err.Error(), "interrupted IPv6 apply") {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -194,7 +228,7 @@ func TestExecutorRecoversInterruptedApply(t *testing.T) {
 	protector := routeEngineProtector(t)
 	directory := t.TempDir()
 	runner := &routeEngineRunner{t: t, nftInstalled: true, ipv4Installed: true, ipv6Installed: true}
-	executor := Executor{Runner: runner, Journal: store, Protector: protector, SingBoxConfigPath: filepath.Join(directory, "sing-box.json"), RoutingStatePath: filepath.Join(directory, "routing.json")}
+	executor := Executor{Runner: runner, Journal: store, Protector: protector, SingBoxConfigPath: filepath.Join(directory, "sing-box.json"), RoutingStatePath: filepath.Join(directory, "routing.json"), InterfaceStatePath: filepath.Join(directory, "interfaces", "state.json"), InterfaceRuntimeDirectory: filepath.Join(directory, "interfaces")}
 	if err := os.WriteFile(executor.SingBoxConfigPath, plan.singBox.Candidate(), 0o600); err != nil {
 		t.Fatal(err)
 	}

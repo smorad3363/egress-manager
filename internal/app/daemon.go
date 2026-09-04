@@ -85,13 +85,13 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	if err := singboxExecutor.Recover(ctx); err != nil {
 		return fmt.Errorf("recover interrupted sing-box operations: %w", err)
 	}
-	routeExecutor := routeengine.Executor{Runner: runner, Journal: store, Protector: protector, SingBoxConfigPath: configuration.SingBoxConfigPath, RoutingStatePath: configuration.RoutingStatePath}
-	if err := routeExecutor.Recover(ctx); err != nil {
-		return fmt.Errorf("recover interrupted coordinated route operations: %w", err)
-	}
 	interfaceExecutor := managedInterface.Executor{Runner: runner, Journal: store, Protector: protector, StatePath: configuration.InterfaceStatePath, RuntimeDirectory: configuration.InterfaceRuntimeDirectory}
 	if err := interfaceExecutor.Recover(ctx); err != nil {
 		return fmt.Errorf("recover interrupted interface outbound operations: %w", err)
+	}
+	routeExecutor := routeengine.Executor{Runner: runner, Journal: store, Protector: protector, SingBoxConfigPath: configuration.SingBoxConfigPath, RoutingStatePath: configuration.RoutingStatePath, InterfaceStatePath: configuration.InterfaceStatePath, InterfaceRuntimeDirectory: configuration.InterfaceRuntimeDirectory}
+	if err := routeExecutor.Recover(ctx); err != nil {
+		return fmt.Errorf("recover interrupted coordinated route operations: %w", err)
 	}
 	unfinished, err := store.UnfinishedOperations(ctx, 1000)
 	if err != nil {
@@ -480,6 +480,56 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	}); err != nil {
 		return err
 	}
+	if err := server.Handle(ipc.OperationInterfaceTest, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		var request managedInterface.TestRequest
+		if err := decodePayload(payload, &request); err != nil {
+			return nil, err
+		}
+		outboundMutex.Lock()
+		defer outboundMutex.Unlock()
+		if (request.ID == "") == (request.Input == "") {
+			return nil, fmt.Errorf("exactly one stored interface outbound ID or import input is required")
+		}
+		state, err := managedInterface.InspectState(configuration.InterfaceStatePath, configuration.InterfaceRuntimeDirectory)
+		if err != nil {
+			return nil, err
+		}
+		tester := managedInterface.Tester{Runner: runner, RuntimeDirectory: configuration.InterfaceRuntimeDirectory, Timeout: 10 * time.Second}
+		if request.ID != "" {
+			if request.ExpectedRevision < 1 {
+				return nil, fmt.Errorf("expected revision is required")
+			}
+			stored, err := store.Outbound(ctx, request.ID)
+			if err != nil {
+				return nil, err
+			}
+			if stored.Revision != request.ExpectedRevision {
+				return nil, database.ErrConflict
+			}
+			if stored.Outbound.Adapter != domain.OutboundAdapterInterface {
+				return nil, fmt.Errorf("outbound does not use the interface adapter")
+			}
+			credential, err := store.OutboundCredential(ctx, request.ID)
+			if err != nil {
+				return nil, err
+			}
+			health := tester.Test(ctx, stored.Outbound, credential, state)
+			stored.Outbound.Health = health
+			updated, err := store.UpdateOutbound(ctx, stored.Outbound, request.ExpectedRevision, nil, time.Now().UTC())
+			if err != nil {
+				return nil, err
+			}
+			return managedInterface.TestResponse{Outbound: updated.Outbound, Health: health}, nil
+		}
+		parsed, err := managedInterface.ParseImport(request.Input)
+		if err != nil {
+			return nil, err
+		}
+		health := tester.Test(ctx, parsed.Outbound, parsed.CredentialDocument, state)
+		return managedInterface.TestResponse{Outbound: parsed.Outbound, Health: health}, nil
+	}); err != nil {
+		return err
+	}
 	if err := server.Handle(ipc.OperationInterfacePlan, func(ctx context.Context, payload json.RawMessage) (any, error) {
 		if err := decodeEmptyPayload(payload); err != nil {
 			return nil, err
@@ -575,7 +625,22 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		if err != nil {
 			return routeengine.Plan{}, err
 		}
-		desired, err := routing.BuildPlan(routing.Settings{TableBase: 20000, RulePriorityBase: 21000, ProtectedLocalPrefixes: configuration.ProtectedManagementCIDRs}, routes, outbounds, host, resolved, routingState)
+		interfaceState, err := managedInterface.InspectState(configuration.InterfaceStatePath, configuration.InterfaceRuntimeDirectory)
+		if err != nil {
+			return routeengine.Plan{}, err
+		}
+		interfacePlan, err := managedInterface.BuildPlan(outbounds, credentials, interfaceState, host.Interfaces)
+		if err != nil {
+			return routeengine.Plan{}, err
+		}
+		if interfacePlan.Review.StateHash != interfacePlan.Review.CandidateHash {
+			return routeengine.Plan{}, fmt.Errorf("native interface lifecycle must be applied before routed traffic can move")
+		}
+		interfaceOutbounds := make(map[domain.ID]string, len(interfaceState.Entries))
+		for _, entry := range interfaceState.Entries {
+			interfaceOutbounds[entry.ID] = entry.InterfaceName
+		}
+		desired, err := routing.BuildPlan(routing.Settings{TableBase: 20000, RulePriorityBase: 21000, ProtectedLocalPrefixes: configuration.ProtectedManagementCIDRs, InterfaceOutbounds: interfaceOutbounds}, routes, outbounds, host, resolved, routingState)
 		if err != nil {
 			return routeengine.Plan{}, err
 		}
@@ -599,7 +664,7 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		if err != nil {
 			return routeengine.Plan{}, err
 		}
-		return routeengine.BuildPlan(singBoxPlan, desired, native)
+		return routeengine.BuildPlan(singBoxPlan, desired, native, interfaceState)
 	}
 	if err := server.Handle(ipc.OperationRoutesPlan, func(ctx context.Context, payload json.RawMessage) (any, error) {
 		if err := decodeEmptyPayload(payload); err != nil {
@@ -627,8 +692,8 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 			return nil, err
 		}
 		review := plan.Review
-		if request.ExpectedSingBoxStateHash == "" || request.ExpectedRoutingStateHash == "" || request.ExpectedSingBoxCandidate == "" || request.ExpectedRoutingCandidate == "" || request.ExpectedNativeCandidate == "" || request.ExpectedCombinedCandidate == "" ||
-			review.SingBoxStateHash != request.ExpectedSingBoxStateHash || review.RoutingStateHash != request.ExpectedRoutingStateHash || review.SingBoxCandidateHash != request.ExpectedSingBoxCandidate || review.RoutingCandidateHash != request.ExpectedRoutingCandidate || review.NativeCandidateHash != request.ExpectedNativeCandidate || review.CombinedCandidateHash != request.ExpectedCombinedCandidate {
+		if request.ExpectedSingBoxStateHash == "" || request.ExpectedRoutingStateHash == "" || request.ExpectedInterfaceStateHash == "" || request.ExpectedSingBoxCandidate == "" || request.ExpectedRoutingCandidate == "" || request.ExpectedNativeCandidate == "" || request.ExpectedCombinedCandidate == "" ||
+			review.SingBoxStateHash != request.ExpectedSingBoxStateHash || review.RoutingStateHash != request.ExpectedRoutingStateHash || review.InterfaceStateHash != request.ExpectedInterfaceStateHash || review.SingBoxCandidateHash != request.ExpectedSingBoxCandidate || review.RoutingCandidateHash != request.ExpectedRoutingCandidate || review.NativeCandidateHash != request.ExpectedNativeCandidate || review.CombinedCandidateHash != request.ExpectedCombinedCandidate {
 			return nil, routeengine.ErrStateChanged
 		}
 		return routeExecutor.Execute(ctx, request.TransactionID, plan)

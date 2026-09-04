@@ -142,6 +142,20 @@ func TestBuildPlanIgnoresNativeInterfaceOutbounds(t *testing.T) {
 	if plan.Plan.EnabledOutbounds != 0 || strings.Contains(string(plan.Candidate()), "native_wg") {
 		t.Fatalf("native interface outbound entered sing-box candidate: %s", plan.Candidate())
 	}
+	intent := routing.RouteIntent{
+		ID: "native_route", Source: domain.RouteSource{Kind: domain.RouteSourceInterface, Interface: "tun0"}, IngressInterface: "tun0",
+		TunnelInterface: "egmwg0123456789", RoutingTable: 20001, RulePriority: 21001,
+		OutboundID: outbound.ID, OutboundAdapter: domain.OutboundAdapterInterface, SelectedOutboundID: outbound.ID,
+		FailurePolicy: domain.FailureBlock, DNSPolicy: domain.DNSBlock, IPv4Policy: domain.IPv4FollowOutbound, IPv6Policy: domain.IPv6Block,
+		KillSwitch: true, BypassAddresses: []netip.Addr{netip.MustParseAddr("203.0.113.30")},
+	}
+	routed, err := BuildRoutedPlan([]domain.Outbound{outbound}, nil, []routing.RouteIntent{intent}, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if routed.Plan.RoutedRoutes != 0 || strings.Contains(string(routed.Candidate()), "egmwg0123456789") || strings.Contains(string(routed.Candidate()), `"type": "tun"`) {
+		t.Fatalf("native route entered sing-box candidate: %s", routed.Candidate())
+	}
 }
 
 func TestParseStateRejectsForeignConfiguration(t *testing.T) {

@@ -589,13 +589,18 @@ func (executor Executor) prepareRuntimeDirectory() error {
 }
 
 func (executor Executor) run(ctx context.Context, command system.Command) error {
+	_, err := executor.output(ctx, command)
+	return err
+}
+
+func (executor Executor) output(ctx context.Context, command system.Command) ([]byte, error) {
 	commandContext, cancel := context.WithTimeout(ctx, executor.timeout())
 	defer cancel()
 	result, err := executor.Runner.Run(commandContext, command)
 	if err != nil || result.ExitCode != 0 {
-		return errors.Join(err, fmt.Errorf("%s exited with code %d", command.Name, result.ExitCode))
+		return nil, errors.Join(err, fmt.Errorf("%s exited with code %d", command.Name, result.ExitCode))
 	}
-	return nil
+	return result.Stdout, nil
 }
 
 func (executor Executor) transition(ctx context.Context, id domain.ID, from, to domain.TransactionState, detail string) error {

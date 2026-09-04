@@ -69,7 +69,7 @@ func TestRouteAPIRequiresAuthenticationCSRFAndReviewedHashes(t *testing.T) {
 	}
 
 	control.routePlan = routeengine.Review{
-		Engine: "coordinated-egress-routing", SingBoxStateHash: "sb-state", RoutingStateHash: "route-state",
+		Engine: "coordinated-egress-routing", SingBoxStateHash: "sb-state", RoutingStateHash: "route-state", InterfaceStateHash: "interface-state",
 		SingBoxCandidateHash: "sb-candidate", RoutingCandidateHash: "route-candidate", NativeCandidateHash: "native-candidate", CombinedCandidateHash: "combined-candidate",
 	}
 	planned := request(http.MethodPost, "/api/v1/routes/plan", []byte(`{}`), true)
@@ -80,7 +80,7 @@ func TestRouteAPIRequiresAuthenticationCSRFAndReviewedHashes(t *testing.T) {
 	if missingHash.Code != http.StatusBadRequest {
 		t.Fatalf("missing hash apply status = %d", missingHash.Code)
 	}
-	applyBody := []byte(`{"expected_sing_box_state_hash":"sb-state","expected_routing_state_hash":"route-state","expected_sing_box_candidate_hash":"sb-candidate","expected_routing_candidate_hash":"route-candidate","expected_native_candidate_hash":"native-candidate","expected_combined_candidate_hash":"combined-candidate"}`)
+	applyBody := []byte(`{"expected_sing_box_state_hash":"sb-state","expected_routing_state_hash":"route-state","expected_interface_state_hash":"interface-state","expected_sing_box_candidate_hash":"sb-candidate","expected_routing_candidate_hash":"route-candidate","expected_native_candidate_hash":"native-candidate","expected_combined_candidate_hash":"combined-candidate"}`)
 	applied := request(http.MethodPost, "/api/v1/routes/apply", applyBody, true)
 	if applied.Code != http.StatusOK || !strings.HasPrefix(string(control.lastRouteApply.TransactionID), "route_") || control.lastRouteApply.ExpectedCombinedCandidate != "combined-candidate" {
 		t.Fatalf("apply status = %d request = %#v", applied.Code, control.lastRouteApply)

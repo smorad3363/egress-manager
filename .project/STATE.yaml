@@ -6,12 +6,12 @@ phase: 10
 phase_name: interface-outbounds
 
 active_spec: specs/010-interface-outbounds/spec.md
-active_task: interface-outbound-routing
+active_task: interface-outbound-integration
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: connect verified native interfaces to route planning and stale-state-protected apply without creating sing-box TUNs
+next_action: add disposable-host WireGuard and OpenVPN fixture integration, then run the Phase 10 acceptance gate
 
 dirty_work_expected: false
 
@@ -104,6 +104,9 @@ recent_decisions:
   - OpenVPN clients run as hardened project-named transient systemd services and are recreated from encrypted desired state after reboot; no plaintext profile is persisted outside the private runtime directory.
   - Native interface import, plan, and exact-two-hash apply are exposed through privileged IPC and authenticated CSRF-protected HTTP operations; candidate profiles remain private to egressd.
   - Interface state and runtime configuration paths are absolute, distinct, and constrained to the private runtime directory with backward-compatible defaults.
+  - Native routes use the exact verified project-owned interface and are omitted from sing-box TUN generation; incompatible direct fallback is rejected.
+  - Coordinated route review and apply bind the exact native interface state hash and refuse to move traffic until desired interface lifecycle state is already applied.
+  - Native health validates the private profile, verifies owned lifecycle state, reports WireGuard handshake evidence or active OpenVPN service state, and leaves internet reachability explicitly untested.
 
 touched_areas:
   - generic outbound abstraction

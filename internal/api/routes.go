@@ -136,7 +136,7 @@ func (server *Server) applyRoutesHandler(writer http.ResponseWriter, request *ht
 		return
 	}
 	input.TransactionID = domain.ID("route_" + logging.OperationID(request.Context()))
-	if input.ExpectedSingBoxStateHash == "" || input.ExpectedRoutingStateHash == "" || input.ExpectedSingBoxCandidate == "" || input.ExpectedRoutingCandidate == "" || input.ExpectedNativeCandidate == "" || input.ExpectedCombinedCandidate == "" {
+	if input.ExpectedSingBoxStateHash == "" || input.ExpectedRoutingStateHash == "" || input.ExpectedInterfaceStateHash == "" || input.ExpectedSingBoxCandidate == "" || input.ExpectedRoutingCandidate == "" || input.ExpectedNativeCandidate == "" || input.ExpectedCombinedCandidate == "" {
 		WriteError(writer, request, NewError(http.StatusBadRequest, CodeBadRequest, "All reviewed route plan hashes are required.", nil))
 		return
 	}

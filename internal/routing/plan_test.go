@@ -88,6 +88,38 @@ func TestBuildPlanSupportsExplicitFailoverAndOmitsDisabledRoutes(t *testing.T) {
 	}
 }
 
+func TestBuildPlanUsesVerifiedNativeInterfaceWithoutSyntheticTUN(t *testing.T) {
+	t.Parallel()
+	state, _ := ParseState(nil, false)
+	route := testRoute()
+	native := domain.Outbound{
+		ID: "primary", Name: "Native WireGuard", Adapter: domain.OutboundAdapterInterface, Type: domain.OutboundWireGuard,
+		Server: domain.Endpoint{Host: "203.0.113.30", Port: 51820}, Capabilities: domain.Capabilities{TCP: true, UDP: true},
+		Health: domain.UnknownOutboundHealth(), Enabled: true, SecretMetadata: []string{"private_key"},
+	}
+	host := testRoutingHost()
+	host.Interfaces = append(host.Interfaces, inventory.Interface{Name: "egmwg0123456789", State: "up", MTU: 1420})
+	settings := testRoutingSettings()
+	settings.InterfaceOutbounds = map[domain.ID]string{"primary": "egmwg0123456789"}
+	plan, err := BuildPlan(settings, []domain.Route{route}, []domain.Outbound{native}, host, nil, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseState(plan.Candidate(), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	intent := parsed.Routes[0]
+	if intent.OutboundAdapter != domain.OutboundAdapterInterface || intent.TunnelInterface != "egmwg0123456789" || len(intent.TunnelAddresses) != 0 {
+		t.Fatalf("native route intent = %#v", intent)
+	}
+	route.FailurePolicy = domain.FailureDirect
+	route.KillSwitch = false
+	if _, err := BuildPlan(settings, []domain.Route{route}, []domain.Outbound{native}, host, nil, state); err == nil || !strings.Contains(err.Error(), "does not support direct") {
+		t.Fatalf("direct native route error = %v", err)
+	}
+}
+
 func TestBuildPlanRejectsUnsafeSelectorsAndOutboundPaths(t *testing.T) {
 	t.Parallel()
 	state, _ := ParseState(nil, false)

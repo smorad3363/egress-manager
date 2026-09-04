@@ -24,6 +24,24 @@ func (server *Server) interfaceOutboundImportHandler(writer http.ResponseWriter,
 	_ = WriteJSON(writer, http.StatusCreated, result)
 }
 
+func (server *Server) interfaceOutboundTestHandler(writer http.ResponseWriter, request *http.Request) {
+	var input managedInterface.TestRequest
+	if err := decodeJSONLimit(request, &input, maximumInterfaceImportJSONBytes); err != nil {
+		WriteError(writer, request, NewError(http.StatusBadRequest, CodeBadRequest, "Invalid interface outbound health request.", err))
+		return
+	}
+	if (input.ID == "") == (input.Input == "") || input.ID != "" && input.ExpectedRevision < 1 {
+		WriteError(writer, request, NewError(http.StatusBadRequest, CodeBadRequest, "Exactly one stored interface outbound or profile is required.", nil))
+		return
+	}
+	result, err := server.control.TestInterfaceOutbound(request.Context(), input)
+	if err != nil {
+		WriteError(writer, request, NewError(http.StatusConflict, CodeConflict, "Interface outbound health check rejected.", err))
+		return
+	}
+	_ = WriteJSON(writer, http.StatusOK, result)
+}
+
 func (server *Server) interfaceOutboundsPlanHandler(writer http.ResponseWriter, request *http.Request) {
 	var input struct{}
 	if err := decodeJSON(request, &input); err != nil {

@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/egress-manager/egress-manager/internal/domain"
 	"github.com/egress-manager/egress-manager/internal/inventory"
@@ -32,6 +33,7 @@ type Settings struct {
 	TableBase              uint32
 	RulePriorityBase       uint32
 	ProtectedLocalPrefixes []netip.Prefix
+	InterfaceOutbounds     map[domain.ID]string
 }
 
 type ResolvedEndpoints map[domain.ID][]netip.Addr
@@ -93,11 +95,20 @@ type RouteIntent struct {
 }
 
 func (intent RouteIntent) Validate() error {
-	if err := intent.ID.Validate("owned route id"); err != nil || intent.TunnelInterface != tunnelName(intent.ID) || !linuxInterfacePattern.MatchString(intent.IngressInterface) || intent.RoutingTable == 0 || intent.RulePriority == 0 {
+	if err := intent.ID.Validate("owned route id"); err != nil || !linuxInterfacePattern.MatchString(intent.TunnelInterface) || !linuxInterfacePattern.MatchString(intent.IngressInterface) || intent.RoutingTable == 0 || intent.RulePriority == 0 {
 		return fmt.Errorf("owned routing state contains an invalid route identity or resource")
 	}
-	if intent.OutboundAdapter != domain.OutboundAdapterSingBox {
-		return fmt.Errorf("owned route does not use the sing-box adapter")
+	if err := intent.OutboundAdapter.Validate(); err != nil {
+		return fmt.Errorf("owned route uses an invalid outbound adapter")
+	}
+	if intent.OutboundAdapter != domain.OutboundAdapterSingBox && intent.OutboundAdapter != domain.OutboundAdapterInterface {
+		return fmt.Errorf("owned route uses an unsupported outbound adapter")
+	}
+	if intent.OutboundAdapter == domain.OutboundAdapterSingBox && intent.TunnelInterface != tunnelName(intent.ID) {
+		return fmt.Errorf("owned sing-box route uses an invalid tunnel interface")
+	}
+	if intent.OutboundAdapter == domain.OutboundAdapterInterface && !strings.HasPrefix(intent.TunnelInterface, "egmwg") && !strings.HasPrefix(intent.TunnelInterface, "egmov") {
+		return fmt.Errorf("owned native route uses an invalid tunnel interface")
 	}
 	if intent.UseDirect {
 		if intent.FailurePolicy != domain.FailureDirect || intent.SelectedOutboundID != "" {
@@ -123,8 +134,12 @@ func (intent RouteIntent) Validate() error {
 	if intent.Source.Kind == domain.RouteSourceInterface && intent.Source.Interface != intent.IngressInterface {
 		return fmt.Errorf("owned route ingress does not match its interface source")
 	}
-	if len(intent.TunnelAddresses) != 2 || !validTunnelAddress(intent.TunnelAddresses[0], true) || !validTunnelAddress(intent.TunnelAddresses[1], false) {
-		return fmt.Errorf("owned route contains invalid tunnel addresses")
+	if intent.OutboundAdapter == domain.OutboundAdapterSingBox {
+		if len(intent.TunnelAddresses) != 2 || !validTunnelAddress(intent.TunnelAddresses[0], true) || !validTunnelAddress(intent.TunnelAddresses[1], false) {
+			return fmt.Errorf("owned route contains invalid tunnel addresses")
+		}
+	} else if len(intent.TunnelAddresses) != 0 {
+		return fmt.Errorf("owned native route contains synthetic tunnel addresses")
 	}
 	if len(intent.BypassAddresses) < 1 || len(intent.BypassAddresses) > 32 {
 		return fmt.Errorf("owned route contains an invalid outbound bypass set")
@@ -216,8 +231,11 @@ func BuildPlan(settings Settings, routes []domain.Route, outbounds []domain.Outb
 		if !exists || !primary.Enabled {
 			return ExecutionPlan{}, fmt.Errorf("route %q references a missing or disabled primary outbound", route.ID)
 		}
-		if primary.Adapter != domain.OutboundAdapterSingBox {
-			return ExecutionPlan{}, fmt.Errorf("route %q outbound adapter does not support routed TUN", route.ID)
+		if primary.Adapter == domain.OutboundAdapterInterface && route.FailurePolicy == domain.FailureDirect {
+			return ExecutionPlan{}, fmt.Errorf("route %q native interface outbound does not support direct failure policy", route.ID)
+		}
+		if primary.Adapter != domain.OutboundAdapterSingBox && primary.Adapter != domain.OutboundAdapterInterface {
+			return ExecutionPlan{}, fmt.Errorf("route %q outbound adapter does not support routed traffic", route.ID)
 		}
 		bypass, err := endpointAddresses(primary, resolved)
 		if err != nil {
@@ -253,16 +271,34 @@ func BuildPlan(settings Settings, routes []domain.Route, outbounds []domain.Outb
 				useDirect = true
 			}
 		}
+		tunnelInterface := tunnelName(route.ID)
+		tunnelAddresses := slotTunnelAddresses(slot)
+		if primary.Adapter == domain.OutboundAdapterInterface {
+			selectedInterface, exists := settings.InterfaceOutbounds[selected]
+			if !exists || !linuxInterfacePattern.MatchString(selectedInterface) {
+				return ExecutionPlan{}, fmt.Errorf("route %q selected native outbound has no owned interface", route.ID)
+			}
+			link, exists := interfaces[selectedInterface]
+			if !exists || strings.EqualFold(link.State, "down") {
+				return ExecutionPlan{}, fmt.Errorf("route %q selected native outbound interface is unavailable", route.ID)
+			}
+			tunnelInterface = selectedInterface
+			tunnelAddresses = nil
+		}
 		intent := RouteIntent{
-			ID: route.ID, Source: route.Source, IngressInterface: ingress, TunnelInterface: tunnelName(route.ID), RoutingTable: table, RulePriority: priority,
+			ID: route.ID, Source: route.Source, IngressInterface: ingress, TunnelInterface: tunnelInterface, RoutingTable: table, RulePriority: priority,
 			OutboundID: route.OutboundID, OutboundAdapter: primary.Adapter, FallbackOutboundID: route.FallbackOutboundID, SelectedOutboundID: selected, UseDirect: useDirect,
 			FailurePolicy: route.FailurePolicy, DNSPolicy: route.DNSPolicy, DNSServers: append([]netip.Addr{}, route.DNSServers...), IPv4Policy: route.IPv4Policy, IPv6Policy: route.IPv6Policy,
-			KillSwitch: route.KillSwitch, MTU: route.MTU, TCPMSS: route.TCPMSS, BypassAddresses: bypass, TunnelAddresses: slotTunnelAddresses(slot),
+			KillSwitch: route.KillSwitch, MTU: route.MTU, TCPMSS: route.TCPMSS, BypassAddresses: bypass, TunnelAddresses: tunnelAddresses,
 		}
 		candidate.Routes = append(candidate.Routes, intent)
 		public.EnabledRoutes++
+		tunnelSummary := "Create a dedicated project-owned sing-box TUN path."
+		if primary.Adapter == domain.OutboundAdapterInterface {
+			tunnelSummary = "Use the verified project-owned native VPN interface."
+		}
 		public.Actions = append(public.Actions,
-			Action{Kind: "tun", Resource: intent.TunnelInterface, Summary: "Create a dedicated project-owned TUN path."},
+			Action{Kind: "tun", Resource: intent.TunnelInterface, Summary: tunnelSummary},
 			Action{Kind: "policy", Resource: string(route.ID), Summary: "Select traffic, bypass outbound endpoints, and enforce explicit IP and DNS policies."},
 		)
 		if route.KillSwitch {
@@ -352,6 +388,11 @@ func (settings Settings) validate() error {
 	for _, prefix := range settings.ProtectedLocalPrefixes {
 		if !prefix.IsValid() || prefix != prefix.Masked() {
 			errs = append(errs, fmt.Errorf("protected local prefixes must be canonical"))
+		}
+	}
+	for id, name := range settings.InterfaceOutbounds {
+		if err := id.Validate("interface outbound ID"); err != nil || !linuxInterfacePattern.MatchString(name) || !strings.HasPrefix(name, "egmwg") && !strings.HasPrefix(name, "egmov") {
+			errs = append(errs, fmt.Errorf("interface outbound mapping is invalid"))
 		}
 	}
 	return errors.Join(errs...)

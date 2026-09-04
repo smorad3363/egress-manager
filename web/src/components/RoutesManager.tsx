@@ -21,7 +21,7 @@ type Outbound = { id: string; name: string; type: string; enabled: boolean; heal
 type StoredOutbound = { outbound: Outbound; revision: number };
 type Action = { kind: string; resource: string; summary: string };
 type RouteReview = {
-  engine: string; sing_box_state_hash: string; routing_state_hash: string; sing_box_candidate_hash: string;
+  engine: string; sing_box_state_hash: string; routing_state_hash: string; interface_state_hash: string; sing_box_candidate_hash: string;
   routing_candidate_hash: string; native_candidate_hash: string; combined_candidate_hash: string;
   enabled_outbounds: number; enabled_routes: number; sing_box_actions: Action[]; routing_actions: Action[]; native_actions: Action[];
 };
@@ -99,6 +99,7 @@ export function RoutesManager({ createRequest }: { createRequest: number }) {
     if (!review) return;
     await api("/api/v1/routes/apply", { method: "POST", body: JSON.stringify({
       expected_sing_box_state_hash: review.sing_box_state_hash, expected_routing_state_hash: review.routing_state_hash,
+      expected_interface_state_hash: review.interface_state_hash,
       expected_sing_box_candidate_hash: review.sing_box_candidate_hash, expected_routing_candidate_hash: review.routing_candidate_hash,
       expected_native_candidate_hash: review.native_candidate_hash, expected_combined_candidate_hash: review.combined_candidate_hash,
     }) });

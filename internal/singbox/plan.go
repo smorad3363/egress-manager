@@ -187,6 +187,9 @@ func BuildRoutedPlan(outbounds []domain.Outbound, credentials map[domain.ID][]by
 			return ExecutionPlan{}, fmt.Errorf("duplicate routed intent %q", intent.ID)
 		}
 		seenRoutes[intent.ID] = struct{}{}
+		if intent.OutboundAdapter == domain.OutboundAdapterInterface {
+			continue
+		}
 		target := ownedTagPrefix + string(intent.SelectedOutboundID)
 		if intent.UseDirect {
 			target = directRouteTag

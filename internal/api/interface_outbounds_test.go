@@ -18,6 +18,7 @@ func TestInterfaceOutboundAPIRequiresAuthenticationCSRFAndExactHashes(t *testing
 		Server: domain.Endpoint{Host: "vpn.example.com", Port: 51820}, Capabilities: domain.Capabilities{TCP: true, UDP: true}, Health: domain.UnknownOutboundHealth(), Enabled: true, SecretMetadata: []string{"private_key"},
 	}}
 	control.interfacePlan = managedInterface.Review{Engine: "native-interface-outbounds", StateHash: "state-hash", CandidateHash: "candidate-hash", CandidateExists: true, EnabledOutbounds: 1, Actions: []managedInterface.Action{{Kind: "create", Resource: "egmwg0123456789", Summary: "Create owned interface."}}}
+	control.interfaceTest = managedInterface.TestResponse{Outbound: control.interfaceImport.Outbound, Health: domain.OutboundHealth{Status: domain.HealthDegraded, ConfigurationValid: domain.ProbePassed, TransportReachable: domain.ProbeUntestable, InternetReachable: domain.ProbeUntestable, TCP: domain.ProbeUntestable, UDP: domain.ProbeUntestable, Detail: "lifecycle_not_applied"}}
 	unauthenticated := httptest.NewRequest(http.MethodPost, "/api/v1/interface-outbounds/plan", strings.NewReader(`{}`))
 	unauthenticated.Header.Set("Content-Type", "application/json")
 	unauthenticatedResponse := httptest.NewRecorder()
@@ -44,6 +45,10 @@ func TestInterfaceOutboundAPIRequiresAuthenticationCSRFAndExactHashes(t *testing
 	imported := request("/api/v1/interface-outbounds/import", `{"input":"TEST_ONLY_PRIVATE_PROFILE"}`, true)
 	if imported.Code != http.StatusCreated || strings.Contains(imported.Body.String(), "TEST_ONLY_PRIVATE_PROFILE") || control.lastInterfaceImport.Input != "TEST_ONLY_PRIVATE_PROFILE" {
 		t.Fatalf("import status = %d body = %s request = %#v", imported.Code, imported.Body.String(), control.lastInterfaceImport)
+	}
+	tested := request("/api/v1/interface-outbounds/test", `{"id":"wireguard_test","expected_revision":1}`, true)
+	if tested.Code != http.StatusOK || !strings.Contains(tested.Body.String(), `"detail":"lifecycle_not_applied"`) || control.lastInterfaceTest.ID != "wireguard_test" {
+		t.Fatalf("test status = %d body = %s request = %#v", tested.Code, tested.Body.String(), control.lastInterfaceTest)
 	}
 	planned := request("/api/v1/interface-outbounds/plan", `{}`, true)
 	if planned.Code != http.StatusOK || !strings.Contains(planned.Body.String(), `"candidate_hash":"candidate-hash"`) || strings.Contains(planned.Body.String(), "candidate_config") {
