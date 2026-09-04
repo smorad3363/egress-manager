@@ -22,6 +22,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/nat"
 	"github.com/egress-manager/egress-manager/internal/routeengine"
 	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
+	managedXray "github.com/egress-manager/egress-manager/internal/xray"
 )
 
 const (
@@ -54,6 +55,9 @@ type ControlService interface {
 	ApplySingBox(context.Context, managedSingBox.ApplyRequest) (managedSingBox.ApplyResponse, error)
 	PlanRoutes(context.Context) (routeengine.Review, error)
 	ApplyRoutes(context.Context, routeengine.ApplyRequest) (routeengine.ApplyResponse, error)
+	DiscoverXray(context.Context) (managedXray.Report, error)
+	PlanXray(context.Context) (managedXray.FragmentReview, error)
+	ApplyXray(context.Context, managedXray.FragmentApplyRequest) (managedXray.FragmentApplyResponse, error)
 }
 
 type ForwardRepository interface {
@@ -89,6 +93,13 @@ type RouteRepository interface {
 	ListRoutes(context.Context, domain.ID, int) ([]database.StoredRoute, error)
 }
 
+type XrayBindingRepository interface {
+	CreateXrayBinding(context.Context, domain.XrayBinding, time.Time) (database.StoredXrayBinding, error)
+	UpdateXrayBinding(context.Context, domain.XrayBinding, int64, time.Time) (database.StoredXrayBinding, error)
+	DeleteXrayBinding(context.Context, domain.ID, int64) error
+	ListXrayBindings(context.Context, domain.ID, int) ([]database.StoredXrayBinding, error)
+}
+
 type ServerConfig struct {
 	SessionCookieName string
 	SecureCookies     bool
@@ -104,15 +115,16 @@ type Server struct {
 	haproxy   HAProxyRepository
 	outbounds OutboundRepository
 	routes    RouteRepository
+	xray      XrayBindingRepository
 	health    http.Handler
 	now       func() time.Time
 }
 
-func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, sessions SessionService, control ControlService, forwards ForwardRepository, haproxy HAProxyRepository, outbounds OutboundRepository, routes RouteRepository, health http.Handler) (*Server, error) {
+func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, sessions SessionService, control ControlService, forwards ForwardRepository, haproxy HAProxyRepository, outbounds OutboundRepository, routes RouteRepository, xray XrayBindingRepository, health http.Handler) (*Server, error) {
 	if config.SessionCookieName == "" || !config.SecureCookies {
 		return nil, fmt.Errorf("secure session cookie configuration is required")
 	}
-	if logger == nil || login == nil || sessions == nil || control == nil || forwards == nil || haproxy == nil || outbounds == nil || routes == nil || health == nil {
+	if logger == nil || login == nil || sessions == nil || control == nil || forwards == nil || haproxy == nil || outbounds == nil || routes == nil || xray == nil || health == nil {
 		return nil, fmt.Errorf("API dependencies are required")
 	}
 	return &Server{
@@ -125,6 +137,7 @@ func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, ses
 		haproxy:   haproxy,
 		outbounds: outbounds,
 		routes:    routes,
+		xray:      xray,
 		health:    health,
 		now:       time.Now,
 	}, nil
@@ -156,6 +169,10 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("/api/v1/routes/plan", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.planRoutesHandler))))
 	mux.Handle("/api/v1/routes/apply", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.applyRoutesHandler))))
 	mux.Handle("/api/v1/routes", server.requireSession(http.HandlerFunc(server.routesHandler)))
+	mux.Handle("/api/v1/xray/discovery", server.method(http.MethodGet, server.requireSession(http.HandlerFunc(server.xrayDiscoveryHandler))))
+	mux.Handle("/api/v1/xray/bindings", server.requireSession(http.HandlerFunc(server.xrayBindingsHandler)))
+	mux.Handle("/api/v1/xray/plan", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.xrayPlanHandler))))
+	mux.Handle("/api/v1/xray/apply", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.xrayApplyHandler))))
 	mux.Handle("/api/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		WriteError(writer, request, NewError(http.StatusNotFound, CodeNotFound, "Endpoint not found.", nil))
 	}))

@@ -27,6 +27,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/secrets"
 	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
 	"github.com/egress-manager/egress-manager/internal/system"
+	managedXray "github.com/egress-manager/egress-manager/internal/xray"
 )
 
 type DaemonOptions struct {
@@ -69,6 +70,7 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		return err
 	}
 	runner := system.ExecRunner{}
+	xrayDiscoverer := managedXray.Discoverer{Runner: runner, Files: managedXray.OSFileSystem{}, Timeout: 2 * time.Second}
 	executor := nat.Executor{Runner: runner, Journal: store, Verifier: nat.SystemVerifier{Runner: runner}}
 	if err := executor.Recover(ctx); err != nil {
 		return fmt.Errorf("recover interrupted network operations: %w", err)
@@ -85,6 +87,31 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	routeExecutor := routeengine.Executor{Runner: runner, Journal: store, Protector: protector, SingBoxConfigPath: configuration.SingBoxConfigPath, RoutingStatePath: configuration.RoutingStatePath}
 	if err := routeExecutor.Recover(ctx); err != nil {
 		return fmt.Errorf("recover interrupted coordinated route operations: %w", err)
+	}
+	unfinished, err := store.UnfinishedOperations(ctx, 1000)
+	if err != nil {
+		return err
+	}
+	xrayRecoveryRequired := false
+	for _, operation := range unfinished {
+		if operation.Operation == "xray_fragment_apply" {
+			xrayRecoveryRequired = true
+			break
+		}
+	}
+	if xrayRecoveryRequired {
+		report, discoverErr := xrayDiscoverer.Discover(ctx)
+		if discoverErr != nil {
+			return fmt.Errorf("discover Xray for recovery: %w", discoverErr)
+		}
+		installation, selectErr := selectManagedXrayInstallation(report)
+		if selectErr != nil {
+			return fmt.Errorf("recover interrupted Xray operations: %w", selectErr)
+		}
+		xrayExecutor := managedXray.FragmentExecutor{Runner: runner, Journal: store, Protector: protector, Installation: installation}
+		if recoverErr := xrayExecutor.Recover(ctx); recoverErr != nil {
+			return fmt.Errorf("recover interrupted Xray operations: %w", recoverErr)
+		}
 	}
 	collector := inventory.Collector{Runner: runner, Files: inventory.OSFiles{}, Timeout: 2 * time.Second}
 	server, err := ipc.NewServer(authenticator, logger)
@@ -509,6 +536,80 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		return err
 	}
 
+	var xrayMutex sync.Mutex
+	loadXrayPlan := func(ctx context.Context) (managedXray.FragmentExecutionPlan, managedXray.Installation, error) {
+		report, err := xrayDiscoverer.Discover(ctx)
+		if err != nil {
+			return managedXray.FragmentExecutionPlan{}, managedXray.Installation{}, err
+		}
+		installation, err := selectManagedXrayInstallation(report)
+		if err != nil {
+			return managedXray.FragmentExecutionPlan{}, managedXray.Installation{}, err
+		}
+		snapshot, err := managedXray.SnapshotConfdir(installation)
+		if err != nil {
+			return managedXray.FragmentExecutionPlan{}, managedXray.Installation{}, err
+		}
+		stored, err := store.ListXrayBindings(ctx, "", managedXray.MaximumBindings+1)
+		if err != nil {
+			return managedXray.FragmentExecutionPlan{}, managedXray.Installation{}, err
+		}
+		if len(stored) > managedXray.MaximumBindings {
+			return managedXray.FragmentExecutionPlan{}, managedXray.Installation{}, fmt.Errorf("Xray desired state exceeds %d bindings", managedXray.MaximumBindings)
+		}
+		bindings := make([]domain.XrayBinding, 0, len(stored))
+		for _, item := range stored {
+			bindings = append(bindings, item.Binding)
+		}
+		installation = snapshot.InstallationWithEffectiveTags(installation)
+		plan, err := managedXray.BuildFragmentPlan(installation, bindings, snapshot.Foreign, snapshot.Fragment)
+		return plan, installation, err
+	}
+	if err := server.Handle(ipc.OperationXrayDiscover, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		if err := decodeEmptyPayload(payload); err != nil {
+			return nil, err
+		}
+		xrayMutex.Lock()
+		defer xrayMutex.Unlock()
+		return xrayDiscoverer.Discover(ctx)
+	}); err != nil {
+		return err
+	}
+	if err := server.Handle(ipc.OperationXrayPlan, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		if err := decodeEmptyPayload(payload); err != nil {
+			return nil, err
+		}
+		xrayMutex.Lock()
+		defer xrayMutex.Unlock()
+		plan, _, err := loadXrayPlan(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return plan.Review, nil
+	}); err != nil {
+		return err
+	}
+	if err := server.Handle(ipc.OperationXrayApply, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		var request managedXray.FragmentApplyRequest
+		if err := decodePayload(payload, &request); err != nil {
+			return nil, err
+		}
+		xrayMutex.Lock()
+		defer xrayMutex.Unlock()
+		plan, installation, err := loadXrayPlan(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if request.ExpectedForeignStateHash == "" || request.ExpectedFragmentStateHash == "" || request.ExpectedCandidateHash == "" ||
+			plan.Review.ForeignStateHash != request.ExpectedForeignStateHash || plan.Review.FragmentStateHash != request.ExpectedFragmentStateHash || plan.Review.CandidateHash != request.ExpectedCandidateHash {
+			return nil, managedXray.ErrXrayStateChanged
+		}
+		executor := managedXray.FragmentExecutor{Runner: runner, Journal: store, Protector: protector, Installation: installation}
+		return executor.Execute(ctx, request.TransactionID, plan)
+	}); err != nil {
+		return err
+	}
+
 	listener, err := ipc.ListenUnix(configuration.ControlSocketPath)
 	if err != nil {
 		return err
@@ -521,6 +622,22 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	defer removeOwnedSocket(configuration.ControlSocketPath, identity, logger)
 	logger.Info("egressd ready", "socket_path", configuration.ControlSocketPath, "version", buildinfo.Version)
 	return server.Serve(ctx, listener)
+}
+
+func selectManagedXrayInstallation(report managedXray.Report) (managedXray.Installation, error) {
+	var selected []managedXray.Installation
+	for _, installation := range report.Installations {
+		if installation.MutationStrategy == managedXray.ManagedFragment {
+			selected = append(selected, installation)
+		}
+	}
+	if len(selected) == 0 {
+		return managedXray.Installation{}, fmt.Errorf("no Xray installation has a proven managed-fragment boundary")
+	}
+	if len(selected) != 1 {
+		return managedXray.Installation{}, fmt.Errorf("multiple writable Xray installations are ambiguous")
+	}
+	return selected[0], nil
 }
 
 func selectNATEngine(ctx context.Context, runner system.Runner, hostInventory inventory.Inventory, family nat.AddressFamily) (string, bool, nat.IPTablesState, error) {

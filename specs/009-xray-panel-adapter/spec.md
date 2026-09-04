@@ -70,6 +70,7 @@ Discover compatible Xray installations and safely bind existing inbound tags to 
 - Added private candidate composition that prepends deterministic project-owned native `inboundTag` to `outboundTag` rules while preserving the effective foreign routing object. Public review exposes only actions, counts, paths, and state/candidate hashes.
 - Added native validation in a private temporary confdir, encrypted transaction snapshots, repeated foreign/owned change detection, atomic fragment replacement or removal, bounded `xray.service` restart and verification, rollback, and restart recovery.
 - Added revisioned native binding persistence with keyset pagination and a partial unique index enforcing one enabled binding per inbound tag.
+- Added privileged discovery and exact-three-hash plan/apply IPC, authenticated and CSRF-protected HTTP discovery/binding CRUD/plan/apply, and fail-closed daemon startup recovery against a freshly rediscovered standalone boundary.
 
 ## Integration References
 

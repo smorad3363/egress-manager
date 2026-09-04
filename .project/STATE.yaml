@@ -6,12 +6,12 @@ phase: 9
 phase_name: xray-marzban-3x-ui-adapter
 
 active_spec: specs/009-xray-panel-adapter/spec.md
-active_task: xray-daemon-ipc
+active_task: xray-operations-ui
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: expose Xray discovery and exact-hash native route plan/apply through privileged IPC, including startup transaction recovery for the currently discovered supported standalone installation
+next_action: add the responsive Xray integrations and native bindings operations UI with explicit read-only limitations, reviewed actions, and exact-hash apply confirmation
 
 dirty_work_expected: false
 
@@ -85,6 +85,9 @@ recent_decisions:
   - Xray fragment apply journals authenticated snapshots before mutation, rechecks both foreign and owned hashes, uses atomic replacement, restarts and verifies xray.service, and rolls back or recovers interrupted operations.
   - Rollback restores or removes only the reserved owned fragment; detected concurrent foreign changes are reported without overwriting any foreign file.
   - Native Xray bindings use optimistic revisions and keyset pagination; a partial unique index permits at most one enabled binding per inbound tag.
+  - Privileged Xray apply rebuilds discovery, confdir snapshot, and desired bindings inside egressd and requires all three exact reviewed hashes.
+  - HTTP exposes authenticated discovery and revisioned binding CRUD; all mutations, plan, and apply require CSRF protection, and candidates are never returned.
+  - Daemon startup recovers Xray transactions only after rediscovering exactly one supported writable standalone installation; ambiguous or missing recovery boundaries fail closed.
 
 touched_areas:
   - Xray, Marzban, and 3x-ui discovery

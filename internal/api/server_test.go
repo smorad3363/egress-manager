@@ -23,6 +23,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/routeengine"
 	"github.com/egress-manager/egress-manager/internal/secrets"
 	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
+	managedXray "github.com/egress-manager/egress-manager/internal/xray"
 )
 
 type healthyControl struct {
@@ -35,6 +36,9 @@ type healthyControl struct {
 	singBoxPlan      managedSingBox.Plan
 	routePlan        routeengine.Review
 	lastRouteApply   routeengine.ApplyRequest
+	xrayReport       managedXray.Report
+	xrayPlan         managedXray.FragmentReview
+	lastXrayApply    managedXray.FragmentApplyRequest
 }
 
 func (control *healthyControl) Health(context.Context) error {
@@ -111,6 +115,22 @@ func (control *healthyControl) ApplyRoutes(_ context.Context, request routeengin
 	return routeengine.ApplyResponse{TransactionID: request.TransactionID, State: domain.TransactionCommitted, CombinedCandidateHash: request.ExpectedCombinedCandidate}, nil
 }
 
+func (control *healthyControl) DiscoverXray(context.Context) (managedXray.Report, error) {
+	control.calls++
+	return control.xrayReport, nil
+}
+
+func (control *healthyControl) PlanXray(context.Context) (managedXray.FragmentReview, error) {
+	control.calls++
+	return control.xrayPlan, nil
+}
+
+func (control *healthyControl) ApplyXray(_ context.Context, request managedXray.FragmentApplyRequest) (managedXray.FragmentApplyResponse, error) {
+	control.calls++
+	control.lastXrayApply = request
+	return managedXray.FragmentApplyResponse{TransactionID: request.TransactionID, State: domain.TransactionCommitted, CandidateHash: request.ExpectedCandidateHash}, nil
+}
+
 func newTestAPIServer(t *testing.T) (*Server, *healthyControl) {
 	t.Helper()
 	connection, err := database.Open(context.Background(), filepath.Join(t.TempDir(), "api.db"))
@@ -152,6 +172,7 @@ func newTestAPIServer(t *testing.T) (*Server, *healthyControl) {
 		authService,
 		sessions,
 		control,
+		store,
 		store,
 		store,
 		store,

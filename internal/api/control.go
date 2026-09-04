@@ -10,7 +10,32 @@ import (
 	"github.com/egress-manager/egress-manager/internal/nat"
 	"github.com/egress-manager/egress-manager/internal/routeengine"
 	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
+	managedXray "github.com/egress-manager/egress-manager/internal/xray"
 )
+
+func (control IPCControl) DiscoverXray(ctx context.Context) (managedXray.Report, error) {
+	var response managedXray.Report
+	if err := control.Client.Call(ctx, ipc.OperationXrayDiscover, struct{}{}, &response); err != nil {
+		return managedXray.Report{}, err
+	}
+	return response, nil
+}
+
+func (control IPCControl) PlanXray(ctx context.Context) (managedXray.FragmentReview, error) {
+	var response managedXray.FragmentReview
+	if err := control.Client.Call(ctx, ipc.OperationXrayPlan, struct{}{}, &response); err != nil {
+		return managedXray.FragmentReview{}, err
+	}
+	return response, nil
+}
+
+func (control IPCControl) ApplyXray(ctx context.Context, request managedXray.FragmentApplyRequest) (managedXray.FragmentApplyResponse, error) {
+	var response managedXray.FragmentApplyResponse
+	if err := control.Client.Call(ctx, ipc.OperationXrayApply, request, &response); err != nil {
+		return managedXray.FragmentApplyResponse{}, err
+	}
+	return response, nil
+}
 
 func (control IPCControl) PlanHAProxy(ctx context.Context, request managedHAProxy.PlanRequest) (managedHAProxy.Plan, error) {
 	var response managedHAProxy.Plan
