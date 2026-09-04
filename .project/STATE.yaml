@@ -6,12 +6,12 @@ phase: 11
 phase_name: reliability-recovery
 
 active_spec: specs/011-reliability-recovery/spec.md
-active_task: ordered-recovery-coordinator
+active_task: reboot-reconciliation
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: extract ordered startup recovery into a shared idempotent coordinator, then expose egressctl recover through the authenticated privileged boundary
+next_action: move desired native-interface and route reconciliation into the shared recovery workflow, then add restart and reboot convergence tests
 
 dirty_work_expected: false
 
@@ -115,6 +115,9 @@ recent_decisions:
   - All host-network apply paths and startup recovery share one nonblocking Linux flock; the kernel releases ownership after a crash while bounded metadata preserves operator diagnostics.
   - Recovery status never exposes protected previous snapshots, candidate configurations, credentials, or raw failure details.
   - CI executes the pinned Docker network lab instead of maintaining a divergent host dependency and probe list.
+  - Startup and manual recovery use one dependency-ordered coordinator and fail if any unfinished journal entry remains after all known component recoverers run.
+  - Recovery reports expose only step names, success flags, and timestamps; internal errors remain in privileged structured logs.
+  - Global lock contention uses stable IPC code busy, CLI exit code 4, and HTTP 409 without falsely claiming rollback was attempted.
 
 touched_areas:
   - runtime transaction journals

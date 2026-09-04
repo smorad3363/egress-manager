@@ -114,3 +114,8 @@ egressctl rollback
 - Added `egressctl status` with human and JSON output plus stable usage, transport-failure, and recovery-required exit codes.
 - Updated CI to run the same pinned Docker network-lab image used locally, eliminating drift from the expanded WireGuard/OpenVPN probe and dependency set.
 - Checkpoint acceptance passed: full Go test/vet/race and two consecutive privileged network-lab runs are green.
+- Replaced the daemon's ad hoc startup calls with one validated ordered coordinator: native interfaces, sing-box, HAProxy, conditional writable Xray, routing, NAT, then a final unfinished-journal assertion.
+- The coordinator stops at the first unsafe dependency failure, returns only component/timing outcomes publicly, and can be rerun idempotently without exposing the underlying error.
+- Added authenticated `recovery.run` IPC and `egressctl recover`; manual recovery uses the same coordinator and global lock as startup recovery.
+- IPC now returns a stable `busy` code for lock contention, `egressctl` maps it to exit code `4`, and HTTP apply endpoints return an accurate `409` instead of claiming rollback ran before mutation began.
+- Coordinator checkpoint passed full Go test/vet/race; the previously green network lab and frontend gates remain valid because this checkpoint changes no network candidates or frontend assets.

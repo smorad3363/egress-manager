@@ -198,7 +198,7 @@ func (server *Server) applyOutboundsHandler(writer http.ResponseWriter, request 
 	transactionID := domain.ID("singbox_" + logging.OperationID(request.Context()))
 	result, err := server.control.ApplySingBox(request.Context(), managedSingBox.ApplyRequest{TransactionID: transactionID, ExpectedStateHash: input.ExpectedStateHash, ExpectedCandidateHash: input.ExpectedCandidateHash})
 	if err != nil {
-		WriteError(writer, request, NewError(http.StatusServiceUnavailable, CodeUnavailable, "sing-box apply failed and rollback was attempted.", err))
+		WriteMutationError(writer, request, "sing-box apply failed and rollback was attempted.", err)
 		return
 	}
 	_ = WriteJSON(writer, http.StatusOK, result)

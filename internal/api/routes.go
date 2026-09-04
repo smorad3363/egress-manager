@@ -142,7 +142,7 @@ func (server *Server) applyRoutesHandler(writer http.ResponseWriter, request *ht
 	}
 	result, err := server.control.ApplyRoutes(request.Context(), input)
 	if err != nil {
-		WriteError(writer, request, NewError(http.StatusServiceUnavailable, CodeUnavailable, "Egress route apply failed and rollback was attempted.", err))
+		WriteMutationError(writer, request, "Egress route apply failed and rollback was attempted.", err)
 		return
 	}
 	_ = WriteJSON(writer, http.StatusOK, result)

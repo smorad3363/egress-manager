@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/egress-manager/egress-manager/internal/ipc"
 	"github.com/egress-manager/egress-manager/internal/logging"
 )
 
@@ -76,4 +77,12 @@ func WriteJSON(writer http.ResponseWriter, status int, value any) error {
 	writer.Header().Set("Content-Type", "application/json")
 	writer.WriteHeader(status)
 	return json.NewEncoder(writer).Encode(value)
+}
+
+func WriteMutationError(writer http.ResponseWriter, request *http.Request, failureMessage string, err error) {
+	if ipc.IsRemoteError(err, "busy") {
+		WriteError(writer, request, NewError(http.StatusConflict, CodeConflict, "Another host mutation is in progress.", err))
+		return
+	}
+	WriteError(writer, request, NewError(http.StatusServiceUnavailable, CodeUnavailable, failureMessage, err))
 }

@@ -178,7 +178,7 @@ func (server *Server) applyPortForwardsHandler(writer http.ResponseWriter, reque
 		TransactionID: transactionID, RequestedChange: string(requested), Family: input.Family, Forwards: forwards,
 	})
 	if err != nil {
-		WriteError(writer, request, NewError(http.StatusServiceUnavailable, CodeUnavailable, "NAT apply failed and rollback was attempted.", err))
+		WriteMutationError(writer, request, "NAT apply failed and rollback was attempted.", err)
 		return
 	}
 	_ = WriteJSON(writer, http.StatusOK, result)

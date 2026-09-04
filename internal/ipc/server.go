@@ -137,7 +137,14 @@ func (server *Server) serveConnection(ctx context.Context, connection net.Conn) 
 	value, err := handler(requestContext, request.Payload)
 	if err != nil {
 		server.logger.ErrorContext(requestContext, "IPC handler failed", "operation", request.Operation, "handler_error_type", fmt.Sprintf("%T", err))
-		server.writeFailure(connection, request.OperationID, "operation_failed", "IPC operation failed.")
+		code := "operation_failed"
+		message := "IPC operation failed."
+		var coded interface{ IPCErrorCode() string }
+		if errors.As(err, &coded) && coded.IPCErrorCode() == "busy" {
+			code = "busy"
+			message = "Host mutation is already in progress."
+		}
+		server.writeFailure(connection, request.OperationID, code, message)
 		return
 	}
 	payload, err := json.Marshal(value)

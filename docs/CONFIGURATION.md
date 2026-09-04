@@ -49,9 +49,10 @@ The IPC key file contains exactly 32 random bytes encoded as 64 hexadecimal char
 egressd --config /etc/egress-manager/config.json --ipc-key /etc/egress-manager/ipc.key
 egress-web --config /etc/egress-manager/config.json --ipc-key /etc/egress-manager/ipc.key
 egressctl status --config /etc/egress-manager/config.json --ipc-key /etc/egress-manager/ipc.key
+egressctl recover --config /etc/egress-manager/config.json --ipc-key /etc/egress-manager/ipc.key
 ```
 
-`egressctl status --json` returns secret-free recovery, unfinished-journal, and global-lock metadata. It exits with code `3` when manual recovery is required.
+`egressctl status --json` returns secret-free recovery, unfinished-journal, and global-lock metadata. It exits with code `3` when manual recovery is required. `egressctl recover` runs the same ordered coordinator used before daemon readiness; it exits with code `4` when another host mutation owns the global lock. Both commands support `--json`.
 
 Provision an administrator without placing the password in process arguments:
 

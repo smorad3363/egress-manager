@@ -72,7 +72,7 @@ func (server *Server) interfaceOutboundsApplyHandler(writer http.ResponseWriter,
 	transactionID := "interface_" + logging.OperationID(request.Context())
 	result, err := server.control.ApplyInterfaceOutbounds(request.Context(), managedInterface.ApplyRequest{TransactionID: domain.ID(transactionID), ExpectedStateHash: input.ExpectedStateHash, ExpectedCandidateHash: input.ExpectedCandidateHash})
 	if err != nil {
-		WriteError(writer, request, NewError(http.StatusServiceUnavailable, CodeUnavailable, "Interface outbound apply failed and rollback was attempted.", err))
+		WriteMutationError(writer, request, "Interface outbound apply failed and rollback was attempted.", err)
 		return
 	}
 	_ = WriteJSON(writer, http.StatusOK, result)

@@ -151,7 +151,7 @@ func (server *Server) xrayApplyHandler(writer http.ResponseWriter, request *http
 	}
 	result, err := server.control.ApplyXray(request.Context(), input)
 	if err != nil {
-		WriteError(writer, request, NewError(http.StatusServiceUnavailable, CodeUnavailable, "Xray apply failed and rollback was attempted.", err))
+		WriteMutationError(writer, request, "Xray apply failed and rollback was attempted.", err)
 		return
 	}
 	_ = WriteJSON(writer, http.StatusOK, result)

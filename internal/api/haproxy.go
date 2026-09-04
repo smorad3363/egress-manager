@@ -269,7 +269,7 @@ func (server *Server) haproxyApplyHandler(writer http.ResponseWriter, request *h
 	transactionID := domain.ID("haproxy_" + logging.OperationID(request.Context()))
 	result, err := server.control.ApplyHAProxy(request.Context(), managedHAProxy.ApplyRequest{TransactionID: transactionID, RequestedChange: string(requested), Frontends: frontends, Backends: backends})
 	if err != nil {
-		WriteError(writer, request, NewError(http.StatusServiceUnavailable, CodeUnavailable, "HAProxy apply failed and rollback was attempted.", err))
+		WriteMutationError(writer, request, "HAProxy apply failed and rollback was attempted.", err)
 		return
 	}
 	_ = WriteJSON(writer, http.StatusOK, result)

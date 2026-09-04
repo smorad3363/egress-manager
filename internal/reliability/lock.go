@@ -113,6 +113,10 @@ func (err *BusyError) Unwrap() error {
 	return ErrBusy
 }
 
+func (err *BusyError) IPCErrorCode() string {
+	return "busy"
+}
+
 type lockFile interface {
 	Close() error
 	Fd() uintptr

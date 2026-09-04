@@ -28,6 +28,11 @@ func testAuthenticator(t *testing.T) *Authenticator {
 	return authenticator
 }
 
+type codedBusyError struct{}
+
+func (codedBusyError) Error() string        { return "internal detail" }
+func (codedBusyError) IPCErrorCode() string { return "busy" }
+
 func TestRequestAuthenticationRejectsTamperAndStaleTimestamp(t *testing.T) {
 	t.Parallel()
 
@@ -74,6 +79,11 @@ func TestAuthenticatedUnixRoundTripAndReplayRejection(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := server.Handle(OperationRecoveryRun, func(context.Context, json.RawMessage) (any, error) {
+		return nil, codedBusyError{}
+	}); err != nil {
+		t.Fatal(err)
+	}
 	var mutationCalled atomic.Bool
 	if err := server.Handle(OperationNATApply, func(context.Context, json.RawMessage) (any, error) {
 		mutationCalled.Store(true)
@@ -106,11 +116,15 @@ func TestAuthenticatedUnixRoundTripAndReplayRejection(t *testing.T) {
 		t.Fatalf("unsigned mutation response = %#v; called = %v", unsignedResponse, mutationCalled.Load())
 	}
 
+	randomness := make([]byte, 128)
+	for index := range randomness {
+		randomness[index] = byte(index)
+	}
 	client := Client{
 		SocketPath:    socketPath,
 		Authenticator: authenticator,
 		Timeout:       2 * time.Second,
-		Random:        bytes.NewReader(bytes.Repeat([]byte{0x42}, 128)),
+		Random:        bytes.NewReader(randomness),
 	}
 	callContext := logging.WithOperationID(context.Background(), "fedcba9876543210fedcba9876543210")
 	var response map[string]string
@@ -119,6 +133,9 @@ func TestAuthenticatedUnixRoundTripAndReplayRejection(t *testing.T) {
 	}
 	if response["status"] != "ok" || response["operation_id"] != "fedcba9876543210fedcba9876543210" {
 		t.Fatalf("response = %#v", response)
+	}
+	if err := client.Call(context.Background(), OperationRecoveryRun, struct{}{}, nil); !IsRemoteError(err, "busy") {
+		t.Fatalf("coded busy error = %v", err)
 	}
 
 	request := Request{

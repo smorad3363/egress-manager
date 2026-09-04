@@ -23,6 +23,7 @@ import (
 	managedInterface "github.com/egress-manager/egress-manager/internal/interfaceoutbound"
 	"github.com/egress-manager/egress-manager/internal/inventory"
 	"github.com/egress-manager/egress-manager/internal/ipc"
+	"github.com/egress-manager/egress-manager/internal/logging"
 	"github.com/egress-manager/egress-manager/internal/nat"
 	"github.com/egress-manager/egress-manager/internal/reliability"
 	"github.com/egress-manager/egress-manager/internal/routeengine"
@@ -85,50 +86,54 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	runner := system.ExecRunner{}
 	xrayDiscoverer := managedXray.Discoverer{Runner: runner, Files: managedXray.OSFileSystem{}, Timeout: 2 * time.Second}
 	executor := nat.Executor{Runner: runner, Journal: store, Verifier: nat.SystemVerifier{Runner: runner}}
-	if err := executor.Recover(ctx); err != nil {
-		return fmt.Errorf("recover interrupted network operations: %w", err)
-	}
 	haproxyRuntime := managedHAProxy.RuntimeClient{SocketPath: configuration.HAProxyRuntimeSocketPath, Dialer: managedHAProxy.NetDialer{}, Timeout: 2 * time.Second}
 	haproxyExecutor := managedHAProxy.Executor{Runner: runner, Journal: store, Runtime: haproxyRuntime, ConfigPath: configuration.HAProxyConfigPath, PIDPath: configuration.HAProxyPIDPath}
-	if err := haproxyExecutor.Recover(ctx); err != nil {
-		return fmt.Errorf("recover interrupted HAProxy operations: %w", err)
-	}
 	singboxExecutor := managedSingBox.Executor{Runner: runner, Journal: store, Protector: protector, ConfigPath: configuration.SingBoxConfigPath}
-	if err := singboxExecutor.Recover(ctx); err != nil {
-		return fmt.Errorf("recover interrupted sing-box operations: %w", err)
-	}
 	interfaceExecutor := managedInterface.Executor{Runner: runner, Journal: store, Protector: protector, StatePath: configuration.InterfaceStatePath, RuntimeDirectory: configuration.InterfaceRuntimeDirectory}
-	if err := interfaceExecutor.Recover(ctx); err != nil {
-		return fmt.Errorf("recover interrupted interface outbound operations: %w", err)
-	}
 	routeExecutor := routeengine.Executor{Runner: runner, Journal: store, Protector: protector, SingBoxConfigPath: configuration.SingBoxConfigPath, RoutingStatePath: configuration.RoutingStatePath, InterfaceStatePath: configuration.InterfaceStatePath, InterfaceRuntimeDirectory: configuration.InterfaceRuntimeDirectory}
-	if err := routeExecutor.Recover(ctx); err != nil {
-		return fmt.Errorf("recover interrupted coordinated route operations: %w", err)
+	recoverXray := func(ctx context.Context) error {
+		unfinished, err := store.UnfinishedOperations(ctx, reliability.MaximumRecoveryOperations)
+		if err != nil {
+			return err
+		}
+		for _, operation := range unfinished {
+			if operation.Operation != "xray_fragment_apply" {
+				continue
+			}
+			report, err := xrayDiscoverer.Discover(ctx)
+			if err != nil {
+				return fmt.Errorf("discover Xray for recovery: %w", err)
+			}
+			installation, err := selectManagedXrayInstallation(report)
+			if err != nil {
+				return err
+			}
+			xrayExecutor := managedXray.FragmentExecutor{Runner: runner, Journal: store, Protector: protector, Installation: installation}
+			return xrayExecutor.Recover(ctx)
+		}
+		return nil
 	}
-	unfinished, err := store.UnfinishedOperations(ctx, 1000)
-	if err != nil {
-		return err
+	verifyRecoveryJournal := func(ctx context.Context) error {
+		unfinished, err := store.UnfinishedOperations(ctx, reliability.MaximumRecoveryOperations)
+		if err != nil {
+			return err
+		}
+		if len(unfinished) != 0 {
+			return fmt.Errorf("%d unfinished operations remain after recovery", len(unfinished))
+		}
+		return nil
 	}
-	xrayRecoveryRequired := false
-	for _, operation := range unfinished {
-		if operation.Operation == "xray_fragment_apply" {
-			xrayRecoveryRequired = true
-			break
-		}
-	}
-	if xrayRecoveryRequired {
-		report, discoverErr := xrayDiscoverer.Discover(ctx)
-		if discoverErr != nil {
-			return fmt.Errorf("discover Xray for recovery: %w", discoverErr)
-		}
-		installation, selectErr := selectManagedXrayInstallation(report)
-		if selectErr != nil {
-			return fmt.Errorf("recover interrupted Xray operations: %w", selectErr)
-		}
-		xrayExecutor := managedXray.FragmentExecutor{Runner: runner, Journal: store, Protector: protector, Installation: installation}
-		if recoverErr := xrayExecutor.Recover(ctx); recoverErr != nil {
-			return fmt.Errorf("recover interrupted Xray operations: %w", recoverErr)
-		}
+	recoveryCoordinator := reliability.Coordinator{Steps: []reliability.RecoveryStep{
+		{Component: "interface", Recover: interfaceExecutor.Recover},
+		{Component: "singbox", Recover: singboxExecutor.Recover},
+		{Component: "haproxy", Recover: haproxyExecutor.Recover},
+		{Component: "xray", Recover: recoverXray},
+		{Component: "routing", Recover: routeExecutor.Recover},
+		{Component: "nat", Recover: executor.Recover},
+		{Component: "journal", Recover: verifyRecoveryJournal},
+	}}
+	if _, err := recoveryCoordinator.Run(ctx); err != nil {
+		return fmt.Errorf("startup recovery failed: %w", err)
 	}
 	collector := inventory.Collector{Runner: runner, Files: inventory.OSFiles{}, Timeout: 2 * time.Second}
 	loadInterfacePlan := func(ctx context.Context) (managedInterface.ExecutionPlan, error) {
@@ -198,6 +203,20 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 			return nil, err
 		}
 		return reliability.Inspect(ctx, store, mutationLock, time.Now().UTC())
+	}); err != nil {
+		return err
+	}
+	if err := server.Handle(ipc.OperationRecoveryRun, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		if err := decodeEmptyPayload(payload); err != nil {
+			return nil, err
+		}
+		return withMutationLock(mutationLock, domain.ID(logging.OperationID(ctx)), "recovery", func() (any, error) {
+			report, recoveryErr := recoveryCoordinator.Run(ctx)
+			if recoveryErr != nil {
+				logger.ErrorContext(ctx, "manual recovery failed", "component", report.FailedComponent, "error", recoveryErr)
+			}
+			return report, nil
+		})
 	}); err != nil {
 		return err
 	}
