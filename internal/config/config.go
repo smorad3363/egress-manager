@@ -27,6 +27,7 @@ type Config struct {
 	HAProxyConfigPath        string         `json:"haproxy_config_path"`
 	HAProxyRuntimeSocketPath string         `json:"haproxy_runtime_socket_path"`
 	HAProxyPIDPath           string         `json:"haproxy_pid_path"`
+	SingBoxConfigPath        string         `json:"sing_box_config_path"`
 	SessionCookieName        string         `json:"session_cookie_name"`
 	SSHPorts                 []uint16       `json:"ssh_ports"`
 	ProtectedManagementCIDRs []netip.Prefix `json:"protected_management_cidrs"`
@@ -43,6 +44,7 @@ func Default(dataDirectory string) Config {
 		HAProxyConfigPath:        filepath.Join(dataDirectory, "haproxy.cfg"),
 		HAProxyRuntimeSocketPath: filepath.Join(dataDirectory, "haproxy-runtime.sock"),
 		HAProxyPIDPath:           filepath.Join(dataDirectory, "haproxy.pid"),
+		SingBoxConfigPath:        filepath.Join(dataDirectory, "sing-box.json"),
 		SessionCookieName:        defaultCookieName,
 		SSHPorts:                 []uint16{22},
 		ProtectedManagementCIDRs: []netip.Prefix{},
@@ -89,12 +91,13 @@ func (configuration Config) Validate() error {
 		"haproxy_config_path":         configuration.HAProxyConfigPath,
 		"haproxy_runtime_socket_path": configuration.HAProxyRuntimeSocketPath,
 		"haproxy_pid_path":            configuration.HAProxyPIDPath,
+		"sing_box_config_path":        configuration.SingBoxConfigPath,
 	} {
 		if strings.TrimSpace(path) == "" || !filepath.IsAbs(path) {
 			errs = append(errs, fmt.Errorf("%s must be absolute", name))
 		}
 	}
-	paths := []string{configuration.ControlSocketPath, configuration.HAProxyConfigPath, configuration.HAProxyRuntimeSocketPath, configuration.HAProxyPIDPath}
+	paths := []string{configuration.ControlSocketPath, configuration.HAProxyConfigPath, configuration.HAProxyRuntimeSocketPath, configuration.HAProxyPIDPath, configuration.SingBoxConfigPath}
 	seenPaths := map[string]struct{}{}
 	for _, path := range paths {
 		cleaned := filepath.Clean(path)

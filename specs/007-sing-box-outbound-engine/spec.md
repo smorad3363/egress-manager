@@ -83,3 +83,8 @@ Support URI and structured-configuration import where practical, with fixture-ba
 - Revisioned SQLite persistence with keyset pagination, encrypted credential isolation, atomic clone/delete semantics, and indexes for enabled adapter scans and protocol filtering.
 - Fixture-based URI import for VLESS, Trojan, Shadowsocks, VMess, Hysteria2, TUIC, SOCKS5, and WireGuard, plus structured sing-box JSON import.
 - Public import results and structured logging expose secret metadata only; credential values remain private and redacted.
+- Deterministic secret-safe planning where public output contains only actions and hashes while candidate and recovery journal payloads remain encrypted.
+- Native validation, atomic install, dedicated service restart, verification, rollback, and interrupted-operation recovery.
+- Current-version WireGuard endpoint conversion at the adapter boundary while preserving the generic WireGuard outbound domain type.
+- Layered health testing for configuration validity, direct transport reachability, proxied internet reachability, external IP, TCP, UDP testability, and latency.
+- Repeatable integration against the official pinned sing-box `v1.13.20` binary for all parser fixtures and an isolated chained SOCKS5 connectivity probe.

@@ -1,1 +1,1 @@
-wireguard://TEST_ONLY_PRIVATE_KEY@wireguard.example.com:51820?peer_public_key=TEST_ONLY_PUBLIC_KEY&local_address=10.7.0.2%2F32#WireGuard%20Fixture
+wireguard://AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA%3D@wireguard.example.com:51820?peer_public_key=ISIjJCUmJygpKissLS4vMDEyMzQ1Njc4OTo7PD0%2BP0A%3D&local_address=10.7.0.2%2F32#WireGuard%20Fixture

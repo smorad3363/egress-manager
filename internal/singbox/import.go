@@ -436,6 +436,13 @@ func normalizeHost(host string) (string, error) {
 func jsonPort(value any) (uint16, error) {
 	var text string
 	switch typed := value.(type) {
+	case uint16:
+		if typed == 0 {
+			return 0, fmt.Errorf("sing-box outbound server_port is invalid")
+		}
+		return typed, nil
+	case int:
+		text = strconv.Itoa(typed)
 	case json.Number:
 		text = typed.String()
 	case float64:

@@ -21,6 +21,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/ipc"
 	"github.com/egress-manager/egress-manager/internal/nat"
 	"github.com/egress-manager/egress-manager/internal/secrets"
+	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
 	"github.com/egress-manager/egress-manager/internal/system"
 )
 
@@ -72,6 +73,10 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	haproxyExecutor := managedHAProxy.Executor{Runner: runner, Journal: store, Runtime: haproxyRuntime, ConfigPath: configuration.HAProxyConfigPath, PIDPath: configuration.HAProxyPIDPath}
 	if err := haproxyExecutor.Recover(ctx); err != nil {
 		return fmt.Errorf("recover interrupted HAProxy operations: %w", err)
+	}
+	singboxExecutor := managedSingBox.Executor{Runner: runner, Journal: store, Protector: protector, ConfigPath: configuration.SingBoxConfigPath}
+	if err := singboxExecutor.Recover(ctx); err != nil {
+		return fmt.Errorf("recover interrupted sing-box operations: %w", err)
 	}
 	collector := inventory.Collector{Runner: runner, Files: inventory.OSFiles{}, Timeout: 2 * time.Second}
 	server, err := ipc.NewServer(authenticator, logger)

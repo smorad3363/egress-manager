@@ -13,7 +13,7 @@ require_command() {
 [ "$(uname -s)" = "Linux" ] || fail "network lab requires Linux"
 [ "$(id -u)" -eq 0 ] || fail "network lab requires root or a privileged container"
 
-for command_name in ip nft iptables iptables-save iptables-restore haproxy socat sysctl timeout grep awk; do
+for command_name in ip nft iptables iptables-save iptables-restore haproxy sing-box socat sysctl timeout grep awk; do
     require_command "$command_name"
 done
 
@@ -27,6 +27,10 @@ iptables_probe=${EGRESS_IPTABLES_PROBE:-/usr/local/bin/egress-iptables-probe}
 [ -x "$iptables_probe" ] || fail "iptables probe not executable: $iptables_probe"
 haproxy_probe=${EGRESS_HAPROXY_PROBE:-/usr/local/bin/egress-haproxy-probe}
 [ -x "$haproxy_probe" ] || fail "HAProxy probe not executable: $haproxy_probe"
+singbox_probe=${EGRESS_SINGBOX_PROBE:-/usr/local/bin/egress-singbox-probe}
+[ -x "$singbox_probe" ] || fail "sing-box probe not executable: $singbox_probe"
+
+"$singbox_probe" /lab/singbox-fixtures
 
 suffix=$$
 client_ns="egm-c-$suffix"
