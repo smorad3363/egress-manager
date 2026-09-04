@@ -5,6 +5,8 @@ import (
 	"net/netip"
 )
 
+const MaximumHAProxyBackendsPerFrontend = 64
+
 type BalanceAlgorithm string
 
 const (
@@ -35,6 +37,9 @@ func (frontend HAProxyFrontend) Validate() error {
 	}
 	if len(frontend.BackendIDs) == 0 {
 		errs = append(errs, fmt.Errorf("HAProxy frontend requires at least one backend"))
+	}
+	if len(frontend.BackendIDs) > MaximumHAProxyBackendsPerFrontend {
+		errs = append(errs, fmt.Errorf("HAProxy frontend must not reference more than %d backends", MaximumHAProxyBackendsPerFrontend))
 	}
 	seen := make(map[ID]struct{}, len(frontend.BackendIDs))
 	for _, id := range frontend.BackendIDs {

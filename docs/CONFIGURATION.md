@@ -21,6 +21,9 @@ Both services read the same strict JSON configuration and IPC shared key. Unknow
   "data_directory": "/var/lib/egress-manager",
   "database_path": "/var/lib/egress-manager/egress-manager.db",
   "control_socket_path": "/run/egress-manager/egressd.sock",
+  "haproxy_config_path": "/var/lib/egress-manager/haproxy.cfg",
+  "haproxy_runtime_socket_path": "/run/egress-manager/haproxy-runtime.sock",
+  "haproxy_pid_path": "/run/egress-manager/haproxy.pid",
   "session_cookie_name": "egress_session",
   "ssh_ports": [22],
   "protected_management_cidrs": []

@@ -39,8 +39,65 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(version) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 3 {
-		t.Fatalf("migration count = %d, want 3", count)
+	if count != 4 {
+		t.Fatalf("migration count = %d, want 4", count)
+	}
+}
+
+func TestHAProxyRepositoriesEnforceReferencesAndOptimisticRevision(t *testing.T) {
+	t.Parallel()
+	store := NewStore(openTestDatabase(t))
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	primary := domain.HAProxyBackend{ID: "api_primary", Name: "API Primary", Server: domain.Endpoint{Host: "10.20.0.10", Port: 8080}, Weight: 100, HealthCheck: true, Health: domain.Health{Status: domain.HealthUnknown}, Enabled: true}
+	backup := domain.HAProxyBackend{ID: "api_backup", Name: "API Backup", Server: domain.Endpoint{Host: "10.20.0.11", Port: 8080}, Weight: 50, Backup: true, HealthCheck: true, Health: domain.Health{Status: domain.HealthUnknown}, Enabled: true}
+	if _, err := store.CreateHAProxyBackend(ctx, primary, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateHAProxyBackend(ctx, backup, now); err != nil {
+		t.Fatal(err)
+	}
+	frontend := domain.HAProxyFrontend{ID: "public_api", Name: "Public API", Bind: netip.MustParseAddr("192.0.2.10"), Port: 443, BackendIDs: []domain.ID{primary.ID, backup.ID}, Algorithm: domain.BalanceLeastConn, Enabled: true}
+	created, err := store.CreateHAProxyFrontend(ctx, frontend, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.Revision != 1 {
+		t.Fatalf("created revision = %d", created.Revision)
+	}
+	if err := store.DeleteHAProxyBackend(ctx, primary.ID, 1); !errors.Is(err, ErrConflict) {
+		t.Fatalf("delete referenced backend error = %v", err)
+	}
+	frontend.Algorithm = domain.BalanceRoundRobin
+	updated, err := store.UpdateHAProxyFrontend(ctx, frontend, 1, now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Revision != 2 || updated.Frontend.Algorithm != domain.BalanceRoundRobin {
+		t.Fatalf("updated frontend = %#v", updated)
+	}
+	if _, err := store.UpdateHAProxyFrontend(ctx, frontend, 1, now.Add(2*time.Second)); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale update error = %v", err)
+	}
+	backends, err := store.ListHAProxyBackends(ctx, "api_backup", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(backends) != 1 || backends[0].Backend.ID != primary.ID {
+		t.Fatalf("backend keyset page = %#v", backends)
+	}
+	if err := store.DeleteHAProxyFrontend(ctx, frontend.ID, 2); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteHAProxyBackend(ctx, primary.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	missing := frontend
+	missing.ID = "missing_ref"
+	missing.Name = "Missing reference"
+	missing.BackendIDs = []domain.ID{"does_not_exist"}
+	if _, err := store.CreateHAProxyFrontend(ctx, missing, now); !errors.Is(err, ErrConflict) {
+		t.Fatalf("missing backend reference error = %v", err)
 	}
 }
 

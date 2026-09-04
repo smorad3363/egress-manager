@@ -24,6 +24,9 @@ type Config struct {
 	DataDirectory            string         `json:"data_directory"`
 	DatabasePath             string         `json:"database_path"`
 	ControlSocketPath        string         `json:"control_socket_path"`
+	HAProxyConfigPath        string         `json:"haproxy_config_path"`
+	HAProxyRuntimeSocketPath string         `json:"haproxy_runtime_socket_path"`
+	HAProxyPIDPath           string         `json:"haproxy_pid_path"`
 	SessionCookieName        string         `json:"session_cookie_name"`
 	SSHPorts                 []uint16       `json:"ssh_ports"`
 	ProtectedManagementCIDRs []netip.Prefix `json:"protected_management_cidrs"`
@@ -37,6 +40,9 @@ func Default(dataDirectory string) Config {
 		DataDirectory:            dataDirectory,
 		DatabasePath:             filepath.Join(dataDirectory, "egress-manager.db"),
 		ControlSocketPath:        filepath.Join(dataDirectory, "egressd.sock"),
+		HAProxyConfigPath:        filepath.Join(dataDirectory, "haproxy.cfg"),
+		HAProxyRuntimeSocketPath: filepath.Join(dataDirectory, "haproxy-runtime.sock"),
+		HAProxyPIDPath:           filepath.Join(dataDirectory, "haproxy.pid"),
 		SessionCookieName:        defaultCookieName,
 		SSHPorts:                 []uint16{22},
 		ProtectedManagementCIDRs: []netip.Prefix{},
@@ -78,6 +84,24 @@ func (configuration Config) Validate() error {
 	}
 	if strings.TrimSpace(configuration.ControlSocketPath) == "" || !filepath.IsAbs(configuration.ControlSocketPath) {
 		errs = append(errs, fmt.Errorf("control_socket_path must be absolute"))
+	}
+	for name, path := range map[string]string{
+		"haproxy_config_path":         configuration.HAProxyConfigPath,
+		"haproxy_runtime_socket_path": configuration.HAProxyRuntimeSocketPath,
+		"haproxy_pid_path":            configuration.HAProxyPIDPath,
+	} {
+		if strings.TrimSpace(path) == "" || !filepath.IsAbs(path) {
+			errs = append(errs, fmt.Errorf("%s must be absolute", name))
+		}
+	}
+	paths := []string{configuration.ControlSocketPath, configuration.HAProxyConfigPath, configuration.HAProxyRuntimeSocketPath, configuration.HAProxyPIDPath}
+	seenPaths := map[string]struct{}{}
+	for _, path := range paths {
+		cleaned := filepath.Clean(path)
+		if _, exists := seenPaths[cleaned]; exists {
+			errs = append(errs, fmt.Errorf("runtime paths must be distinct"))
+		}
+		seenPaths[cleaned] = struct{}{}
 	}
 	if (configuration.TLSCertificatePath == "") != (configuration.TLSPrivateKeyPath == "") {
 		errs = append(errs, fmt.Errorf("TLS certificate and private key paths must be configured together"))

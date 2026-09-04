@@ -13,7 +13,7 @@ require_command() {
 [ "$(uname -s)" = "Linux" ] || fail "network lab requires Linux"
 [ "$(id -u)" -eq 0 ] || fail "network lab requires root or a privileged container"
 
-for command_name in ip nft iptables iptables-save iptables-restore socat sysctl timeout grep awk; do
+for command_name in ip nft iptables iptables-save iptables-restore haproxy socat sysctl timeout grep awk; do
     require_command "$command_name"
 done
 
@@ -25,6 +25,8 @@ counter_probe=${EGRESS_COUNTER_PROBE:-/usr/local/bin/egress-counter-probe}
 [ -x "$counter_probe" ] || fail "counter probe not executable: $counter_probe"
 iptables_probe=${EGRESS_IPTABLES_PROBE:-/usr/local/bin/egress-iptables-probe}
 [ -x "$iptables_probe" ] || fail "iptables probe not executable: $iptables_probe"
+haproxy_probe=${EGRESS_HAPROXY_PROBE:-/usr/local/bin/egress-haproxy-probe}
+[ -x "$haproxy_probe" ] || fail "HAProxy probe not executable: $haproxy_probe"
 
 suffix=$$
 client_ns="egm-c-$suffix"
@@ -38,13 +40,14 @@ tcp_pid=""
 udp_pid=""
 candidate_path="/tmp/egm-nat-$suffix.nft"
 iptables_candidate_path="/tmp/egm-nat-$suffix.iptables"
+haproxy_candidate_path="/tmp/egm-haproxy-$suffix.cfg"
 
 namespace_exists() {
     ip netns list | awk '{print $1}' | grep -Fxq "$1"
 }
 
 cleanup() {
-	rm -f "$candidate_path" "$iptables_candidate_path"
+	rm -f "$candidate_path" "$iptables_candidate_path" "$haproxy_candidate_path"
     for process_id in "$tcp_pid" "$udp_pid"; do
         if [ -n "$process_id" ] && kill -0 "$process_id" 2>/dev/null; then
             if ! kill "$process_id" 2>/dev/null; then
@@ -95,6 +98,11 @@ ip -n "$server_ns" link set s0 up
 ip -n "$client_ns" route add default via 10.203.1.1
 ip -n "$server_ns" route add default via 10.203.2.1
 ip netns exec "$router_ns" sysctl -q -w net.ipv4.ip_forward=1
+
+"$haproxy_probe" >"$haproxy_candidate_path"
+haproxy -c -f "$haproxy_candidate_path" >/dev/null
+printf 'invalid directive\n' >>"$haproxy_candidate_path"
+if haproxy -c -f "$haproxy_candidate_path" >/dev/null 2>&1; then fail "HAProxy accepted an invalid generated candidate"; fi
 
 ip netns exec "$router_ns" nft add table inet foreign_lab
 ip netns exec "$router_ns" nft 'add chain inet foreign_lab marker'

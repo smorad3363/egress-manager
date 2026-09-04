@@ -6,12 +6,12 @@ phase: 6
 phase_name: haproxy-engine
 
 active_spec: specs/006-haproxy-engine/spec.md
-active_task: haproxy-domain-storage-and-planner
+active_task: haproxy-runtime-transaction-engine
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: implement HAProxy desired-state persistence, validation, deterministic rendering, and owned-state inspection
+next_action: implement HAProxy runtime socket statistics and transactional validate-install-reload-verify-rollback execution
 
 dirty_work_expected: false
 
@@ -48,7 +48,9 @@ recent_decisions:
   - Traffic counters are read from stable owned-rule comments through bounded nftables JSON output.
   - nftables remains primary; existing owned iptables state remains on the compatibility adapter until explicitly migrated.
   - Ambiguous simultaneous owned state across nftables and iptables is rejected instead of guessed.
+  - HAProxy runs as a dedicated project-owned instance with its own configuration, PID file, and Runtime API socket.
+  - HAProxy frontend/backend references use a normalized link table so referenced backends cannot be deleted silently.
 
 touched_areas:
-  - HAProxy domain and persistence
-  - HAProxy candidate planner
+  - HAProxy Runtime API
+  - HAProxy transactional executor
