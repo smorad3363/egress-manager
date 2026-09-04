@@ -170,7 +170,7 @@ func renderIPBatch(intents []RouteIntent, ipv4 bool) []byte {
 				if ipv4 {
 					bits = 32
 				}
-				fmt.Fprintf(&builder, "route replace unreachable %s table %d proto %s\n", netip.PrefixFrom(address, bits), intent.RoutingTable, OwnedRouteProtocol)
+				fmt.Fprintf(&builder, "route replace throw %s table %d proto %s\n", netip.PrefixFrom(address, bits), intent.RoutingTable, OwnedRouteProtocol)
 			}
 			fmt.Fprintf(&builder, "route replace default dev %s table %d proto %s\n", intent.TunnelInterface, intent.RoutingTable, OwnedRouteProtocol)
 		} else if policy == string(domain.IPv4Block) {

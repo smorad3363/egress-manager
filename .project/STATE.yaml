@@ -6,17 +6,17 @@ phase: 10
 phase_name: interface-outbounds
 
 active_spec: specs/010-interface-outbounds/spec.md
-active_task: interface-outbound-integration
-status: in_progress
+active_task: phase-10-exit-gate
+status: complete
 
 last_green_ref: HEAD
 
-next_action: add disposable-host WireGuard and OpenVPN fixture integration, then run the Phase 10 acceptance gate
+next_action: create the Phase 11 reliability and recovery specification from the authoritative English roadmap
 
 dirty_work_expected: false
 
 tests:
-  last_run: 2026-09-04
+  last_run: 2026-09-05
   result: pass
   commands:
     - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test ./... && go vet ./..."
@@ -107,9 +107,13 @@ recent_decisions:
   - Native routes use the exact verified project-owned interface and are omitted from sing-box TUN generation; incompatible direct fallback is rejected.
   - Coordinated route review and apply bind the exact native interface state hash and refuse to move traffic until desired interface lifecycle state is already applied.
   - Native health validates the private profile, verifies owned lifecycle state, reports WireGuard handshake evidence or active OpenVPN service state, and leaves internet reachability explicitly untested.
+  - WireGuard endpoint bypasses use throw routes so outer packets continue through the host route while the owned nftables kill switch prevents client fallback leaks.
+  - Native OpenVPN validation uses the standalone --show-tls configuration parser; --test-crypto is intentionally excluded because OpenVPN 2.6 requires a shared-secret key for that mode.
+  - The disposable lab uses kernel WireGuard end to end on standard Linux; on WSL2 it validates kernel interface and peer lifecycle, then uses isolated point-to-point transport for routing assertions because kernel-created UDP sockets cannot use mirrored networking reliably.
 
 touched_areas:
   - generic outbound abstraction
   - WireGuard and OpenVPN import boundaries
   - native interface lifecycle
   - coordinated egress routing transaction
+  - disposable native VPN integration

@@ -6,7 +6,7 @@ tags:
   - phase/10
   - wireguard
   - openvpn
-status: ready
+status: complete
 related:
   - "[[PROJECT_ROADMAP]]"
   - "[[CONSTITUTION]]"
@@ -112,3 +112,8 @@ Extend the generic outbound model with project-owned kernel WireGuard and OpenVP
 - Routed native outbounds now use their verified kernel interface directly and are excluded from sing-box TUN generation; direct failure fallback is rejected for interface adapters.
 - Coordinated route review/apply includes the exact native interface state hash and refuses routing while desired lifecycle state is unapplied or changes concurrently.
 - Added native health operations that separately report configuration validation, lifecycle availability, WireGuard handshake evidence or OpenVPN service state, and explicitly untested internet reachability without altering host routes.
+- Corrected WireGuard handshake parsing to consume the native `public-key timestamp` pairs returned by `wg show all latest-handshakes`.
+- Native OpenVPN validation uses the standalone `--show-tls` configuration parse path; the disposable TLS client/server integration proves the normalized profile and lifecycle against OpenVPN 2.6.
+- Endpoint bypass routes use `throw` entries so encrypted outer traffic can continue to the host routing table while the owned nftables kill switch still blocks client leaks.
+- Added deterministic fixture probes and disposable WireGuard/OpenVPN integration covering native lifecycle, intended-interface traffic, tunnel loss, cleanup, and two consecutive clean runs. On WSL2, kernel WireGuard identity and peer configuration remain native while the documented kernel-socket limitation uses a namespace-local transport only for route and fail-closed assertions.
+- Phase 10 exit gate passed: Go test/vet/race, frontend typecheck/lint/build, nine Playwright scenarios, and two consecutive privileged network-lab runs are green.

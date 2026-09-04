@@ -34,7 +34,7 @@ func (runner *lifecycleRunner) Run(_ context.Context, command system.Command) (s
 	args := command.Args
 	switch command.Name {
 	case "wg-quick", "openvpn":
-		if runner.failValidation && (command.Name == "wg-quick" || containsArg(args, "--test-crypto")) {
+		if runner.failValidation && (command.Name == "wg-quick" || containsArg(args, "--show-tls")) {
 			return system.Result{ExitCode: 1}, errors.New("validation failed")
 		}
 		return system.Result{ExitCode: 0}, nil

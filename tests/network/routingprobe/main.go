@@ -23,6 +23,23 @@ func main() {
 		Server: domain.Endpoint{Host: "10.203.2.3", Port: 1080}, Capabilities: domain.Capabilities{TCP: true, UDP: true},
 		Health: domain.UnknownOutboundHealth(), Enabled: true,
 	}
+	interfaceName := ""
+	if os.Getenv("EGRESS_ROUTE_ADAPTER") == string(domain.OutboundAdapterInterface) {
+		interfaceName = os.Getenv("EGRESS_ROUTE_INTERFACE")
+		outbound.ID = domain.ID(os.Getenv("EGRESS_ROUTE_OUTBOUND_ID"))
+		outbound.Adapter = domain.OutboundAdapterInterface
+		outbound.Server = domain.Endpoint{Host: "10.203.2.2", Port: 51820}
+		outbound.Type = domain.OutboundWireGuard
+		outbound.SecretMetadata = []string{"private_key"}
+		if os.Getenv("EGRESS_ROUTE_TYPE") == string(domain.OutboundOpenVPN) {
+			outbound.Type = domain.OutboundOpenVPN
+			outbound.Server.Port = 1194
+			outbound.SecretMetadata = []string{"profile"}
+		}
+		if interfaceName == "" || outbound.ID == "" {
+			fail("native route interface and outbound ID are required")
+		}
+	}
 	route := domain.Route{
 		ID: "lab_route", Name: "Lab route", Source: domain.RouteSource{Kind: domain.RouteSourceSubnet, Subnet: netip.MustParsePrefix("10.203.1.0/24")},
 		OutboundID: outbound.ID, FailurePolicy: domain.FailureBlock, DNSPolicy: domain.DNSFollowOutbound,
@@ -34,8 +51,15 @@ func main() {
 		{Name: "r0", State: "up", MTU: 1500, Addresses: []inventory.Address{{Family: "inet", CIDR: "10.203.1.1/24", Scope: "global"}, {Family: "inet6", CIDR: "2001:db8:203:1::1/64", Scope: "global"}}},
 		{Name: "r1", State: "up", MTU: 1500, Addresses: []inventory.Address{{Family: "inet", CIDR: "10.203.2.1/24", Scope: "global"}, {Family: "inet6", CIDR: "2001:db8:203:2::1/64", Scope: "global"}}},
 	}}
+	settings := routing.Settings{TableBase: 20000, RulePriorityBase: 21000, ProtectedLocalPrefixes: []netip.Prefix{netip.MustParsePrefix("10.203.2.0/24")}}
+	if interfaceName != "" {
+		host.Interfaces = append(host.Interfaces, inventory.Interface{Name: interfaceName, State: "up", MTU: 1400})
+		settings.InterfaceOutbounds = map[domain.ID]string{outbound.ID: interfaceName}
+		route.DNSPolicy = domain.DNSBlock
+		route.DNSServers = nil
+	}
 	state, _ := routing.ParseState(nil, false)
-	desired, err := routing.BuildPlan(routing.Settings{TableBase: 20000, RulePriorityBase: 21000, ProtectedLocalPrefixes: []netip.Prefix{netip.MustParsePrefix("10.203.2.0/24")}}, []domain.Route{route}, []domain.Outbound{outbound}, host, nil, state)
+	desired, err := routing.BuildPlan(settings, []domain.Route{route}, []domain.Outbound{outbound}, host, nil, state)
 	if err != nil {
 		fail("build routing desired state")
 	}

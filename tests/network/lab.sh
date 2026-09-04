@@ -13,7 +13,7 @@ require_command() {
 [ "$(uname -s)" = "Linux" ] || fail "network lab requires Linux"
 [ "$(id -u)" -eq 0 ] || fail "network lab requires root or a privileged container"
 
-for command_name in ip nft iptables iptables-save iptables-restore haproxy sing-box socat sysctl tcpdump timeout grep awk; do
+for command_name in ip nft iptables iptables-save iptables-restore haproxy sing-box socat sysctl tcpdump timeout grep awk wg wg-quick openvpn openssl ping; do
     require_command "$command_name"
 done
 
@@ -31,6 +31,8 @@ singbox_probe=${EGRESS_SINGBOX_PROBE:-/usr/local/bin/egress-singbox-probe}
 [ -x "$singbox_probe" ] || fail "sing-box probe not executable: $singbox_probe"
 routing_probe=${EGRESS_ROUTING_PROBE:-/usr/local/bin/egress-routing-probe}
 [ -x "$routing_probe" ] || fail "routing probe not executable: $routing_probe"
+interface_probe=${EGRESS_INTERFACE_PROBE:-/usr/local/bin/egress-interface-probe}
+[ -x "$interface_probe" ] || fail "interface outbound probe not executable: $interface_probe"
 
 "$singbox_probe" /lab/singbox-fixtures
 
@@ -49,10 +51,16 @@ dns_pid=""
 haproxy_primary_pid=""
 haproxy_secondary_pid=""
 haproxy_backup_pid=""
+openvpn_server_pid=""
+openvpn_client_pid=""
 candidate_path="/tmp/egm-nat-$suffix.nft"
 iptables_candidate_path="/tmp/egm-nat-$suffix.iptables"
 haproxy_candidate_path="/tmp/egm-haproxy-$suffix.cfg"
 route_candidate_dir="/tmp/egm-route-$suffix"
+interface_candidate_dir="/tmp/egm-interface-$suffix"
+wireguard_candidate_dir="/tmp/egm-wireguard-route-$suffix"
+openvpn_candidate_dir="/tmp/egm-openvpn-route-$suffix"
+openvpn_runtime_dir="/tmp/egm-openvpn-$suffix"
 
 namespace_exists() {
     ip netns list | awk '{print $1}' | grep -Fxq "$1"
@@ -60,13 +68,13 @@ namespace_exists() {
 
 cleanup() {
 	rm -f "$candidate_path" "$iptables_candidate_path" "$haproxy_candidate_path"
-	rm -rf "$route_candidate_dir"
+	rm -rf "$route_candidate_dir" "$interface_candidate_dir" "$wireguard_candidate_dir" "$openvpn_candidate_dir" "$openvpn_runtime_dir"
     if [ -f /tmp/egm-haproxy.pid ]; then
         haproxy_pid=$(cat /tmp/egm-haproxy.pid 2>/dev/null || true)
         if [ -n "$haproxy_pid" ]; then kill "$haproxy_pid" 2>/dev/null || true; fi
     fi
     rm -f /tmp/egm-haproxy.pid /tmp/egm-haproxy-runtime.sock /tmp/egm-haproxy-managed.cfg
-    for process_id in "$tcp_pid" "$udp_pid" "$tcp6_pid" "$dns_pid" "$haproxy_primary_pid" "$haproxy_secondary_pid" "$haproxy_backup_pid"; do
+    for process_id in "$tcp_pid" "$udp_pid" "$tcp6_pid" "$dns_pid" "$haproxy_primary_pid" "$haproxy_secondary_pid" "$haproxy_backup_pid" "$openvpn_server_pid" "$openvpn_client_pid"; do
         if [ -n "$process_id" ] && kill -0 "$process_id" 2>/dev/null; then
             if ! kill "$process_id" 2>/dev/null; then
                 :
@@ -82,6 +90,9 @@ cleanup() {
 }
 
 trap cleanup EXIT INT TERM
+
+"$interface_probe" /lab/interface-fixtures "$interface_candidate_dir"
+wg-quick strip "$interface_candidate_dir/wireguard.conf" >/dev/null || fail "WireGuard fixture failed native syntax validation"
 
 for namespace in "$client_ns" "$router_ns" "$server_ns"; do
     if namespace_exists "$namespace"; then
@@ -264,6 +275,185 @@ ip netns exec "$router_ns" ip -6 route flush table "$route_table" proto 242
 ip netns exec "$router_ns" nft delete table inet egm_egress
 ip netns exec "$router_ns" nft list table inet foreign_lab >/dev/null || fail "route rollback removed a foreign nftables table"
 printf 'PASS: killed outbound blocks direct IPv4, DNS, and IPv6 leaks while endpoint and foreign state remain reachable\n'
+
+wireguard_name=$(tr -d '\r\n' <"$interface_candidate_dir/wireguard-name")
+wireguard_id=$(tr -d '\r\n' <"$interface_candidate_dir/wireguard-id")
+mkdir -m 700 "$wireguard_candidate_dir"
+umask 077
+wg genkey >"$wireguard_candidate_dir/router.key"
+wg pubkey <"$wireguard_candidate_dir/router.key" >"$wireguard_candidate_dir/router.pub"
+wg genkey >"$wireguard_candidate_dir/server.key"
+wg pubkey <"$wireguard_candidate_dir/server.key" >"$wireguard_candidate_dir/server.pub"
+router_public=$(tr -d '\r\n' <"$wireguard_candidate_dir/router.pub")
+server_public=$(tr -d '\r\n' <"$wireguard_candidate_dir/server.pub")
+wireguard_transport_emulated=false
+if uname -r | grep -qi microsoft; then
+    wireguard_transport_emulated=true
+    ip netns exec "$router_ns" ip link add dev "$wireguard_name" type wireguard
+    ip netns exec "$router_ns" wg set "$wireguard_name" private-key "$wireguard_candidate_dir/router.key" peer "$server_public" allowed-ips 0.0.0.0/0 endpoint 10.203.2.2:51820 persistent-keepalive 1
+    ip netns exec "$router_ns" ip -json -details link show dev "$wireguard_name" | grep -Fq '"info_kind":"wireguard"' || fail "WireGuard kernel lifecycle kind verification failed"
+    ip netns exec "$router_ns" wg show "$wireguard_name" peers | grep -Fq "$server_public" || fail "WireGuard kernel peer verification failed"
+    ip netns exec "$router_ns" ip link delete dev "$wireguard_name"
+    ip link add "$wireguard_name" type veth peer name wgsrv0
+    ip link set "$wireguard_name" netns "$router_ns"
+    ip link set wgsrv0 netns "$server_ns"
+else
+    ip netns exec "$router_ns" ip link add dev "$wireguard_name" type wireguard
+    ip netns exec "$server_ns" ip link add dev wgsrv0 type wireguard
+    ip netns exec "$router_ns" wg set "$wireguard_name" private-key "$wireguard_candidate_dir/router.key" peer "$server_public" allowed-ips 0.0.0.0/0 endpoint 10.203.2.2:51820 persistent-keepalive 1
+    ip netns exec "$server_ns" wg set wgsrv0 listen-port 51820 private-key "$wireguard_candidate_dir/server.key" peer "$router_public" allowed-ips 10.210.0.1/32,10.203.1.0/24
+fi
+ip -n "$router_ns" address add 10.210.0.1/30 dev "$wireguard_name"
+ip -n "$server_ns" address add 10.210.0.2/30 dev wgsrv0
+ip -n "$router_ns" link set "$wireguard_name" up
+ip -n "$server_ns" link set wgsrv0 up
+if [ "$wireguard_transport_emulated" = true ]; then
+    ip -n "$server_ns" route add 10.203.1.0/24 via 10.210.0.1 dev wgsrv0
+else
+    ip -n "$server_ns" route add 10.203.1.0/24 dev wgsrv0
+fi
+ip netns exec "$router_ns" timeout 5 ping -c 1 -W 3 10.210.0.2 >/dev/null || fail "WireGuard native interface baseline failed"
+ip netns exec "$router_ns" env EGRESS_ROUTE_ADAPTER=interface EGRESS_ROUTE_TYPE=wireguard EGRESS_ROUTE_INTERFACE="$wireguard_name" EGRESS_ROUTE_OUTBOUND_ID="$wireguard_id" "$routing_probe" "$wireguard_candidate_dir"
+wireguard_table=$(tr -d '\r\n' <"$wireguard_candidate_dir/table")
+wireguard_priority=$(tr -d '\r\n' <"$wireguard_candidate_dir/priority")
+ip netns exec "$router_ns" nft --check --file "$wireguard_candidate_dir/routing.nft"
+ip netns exec "$router_ns" nft --file "$wireguard_candidate_dir/routing.nft"
+ip netns exec "$router_ns" ip -4 -batch "$wireguard_candidate_dir/routing-v4.batch"
+ip netns exec "$router_ns" ip -6 -batch "$wireguard_candidate_dir/routing-v6.batch"
+if ! ip netns exec "$client_ns" timeout 5 ping -c 1 -W 3 10.210.0.2 >/dev/null; then
+    ip netns exec "$router_ns" wg show >&2 || true
+    ip netns exec "$router_ns" ip -4 rule show >&2 || true
+    ip netns exec "$router_ns" ip -4 route show table "$wireguard_table" >&2 || true
+    ip netns exec "$router_ns" ip route get 10.210.0.2 from 10.203.1.2 iif r0 >&2 || true
+    ip netns exec "$router_ns" nft list table inet egm_egress >&2 || true
+    ip netns exec "$router_ns" ip -s link show dev "$wireguard_name" >&2 || true
+    ip netns exec "$server_ns" wg show >&2 || true
+    ip netns exec "$server_ns" ip -4 route show >&2 || true
+    ip netns exec "$server_ns" ip -s link show dev wgsrv0 >&2 || true
+    fail "WireGuard routed client traffic did not use the native interface"
+fi
+if [ "$wireguard_transport_emulated" = false ]; then
+    wireguard_handshake=$(ip netns exec "$router_ns" wg show "$wireguard_name" latest-handshakes | awk '{print $2}')
+    [ "${wireguard_handshake:-0}" -gt 0 ] || fail "WireGuard handshake evidence was not observed"
+fi
+ip -n "$router_ns" link delete dev "$wireguard_name"
+wireguard_capture="$wireguard_candidate_dir/direct-leak.pcap"
+ip netns exec "$router_ns" timeout 5 tcpdump -U -n -i r1 -w "$wireguard_capture" 'src host 10.203.1.2' >/dev/null 2>&1 &
+wireguard_capture_pid=$!
+sleep 0.3
+if printf 'wireguard-must-not-leak' | ip netns exec "$client_ns" timeout 2 socat - TCP:10.203.2.3:8080,connect-timeout=1 >/dev/null 2>&1; then fail "failed WireGuard interface leaked client traffic"; fi
+if wait "$wireguard_capture_pid"; then fail "WireGuard failure capture ended unexpectedly"; fi
+wireguard_packets=$(ip netns exec "$router_ns" tcpdump -n -r "$wireguard_capture" 2>/dev/null | wc -l)
+[ "$wireguard_packets" -eq 0 ] || fail "failed WireGuard interface leaked packets to direct egress"
+ip netns exec "$router_ns" ip -4 rule delete priority "$wireguard_priority" table "$wireguard_table" protocol 242
+ip netns exec "$router_ns" ip -6 rule delete priority "$wireguard_priority" table "$wireguard_table" protocol 242
+ip netns exec "$router_ns" ip -4 route flush table "$wireguard_table" proto 242
+ip netns exec "$router_ns" ip -6 route flush table "$wireguard_table" proto 242
+ip netns exec "$router_ns" nft delete table inet egm_egress
+ip -n "$server_ns" link delete dev wgsrv0 2>/dev/null || true
+if [ "$wireguard_transport_emulated" = true ]; then
+    printf 'PASS: kernel WireGuard lifecycle plus WSL-safe route transport emulation fail closed after interface loss\n'
+else
+    printf 'PASS: native WireGuard routes client traffic and fails closed after interface loss\n'
+fi
+
+openvpn_name=$(tr -d '\r\n' <"$interface_candidate_dir/openvpn-name")
+openvpn_id=$(tr -d '\r\n' <"$interface_candidate_dir/openvpn-id")
+mkdir -m 700 "$openvpn_runtime_dir" "$openvpn_candidate_dir"
+openssl req -x509 -newkey rsa:2048 -nodes -keyout "$openvpn_runtime_dir/ca.key" -out "$openvpn_runtime_dir/ca.crt" -subj /CN=egress-manager-test-ca -days 1 -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign,cRLSign >/dev/null 2>&1
+openssl req -newkey rsa:2048 -nodes -keyout "$openvpn_runtime_dir/server.key" -out "$openvpn_runtime_dir/server.csr" -subj /CN=egress-manager-test-server >/dev/null 2>&1
+printf 'basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=serverAuth\nsubjectAltName=DNS:egress-manager-test-server\n' >"$openvpn_runtime_dir/server.ext"
+openssl x509 -req -in "$openvpn_runtime_dir/server.csr" -CA "$openvpn_runtime_dir/ca.crt" -CAkey "$openvpn_runtime_dir/ca.key" -CAcreateserial -out "$openvpn_runtime_dir/server.crt" -days 1 -extfile "$openvpn_runtime_dir/server.ext" >/dev/null 2>&1
+openssl req -newkey rsa:2048 -nodes -keyout "$openvpn_runtime_dir/client.key" -out "$openvpn_runtime_dir/client.csr" -subj /CN=egress-manager-test-client >/dev/null 2>&1
+printf 'basicConstraints=CA:FALSE\nkeyUsage=digitalSignature,keyEncipherment\nextendedKeyUsage=clientAuth\n' >"$openvpn_runtime_dir/client.ext"
+openssl x509 -req -in "$openvpn_runtime_dir/client.csr" -CA "$openvpn_runtime_dir/ca.crt" -CAkey "$openvpn_runtime_dir/ca.key" -CAserial "$openvpn_runtime_dir/ca.srl" -out "$openvpn_runtime_dir/client.crt" -days 1 -extfile "$openvpn_runtime_dir/client.ext" >/dev/null 2>&1
+mkdir -m 700 "$openvpn_runtime_dir/ccd"
+printf 'iroute 10.203.1.0 255.255.255.0\n' >"$openvpn_runtime_dir/ccd/egress-manager-test-client"
+cat >"$openvpn_runtime_dir/server.conf" <<EOF
+local 10.203.2.2
+port 1194
+proto udp
+dev tun
+topology subnet
+server 10.220.0.0 255.255.255.0
+route 10.203.1.0 255.255.255.0
+client-config-dir $openvpn_runtime_dir/ccd
+ca $openvpn_runtime_dir/ca.crt
+cert $openvpn_runtime_dir/server.crt
+key $openvpn_runtime_dir/server.key
+dh none
+data-ciphers AES-256-GCM
+keepalive 2 10
+persist-key
+persist-tun
+verb 1
+EOF
+{
+    printf 'client\ndev %s\ndev-type tun\nproto udp\nremote 10.203.2.2 1194\nremote-cert-tls server\nnobind\nroute-nopull\nauth-nocache\npersist-key\npersist-tun\ndata-ciphers AES-256-GCM\nverb 1\n<ca>\n' "$openvpn_name"
+    cat "$openvpn_runtime_dir/ca.crt"
+    printf '</ca>\n<cert>\n'
+    cat "$openvpn_runtime_dir/client.crt"
+    printf '</cert>\n<key>\n'
+    cat "$openvpn_runtime_dir/client.key"
+    printf '</key>\n'
+} >"$openvpn_runtime_dir/client.conf"
+if ! timeout 8 openvpn --config "$openvpn_runtime_dir/client.conf" --show-tls >"$openvpn_runtime_dir/validation.log" 2>&1; then
+    cat "$openvpn_runtime_dir/validation.log" >&2 || true
+    fail "OpenVPN generated client profile failed native validation"
+fi
+ip netns exec "$server_ns" openvpn --config "$openvpn_runtime_dir/server.conf" >"$openvpn_runtime_dir/server.log" 2>&1 &
+openvpn_server_pid=$!
+sleep 0.5
+ip netns exec "$router_ns" openvpn --config "$openvpn_runtime_dir/client.conf" >"$openvpn_runtime_dir/client.log" 2>&1 &
+openvpn_client_pid=$!
+openvpn_wait=0
+while ! ip -n "$router_ns" link show dev "$openvpn_name" >/dev/null 2>&1; do
+    openvpn_wait=$((openvpn_wait + 1))
+    if [ "$openvpn_wait" -ge 50 ]; then
+        cat "$openvpn_runtime_dir/server.log" >&2 || true
+        cat "$openvpn_runtime_dir/client.log" >&2 || true
+        fail "OpenVPN client interface did not become ready"
+    fi
+    sleep 0.2
+done
+ip netns exec "$router_ns" env EGRESS_ROUTE_ADAPTER=interface EGRESS_ROUTE_TYPE=openvpn EGRESS_ROUTE_INTERFACE="$openvpn_name" EGRESS_ROUTE_OUTBOUND_ID="$openvpn_id" "$routing_probe" "$openvpn_candidate_dir"
+openvpn_table=$(tr -d '\r\n' <"$openvpn_candidate_dir/table")
+openvpn_priority=$(tr -d '\r\n' <"$openvpn_candidate_dir/priority")
+ip netns exec "$router_ns" nft --check --file "$openvpn_candidate_dir/routing.nft"
+ip netns exec "$router_ns" nft --file "$openvpn_candidate_dir/routing.nft"
+ip netns exec "$router_ns" ip -4 -batch "$openvpn_candidate_dir/routing-v4.batch"
+ip netns exec "$router_ns" ip -6 -batch "$openvpn_candidate_dir/routing-v6.batch"
+if ! ip netns exec "$client_ns" timeout 5 ping -c 1 -W 3 10.220.0.1 >/dev/null; then
+    ip netns exec "$router_ns" ip -4 rule show >&2 || true
+    ip netns exec "$router_ns" ip -4 route show table "$openvpn_table" >&2 || true
+    ip netns exec "$router_ns" ip route get 10.220.0.1 from 10.203.1.2 iif r0 >&2 || true
+    ip netns exec "$router_ns" nft list table inet egm_egress >&2 || true
+    ip netns exec "$router_ns" ip -s link show dev "$openvpn_name" >&2 || true
+    ip netns exec "$server_ns" ip -4 route show >&2 || true
+    cat "$openvpn_runtime_dir/server.log" >&2 || true
+    cat "$openvpn_runtime_dir/client.log" >&2 || true
+    fail "OpenVPN routed client traffic did not use the native interface"
+fi
+kill "$openvpn_client_pid"
+wait "$openvpn_client_pid" 2>/dev/null || true
+openvpn_client_pid=""
+openvpn_capture="$openvpn_candidate_dir/direct-leak.pcap"
+ip netns exec "$router_ns" timeout 5 tcpdump -U -n -i r1 -w "$openvpn_capture" 'src host 10.203.1.2' >/dev/null 2>&1 &
+openvpn_capture_pid=$!
+sleep 0.3
+if printf 'openvpn-must-not-leak' | ip netns exec "$client_ns" timeout 2 socat - TCP:10.203.2.3:8080,connect-timeout=1 >/dev/null 2>&1; then fail "failed OpenVPN interface leaked client traffic"; fi
+if wait "$openvpn_capture_pid"; then fail "OpenVPN failure capture ended unexpectedly"; fi
+openvpn_packets=$(ip netns exec "$router_ns" tcpdump -n -r "$openvpn_capture" 2>/dev/null | wc -l)
+[ "$openvpn_packets" -eq 0 ] || fail "failed OpenVPN interface leaked packets to direct egress"
+ip netns exec "$router_ns" ip -4 rule delete priority "$openvpn_priority" table "$openvpn_table" protocol 242
+ip netns exec "$router_ns" ip -6 rule delete priority "$openvpn_priority" table "$openvpn_table" protocol 242
+ip netns exec "$router_ns" ip -4 route flush table "$openvpn_table" proto 242
+ip netns exec "$router_ns" ip -6 route flush table "$openvpn_table" proto 242
+ip netns exec "$router_ns" nft delete table inet egm_egress
+kill "$openvpn_server_pid"
+wait "$openvpn_server_pid" 2>/dev/null || true
+openvpn_server_pid=""
+printf 'PASS: native OpenVPN routes client traffic and fails closed after interface loss\n'
 
 haproxy_primary_pid=$(ip netns exec "$server_ns" sh -c 'socat TCP-LISTEN:18081,reuseaddr,fork SYSTEM:"printf primary" >/tmp/egm-haproxy-primary.log 2>&1 & echo $!')
 haproxy_secondary_pid=$(ip netns exec "$server_ns" sh -c 'socat TCP-LISTEN:18082,reuseaddr,fork SYSTEM:"printf secondary" >/tmp/egm-haproxy-secondary.log 2>&1 & echo $!')

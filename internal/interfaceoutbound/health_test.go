@@ -61,13 +61,13 @@ func TestHealthRequiresValidationLifecycleAndHandshakeEvidence(t *testing.T) {
 	}
 	state := State{Exists: true, Hash: strings.Repeat("a", 64), Entries: []StateEntry{entry}, configs: map[domain.ID][]byte{entry.ID: configuration}}
 	now := time.Date(2026, 9, 4, 20, 0, 0, 0, time.UTC)
-	tester := Tester{Runner: &healthRunner{t: t, handshake: "1800000000"}, RuntimeDirectory: runtimeDirectory, Now: func() time.Time { return now }}
+	tester := Tester{Runner: &healthRunner{t: t, handshake: "TEST_ONLY_PUBLIC_KEY 1800000000"}, RuntimeDirectory: runtimeDirectory, Now: func() time.Time { return now }}
 	health := tester.Test(context.Background(), imported.Outbound, imported.CredentialDocument, state)
 	if health.Status != domain.HealthHealthy || health.ConfigurationValid != domain.ProbePassed || health.TransportReachable != domain.ProbePassed || health.InternetReachable != domain.ProbeUntestable || health.Detail != "wireguard_handshake_observed" {
 		t.Fatalf("health = %#v", health)
 	}
 
-	tester.Runner = &healthRunner{t: t, handshake: "0"}
+	tester.Runner = &healthRunner{t: t, handshake: "TEST_ONLY_PUBLIC_KEY 0"}
 	health = tester.Test(context.Background(), imported.Outbound, imported.CredentialDocument, state)
 	if health.Status != domain.HealthDegraded || health.TransportReachable != domain.ProbeUntestable || health.Detail != "wireguard_handshake_not_observed" {
 		t.Fatalf("no-handshake health = %#v", health)

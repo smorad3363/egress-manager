@@ -106,8 +106,14 @@ func hasHandshake(output []byte) bool {
 	if len(fields) == 0 {
 		return false
 	}
-	for _, field := range fields {
-		value, err := strconv.ParseInt(field, 10, 64)
+	start := 0
+	step := 1
+	if len(fields)%2 == 0 {
+		start = 1
+		step = 2
+	}
+	for index := start; index < len(fields); index += step {
+		value, err := strconv.ParseInt(fields[index], 10, 64)
 		if err != nil {
 			return false
 		}

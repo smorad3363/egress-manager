@@ -36,7 +36,7 @@ func TestBuildNativePlanRendersOwnedLeakControlsAndIPBatches(t *testing.T) {
 		}
 	}
 	ipv4 := string(first.IPv4Batch())
-	for _, fragment := range []string{"route replace unreachable 203.0.113.30/32", "route replace default dev ", "proto 242", "rule add priority ", "from 10.8.0.0/24"} {
+	for _, fragment := range []string{"route replace throw 203.0.113.30/32", "route replace default dev ", "proto 242", "rule add priority ", "from 10.8.0.0/24"} {
 		if !strings.Contains(ipv4, fragment) {
 			t.Fatalf("IPv4 batch omitted %q:\n%s", fragment, ipv4)
 		}

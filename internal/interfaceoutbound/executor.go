@@ -179,7 +179,7 @@ func (executor Executor) validateNative(ctx context.Context, entries []candidate
 		case domain.OutboundWireGuard:
 			command = system.Command{Name: "wg-quick", Args: []string{"strip", path}}
 		case domain.OutboundOpenVPN:
-			command = system.Command{Name: "openvpn", Args: []string{"--config", path, "--test-crypto"}}
+			command = system.Command{Name: "openvpn", Args: []string{"--config", path, "--show-tls"}}
 		default:
 			return fmt.Errorf("unsupported native interface outbound validation kind")
 		}
