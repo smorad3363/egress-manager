@@ -6,22 +6,20 @@ phase: 2
 phase_name: backend-foundation
 
 active_spec: specs/002-backend-foundation/spec.md
-active_task: configuration-and-storage
-status: ready
+active_task: authentication-and-sessions
+status: in_progress
 
 last_green_ref: HEAD
 
-next_action: implement validated configuration, embedded SQLite migrations, and repository storage
+next_action: implement Argon2id credentials, opaque sessions, CSRF, and login throttling
 
-dirty_work_expected: false
+dirty_work_expected: true
 
 tests:
   last_run: 2026-09-04
   result: pass
   commands:
-    - docker run --rm --volume <repo>:/src --workdir /src golang:1.27.1 go test ./...
-    - docker run --rm --volume <repo>:/src --workdir /src golang:1.27.1 go vet ./...
-    - docker run --rm --privileged --dns 8.8.8.8 --volume <repo>/tests/network:/lab --workdir /lab golang:1.27.1 sh -c <install-deps-and-run-lab>
+    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test ./internal/config ./internal/database && go vet ./internal/config ./internal/database"
 
 network_transaction:
   status: none
@@ -37,7 +35,9 @@ recent_decisions:
   - Git and STATE.yaml are the primary recovery mechanism.
   - Go 1.27.1 verification uses the official Docker image because the Windows download endpoint returned HTTP 404.
   - Network integration runs entirely inside disposable namespaces and modifies no host firewall table.
+  - SQLite uses go-sqlite3 with CGO; rationale and build risk are recorded in ADR 0001.
 
 touched_areas:
-  - tests/network
-  - continuous integration
+  - internal/config
+  - internal/database
+  - database migration 0001
