@@ -2,16 +2,19 @@
 package system
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 )
 
 type Command struct {
-	Name string
-	Args []string
-	Env  []string
-	Dir  string
+	Name  string
+	Args  []string
+	Env   []string
+	Dir   string
+	Stdin []byte
 }
 
 type Result struct {
@@ -27,9 +30,15 @@ type Runner interface {
 type ExecRunner struct{}
 
 func (ExecRunner) Run(ctx context.Context, command Command) (Result, error) {
+	if len(command.Stdin) > maxCommandInput {
+		return Result{ExitCode: -1}, fmt.Errorf("command input exceeds %d bytes", maxCommandInput)
+	}
 	process := exec.CommandContext(ctx, command.Name, command.Args...)
 	process.Env = append(os.Environ(), command.Env...)
 	process.Dir = command.Dir
+	if len(command.Stdin) > 0 {
+		process.Stdin = bytes.NewReader(command.Stdin)
+	}
 	stdout, stderr := &safeBuffer{}, &safeBuffer{}
 	process.Stdout = stdout
 	process.Stderr = stderr
@@ -47,7 +56,10 @@ type safeBuffer struct {
 	data []byte
 }
 
-const maxCommandOutput = 1 << 20
+const (
+	maxCommandInput  = 1 << 20
+	maxCommandOutput = 1 << 20
+)
 
 func (buffer *safeBuffer) Write(input []byte) (int, error) {
 	remaining := maxCommandOutput - len(buffer.data)

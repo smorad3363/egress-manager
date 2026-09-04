@@ -32,7 +32,8 @@ The nftables rules live only inside the disposable router namespace. Cleanup tar
 
 ```sh
 go build -o /tmp/egress-inventory-probe ./tests/network/inventoryprobe
-sudo EGRESS_INVENTORY_PROBE=/tmp/egress-inventory-probe tests/network/run.sh
+go build -o /tmp/egress-nat-probe ./tests/network/natprobe
+sudo EGRESS_INVENTORY_PROBE=/tmp/egress-inventory-probe EGRESS_NAT_PROBE=/tmp/egress-nat-probe tests/network/run.sh
 ```
 
 Requires Go 1.27.1, `iproute2`, `iptables`, `nftables`, `socat`, `procps`, and `coreutils`.

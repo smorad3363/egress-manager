@@ -6,12 +6,12 @@ phase: 5
 phase_name: nat-port-forward-engine
 
 active_spec: specs/005-nat-port-forward-engine/spec.md
-active_task: nftables-plan-and-renderer
+active_task: nat-storage-ipc-and-api
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: implement normalized NAT intent, management-port protection, owned nftables dry-run plans, and failure-first tests
+next_action: persist port-forward intent and expose authenticated dry-run/apply operations through typed IPC and API
 
 dirty_work_expected: false
 
@@ -42,7 +42,9 @@ recent_decisions:
   - Non-loopback panel listeners require TLS; browser sessions always use secure cookies.
   - The IPC key is domain-separated before use for login-throttle buckets.
   - Inventory probes use fixed executables and arguments, bounded output, and per-command timeouts without a shell.
+  - nftables candidates replace only egm_nat4 or egm_nat6 and are validated natively before apply.
+  - NAT operations are journaled before mutation and interrupted operations recover by restoring the owned-table snapshot.
 
 touched_areas:
-  - specs/005-nat-port-forward-engine
-  - internal NAT planner
+  - internal NAT persistence
+  - authenticated NAT IPC and API

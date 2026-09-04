@@ -19,6 +19,8 @@ done
 
 inventory_probe=${EGRESS_INVENTORY_PROBE:-/usr/local/bin/egress-inventory-probe}
 [ -x "$inventory_probe" ] || fail "inventory probe not executable: $inventory_probe"
+nat_probe=${EGRESS_NAT_PROBE:-/usr/local/bin/egress-nat-probe}
+[ -x "$nat_probe" ] || fail "NAT probe not executable: $nat_probe"
 
 suffix=$$
 client_ns="egm-c-$suffix"
@@ -30,12 +32,14 @@ router_server_if="egrs$suffix"
 server_host_if="egs$suffix"
 tcp_pid=""
 udp_pid=""
+candidate_path="/tmp/egm-nat-$suffix.nft"
 
 namespace_exists() {
     ip netns list | awk '{print $1}' | grep -Fxq "$1"
 }
 
 cleanup() {
+	rm -f "$candidate_path"
     for process_id in "$tcp_pid" "$udp_pid"; do
         if [ -n "$process_id" ] && kill -0 "$process_id" 2>/dev/null; then
             if ! kill "$process_id" 2>/dev/null; then
@@ -90,17 +94,9 @@ ip netns exec "$router_ns" sysctl -q -w net.ipv4.ip_forward=1
 ip netns exec "$router_ns" nft add table inet foreign_lab
 ip netns exec "$router_ns" nft 'add chain inet foreign_lab marker'
 
-ip netns exec "$router_ns" nft add table ip egm_lab
-ip netns exec "$router_ns" nft 'add chain ip egm_lab prerouting { type nat hook prerouting priority dstnat; policy accept; }'
-ip netns exec "$router_ns" nft 'add chain ip egm_lab postrouting { type nat hook postrouting priority srcnat; policy accept; }'
-ip netns exec "$router_ns" nft 'add chain ip egm_lab forward { type filter hook forward priority filter; policy accept; }'
-ip netns exec "$router_ns" nft 'add rule ip egm_lab prerouting ip daddr 10.203.1.1 tcp dport 19080 counter dnat to 10.203.2.2:8080 comment "egm-lab-tcp"'
-ip netns exec "$router_ns" nft 'add rule ip egm_lab prerouting ip daddr 10.203.1.1 udp dport 19053 counter dnat to 10.203.2.2:5353 comment "egm-lab-udp"'
-ip netns exec "$router_ns" nft 'add rule ip egm_lab postrouting oifname "r1" counter masquerade comment "egm-lab-masquerade"'
-ip netns exec "$router_ns" nft 'add rule ip egm_lab forward ct state established,related counter accept comment "egm-lab-established"'
-ip netns exec "$router_ns" nft 'add rule ip egm_lab forward iifname "r0" oifname "r1" ip saddr 10.203.1.0/24 ip daddr 10.203.2.2 tcp dport 8080 counter accept comment "egm-lab-allow-tcp"'
-ip netns exec "$router_ns" nft 'add rule ip egm_lab forward iifname "r0" oifname "r1" ip saddr 10.203.1.0/24 ip daddr 10.203.2.2 udp dport 5353 counter accept comment "egm-lab-allow-udp"'
-ip netns exec "$router_ns" nft 'add rule ip egm_lab forward iifname "r0" oifname "r1" counter drop comment "egm-lab-source-drop"'
+"$nat_probe" >"$candidate_path"
+ip netns exec "$router_ns" nft --check --file "$candidate_path"
+ip netns exec "$router_ns" nft --file "$candidate_path"
 
 tcp_pid=$(ip netns exec "$server_ns" sh -c 'socat TCP-LISTEN:8080,reuseaddr,fork EXEC:/bin/cat >/tmp/egm-tcp.log 2>&1 & echo $!')
 udp_pid=$(ip netns exec "$server_ns" sh -c 'socat -T2 UDP-RECVFROM:5353,reuseaddr,fork EXEC:/bin/cat >/tmp/egm-udp.log 2>&1 & echo $!')
@@ -127,13 +123,13 @@ if printf 'must-drop' | ip netns exec "$client_ns" timeout 2 socat - TCP:10.203.
     fail "source-CIDR restriction accepted a disallowed source"
 fi
 
-ruleset=$(ip netns exec "$router_ns" nft list table ip egm_lab)
-printf '%s\n' "$ruleset" | grep -E 'counter packets [1-9][0-9]* bytes [1-9][0-9]*.*egm-lab-tcp' >/dev/null || fail "TCP counter did not increase"
-printf '%s\n' "$ruleset" | grep -E 'counter packets [1-9][0-9]* bytes [1-9][0-9]*.*egm-lab-udp' >/dev/null || fail "UDP counter did not increase"
-printf '%s\n' "$ruleset" | grep -E 'counter packets [1-9][0-9]* bytes [1-9][0-9]*.*egm-lab-source-drop' >/dev/null || fail "source restriction drop counter did not increase"
+ruleset=$(ip netns exec "$router_ns" nft list table ip egm_nat4)
+printf '%s\n' "$ruleset" | grep -E 'counter packets [1-9][0-9]* bytes [1-9][0-9]*.*egm_pf_lab_tcp' >/dev/null || fail "TCP counter did not increase"
+printf '%s\n' "$ruleset" | grep -E 'counter packets [1-9][0-9]* bytes [1-9][0-9]*.*egm_pf_lab_udp' >/dev/null || fail "UDP counter did not increase"
+printf '%s\n' "$ruleset" | grep -E 'counter packets [1-9][0-9]* bytes [1-9][0-9]*.*egm_pf_lab_tcp_source_drop' >/dev/null || fail "source restriction drop counter did not increase"
 
-ip netns exec "$router_ns" nft delete table ip egm_lab
-if ip netns exec "$router_ns" nft list table ip egm_lab >/dev/null 2>&1; then
+ip netns exec "$router_ns" nft delete table ip egm_nat4
+if ip netns exec "$router_ns" nft list table ip egm_nat4 >/dev/null 2>&1; then
     fail "owned table still exists after rollback"
 fi
 ip netns exec "$router_ns" nft list table inet foreign_lab >/dev/null || fail "foreign table was removed during rollback"

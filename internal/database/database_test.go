@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/egress-manager/egress-manager/internal/domain"
 )
 
 func openTestDatabase(t *testing.T) *sql.DB {
@@ -36,8 +38,8 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	if err := database.QueryRow(`SELECT COUNT(version) FROM schema_migrations`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
-	if count != 1 {
-		t.Fatalf("migration count = %d, want 1", count)
+	if count != 2 {
+		t.Fatalf("migration count = %d, want 2", count)
 	}
 }
 
@@ -171,5 +173,71 @@ func TestRetentionQueryUsesTimeIndex(t *testing.T) {
 	}
 	if !strings.Contains(detail, "idx_login_attempts_retention") {
 		t.Fatalf("query plan does not use retention index: %s", detail)
+	}
+}
+
+func TestOperationJournalTransitionsAndUnfinishedIndex(t *testing.T) {
+	t.Parallel()
+
+	database := openTestDatabase(t)
+	store := NewStore(database)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	operation := domain.Transaction{
+		ID: "nat_001", Operation: "nat_apply", State: domain.TransactionPrepared,
+		RequestedChange: `{}`, PreviousSnapshot: `absent`, CandidateConfig: `table ip egm_nat4 {}`,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.CreateOperation(ctx, operation); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.TransitionOperation(ctx, operation.ID, domain.TransactionPrepared, domain.TransactionValidated, now.Add(time.Second), ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.TransitionOperation(ctx, operation.ID, domain.TransactionPrepared, domain.TransactionFailed, now.Add(2*time.Second), "stale"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale transition error = %v, want ErrConflict", err)
+	}
+	loaded, err := store.Operation(ctx, operation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.State != domain.TransactionValidated || loaded.PreviousSnapshot != "absent" {
+		t.Fatalf("operation = %#v", loaded)
+	}
+	unfinished, err := store.UnfinishedOperations(ctx, 10)
+	if err != nil || len(unfinished) != 1 {
+		t.Fatalf("unfinished = %#v, error = %v", unfinished, err)
+	}
+
+	var detail string
+	row := database.QueryRow(`
+        EXPLAIN QUERY PLAN
+        SELECT id
+        FROM operation_journal
+        WHERE state NOT IN ('COMMITTED', 'ROLLED_BACK', 'FAILED')
+        ORDER BY updated_at
+        LIMIT ?
+    `, 100)
+	var identifier, parent, notUsed int
+	if err := row.Scan(&identifier, &parent, &notUsed, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(detail, "idx_operation_journal_unfinished") {
+		t.Fatalf("query plan does not use unfinished-operation index: %s", detail)
+	}
+
+	row = database.QueryRow(`
+        EXPLAIN QUERY PLAN
+        SELECT id
+        FROM operation_journal
+        WHERE state IN ('COMMITTED', 'ROLLED_BACK', 'FAILED') AND updated_at < ?
+        ORDER BY updated_at
+        LIMIT ?
+    `, now.Add(time.Hour).Unix(), 100)
+	if err := row.Scan(&identifier, &parent, &notUsed, &detail); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(detail, "idx_operation_journal_finished_retention") {
+		t.Fatalf("query plan does not use finished-operation retention index: %s", detail)
 	}
 }
