@@ -21,6 +21,8 @@ import (
 
 const MaximumConfigurationBytes = 256 << 10
 
+const managedFragmentName = "zzzz-egress-manager-routing.json"
+
 type InstallationKind string
 
 const (
@@ -32,7 +34,8 @@ const (
 type MutationStrategy string
 
 const (
-	ReadOnly MutationStrategy = "read_only"
+	ReadOnly        MutationStrategy = "read_only"
+	ManagedFragment MutationStrategy = "managed_fragment"
 )
 
 type OwnershipStatus string
@@ -77,6 +80,8 @@ type Installation struct {
 	ServiceName      string           `json:"service_name"`
 	ServiceLoaded    bool             `json:"service_loaded"`
 	ServiceActive    bool             `json:"service_active"`
+	Loader           string           `json:"loader"`
+	ManagedPath      string           `json:"managed_path,omitempty"`
 	InboundTags      []string         `json:"inbound_tags"`
 	OutboundTags     []string         `json:"outbound_tags"`
 	Ownership        OwnershipStatus  `json:"ownership"`
@@ -146,14 +151,19 @@ func (discoverer Discoverer) Discover(ctx context.Context) (Report, error) {
 			report.Warnings = append(report.Warnings, "rejected malformed Xray configuration at "+item.path)
 			continue
 		}
-		loaded, active := discoverer.serviceState(ctx, timeout, item.service)
+		loaded, active, arguments := discoverer.serviceEvidence(ctx, timeout, item.service)
+		strategy, loader, managedPath := ReadOnly, "single_file_or_unproven", ""
+		if loaded {
+			strategy, loader, managedPath = classifyLoader(item.kind, item.path, arguments)
+		}
 		executable, version := discoverer.xrayVersion(ctx, timeout, item.binaries)
 		digest := sha256.Sum256(content)
 		report.Installations = append(report.Installations, Installation{
 			Kind: item.kind, ConfigPath: item.path, ConfigRoot: filepath.Dir(item.path), ConfigHash: hex.EncodeToString(digest[:]), ConfigBytes: len(content),
 			XrayExecutable: executable, XrayVersion: version,
-			ServiceName: item.service, ServiceLoaded: loaded, ServiceActive: active, InboundTags: inboundTags, OutboundTags: outboundTags,
-			Ownership: ForeignOwnership, MutationStrategy: ReadOnly, Limitations: limitations(item.kind),
+			ServiceName: item.service, ServiceLoaded: loaded, ServiceActive: active, Loader: loader, ManagedPath: managedPath,
+			InboundTags: inboundTags, OutboundTags: outboundTags, Ownership: ForeignOwnership,
+			MutationStrategy: strategy, Limitations: limitations(item.kind, strategy),
 		})
 	}
 	report.Installations, report.Warnings = rejectAmbiguousServices(report.Installations, report.Warnings)
@@ -181,10 +191,10 @@ func (discoverer Discoverer) xrayVersion(ctx context.Context, timeout time.Durat
 	return "", ""
 }
 
-func (discoverer Discoverer) serviceState(ctx context.Context, timeout time.Duration, service string) (bool, bool) {
-	output, err := discoverer.run(ctx, timeout, system.Command{Name: "systemctl", Args: []string{"show", "--property=LoadState,ActiveState", service}})
+func (discoverer Discoverer) serviceEvidence(ctx context.Context, timeout time.Duration, service string) (bool, bool, []string) {
+	output, err := discoverer.run(ctx, timeout, system.Command{Name: "systemctl", Args: []string{"show", "--property=LoadState,ActiveState,ExecStart", service}})
 	if err != nil {
-		return false, false
+		return false, false, nil
 	}
 	properties := map[string]string{}
 	for _, line := range strings.Split(string(output), "\n") {
@@ -193,7 +203,62 @@ func (discoverer Discoverer) serviceState(ctx context.Context, timeout time.Dura
 			properties[key] = value
 		}
 	}
-	return properties["LoadState"] == "loaded", properties["ActiveState"] == "active"
+	return properties["LoadState"] == "loaded", properties["ActiveState"] == "active", parseExecStart(properties["ExecStart"])
+}
+
+func parseExecStart(value string) []string {
+	if strings.Count(value, "argv[]=") != 1 || strings.ContainsAny(value, "\r\n\x00\\\"'") {
+		return nil
+	}
+	_, remainder, found := strings.Cut(value, "argv[]=")
+	if !found {
+		return nil
+	}
+	argumentsText, _, found := strings.Cut(remainder, " ;")
+	if !found {
+		return nil
+	}
+	arguments := strings.Fields(argumentsText)
+	if len(arguments) < 2 || len(arguments) > 32 {
+		return nil
+	}
+	for _, argument := range arguments {
+		if len(argument) > 512 || strings.ContainsAny(argument, ";\t") {
+			return nil
+		}
+	}
+	return arguments
+}
+
+func classifyLoader(kind InstallationKind, configPath string, arguments []string) (MutationStrategy, string, string) {
+	if kind != Standalone || len(arguments) < 2 || filepath.Base(arguments[0]) != "xray" || arguments[1] != "run" {
+		return ReadOnly, "single_file_or_unproven", ""
+	}
+	root := filepath.Clean(filepath.Dir(configPath))
+	matchedRoot := ""
+	for index := 2; index < len(arguments); index++ {
+		if arguments[index] == "-c" || arguments[index] == "-config" || strings.HasPrefix(arguments[index], "-c=") || strings.HasPrefix(arguments[index], "-config=") {
+			return ReadOnly, "single_file_or_unproven", ""
+		}
+		var value string
+		switch {
+		case arguments[index] == "-confdir" && index+1 < len(arguments):
+			value = arguments[index+1]
+		case strings.HasPrefix(arguments[index], "-confdir="):
+			value = strings.TrimPrefix(arguments[index], "-confdir=")
+		}
+		if value == "" {
+			continue
+		}
+		if matchedRoot != "" || !filepath.IsAbs(value) || filepath.Clean(value) != root {
+			return ReadOnly, "single_file_or_unproven", ""
+		}
+		matchedRoot = root
+	}
+	if matchedRoot != "" {
+		return ManagedFragment, "confdir", filepath.Join(root, managedFragmentName)
+	}
+	return ReadOnly, "single_file_or_unproven", ""
 }
 
 func (discoverer Discoverer) run(ctx context.Context, timeout time.Duration, command system.Command) ([]byte, error) {
@@ -268,7 +333,7 @@ func validTag(tag string) bool {
 	return true
 }
 
-func limitations(kind InstallationKind) []string {
+func limitations(kind InstallationKind, strategy MutationStrategy) []string {
 	common := "Read-only until the active loader proves an isolated managed-fragment or documented API boundary."
 	switch kind {
 	case Marzban:
@@ -276,6 +341,9 @@ func limitations(kind InstallationKind) []string {
 	case ThreeXUI:
 		return []string{common, "3x-ui owns runtime configuration and database state; direct file or database mutation is disabled."}
 	default:
+		if strategy == ManagedFragment {
+			return []string{"Only the dedicated Egress Manager routing fragment may be changed; all other Xray files remain foreign-owned."}
+		}
 		return []string{common, "The standalone systemd command line and include semantics have not yet been proven."}
 	}
 }

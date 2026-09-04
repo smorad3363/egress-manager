@@ -65,3 +65,13 @@ Discover compatible Xray installations and safely bind existing inbound tags to 
 - Added deterministic, bounded, read-only discovery for fixed standalone Xray, Marzban, and 3x-ui layouts.
 - Discovery records configuration roots and hashes, explicit tags, fixed executable/version evidence, systemd state, foreign ownership, read-only strategy, and limitations without returning foreign configuration contents.
 - Unsafe files, symlinks, malformed input, duplicate or unsafe tags, unstable reads, and ambiguous candidates for one service are rejected.
+- Added a conservative managed-fragment boundary: only a loaded standalone `xray.service` with one absolute `-confdir` matching the discovered root and no explicit `-config` input is writable. Marzban and 3x-ui remain read-only.
+- Added bounded all-JSON confdir snapshots that hash every foreign filename and byte, collect effective tags and routing, reject unsafe entries and unsupported merge layouts, and authenticate the owned fragment separately.
+- Added private candidate composition that prepends deterministic project-owned native `inboundTag` to `outboundTag` rules while preserving the effective foreign routing object. Public review exposes only actions, counts, paths, and state/candidate hashes.
+
+## Integration References
+
+- [Xray multiple configuration files](https://xtls.github.io/en/config/features/multiple.html)
+- [Xray `run` command and `-confdir` implementation](https://github.com/XTLS/Xray-core/blob/main/main/run.go)
+- [Marzban Xray configuration defaults](https://github.com/Gozargah/Marzban/blob/master/config.py)
+- [3x-ui configuration paths](https://github.com/MHSanaei/3x-ui/blob/main/CONTRIBUTING.md)

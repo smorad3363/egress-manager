@@ -50,6 +50,15 @@ func (discoveryRunner) Run(_ context.Context, command system.Command) (system.Re
 	return system.Result{ExitCode: 127}, errors.New("unexpected command")
 }
 
+type managedDiscoveryRunner struct{ discoveryRunner }
+
+func (managedDiscoveryRunner) Run(ctx context.Context, command system.Command) (system.Result, error) {
+	if command.Name == "systemctl" {
+		return system.Result{Stdout: []byte("LoadState=loaded\nActiveState=active\nExecStart={ path=/usr/local/bin/xray ; argv[]=/usr/local/bin/xray run -confdir /etc/xray ; ignore_errors=no ; }\n"), ExitCode: 0}, nil
+	}
+	return (discoveryRunner{}).Run(ctx, command)
+}
+
 func TestDiscovererReturnsTypedDeterministicReadOnlyEvidence(t *testing.T) {
 	t.Parallel()
 	marzban := []byte(`{"inbounds":[{"tag":"vpn-in"}],"outbounds":[{"tag":"direct"},{"tag":"proxy-de"}],"routing":{"rules":[]}}`)
@@ -71,6 +80,44 @@ func TestDiscovererReturnsTypedDeterministicReadOnlyEvidence(t *testing.T) {
 	}
 	if strings.Contains(strings.Join(marzbanResult.Limitations, " "), string(marzban)) {
 		t.Fatal("discovery limitation leaked external configuration")
+	}
+}
+
+func TestDiscovererEnablesOnlyProvenStandaloneConfdirFragment(t *testing.T) {
+	t.Parallel()
+	content := []byte(`{"inbounds":[{"tag":"vpn-in"}],"outbounds":[{"tag":"proxy"}]}`)
+	report, err := (Discoverer{Runner: managedDiscoveryRunner{}, Files: memoryFiles{contents: map[string][]byte{
+		"/etc/xray/config.json": content,
+	}}}).Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(report.Installations) != 1 {
+		t.Fatalf("report = %#v", report)
+	}
+	installation := report.Installations[0]
+	if installation.MutationStrategy != ManagedFragment || installation.Loader != "confdir" || installation.ManagedPath != "/etc/xray/"+managedFragmentName {
+		t.Fatalf("installation = %#v", installation)
+	}
+}
+
+func TestClassifyLoaderRejectsPanelRelativeAndAmbiguousCommands(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		kind InstallationKind
+		args []string
+	}{
+		{Marzban, []string{"/usr/local/bin/xray", "run", "-confdir", "/var/lib/marzban"}},
+		{Standalone, []string{"/usr/local/bin/xray", "run", "-confdir", "etc/xray"}},
+		{Standalone, []string{"/usr/local/bin/xray", "run", "-confdir", "/another/root"}},
+		{Standalone, []string{"/usr/local/bin/xray", "run", "-confdir", "/etc/xray", "-confdir", "/etc/xray"}},
+		{Standalone, []string{"/usr/local/bin/xray", "run", "-config", "/etc/xray/config.json", "-confdir", "/etc/xray"}},
+		{Standalone, parseExecStart(`{ path=/usr/local/bin/xray ; argv[]=/usr/local/bin/xray run '-confdir' /etc/xray ; }`)},
+	} {
+		strategy, _, managedPath := classifyLoader(test.kind, "/etc/xray/config.json", test.args)
+		if strategy != ReadOnly || managedPath != "" {
+			t.Fatalf("classifyLoader(%q, %#v) = %q, %q", test.kind, test.args, strategy, managedPath)
+		}
 	}
 }
 

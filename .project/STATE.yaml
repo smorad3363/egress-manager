@@ -6,12 +6,12 @@ phase: 9
 phase_name: xray-marzban-3x-ui-adapter
 
 active_spec: specs/009-xray-panel-adapter/spec.md
-active_task: xray-native-managed-fragment-plan
+active_task: xray-managed-fragment-transaction
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: define the positively proven standalone Xray managed-fragment boundary and build stale-safe native inboundTag-to-outboundTag route plans while keeping Marzban and 3x-ui read-only
+next_action: implement native Xray candidate validation plus journaled atomic fragment apply, bounded systemd reload or restart verification, rollback, and interrupted-operation recovery
 
 dirty_work_expected: false
 
@@ -78,6 +78,9 @@ recent_decisions:
   - Xray discovery inspects only fixed standalone, Marzban, and 3x-ui paths; every discovered configuration remains foreign-owned and read-only.
   - Multiple configuration candidates for one service are rejected as ambiguous instead of selecting a path heuristically.
   - Version probes use only fixed Xray executable candidates and service probes use fixed systemctl arguments without invoking a shell.
+  - Managed fragments are allowed only for a loaded standalone xray.service whose simple ExecStart positively proves one absolute -confdir matching the discovered configuration root and no explicit -config input.
+  - Safe Xray composition supports bounded all-JSON confdirs only, rejects files ordered after the reserved fragment, and hashes every foreign filename and byte before planning.
+  - The owned Xray fragment prepends exact native inboundTag-to-outboundTag rules while copying the effective foreign routing object; the foreign rules and routing fields remain in their original order and content model.
 
 touched_areas:
   - Xray, Marzban, and 3x-ui discovery
