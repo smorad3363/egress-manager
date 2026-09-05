@@ -199,6 +199,19 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}},
 		{Component: "journal_final", Recover: verifyRecoveryJournal},
 	}}
+	dependencyMonitor, err := newDependencyMonitor(dependencyMonitorOptions{
+		configuration:     configuration,
+		runner:            runner,
+		collector:         collector,
+		haproxyRuntime:    haproxyRuntime,
+		interfaceExecutor: interfaceExecutor,
+		routeExecutor:     routeExecutor,
+		loadInterfacePlan: loadInterfacePlan,
+		discoverXray:      xrayDiscoverer.Discover,
+	})
+	if err != nil {
+		return err
+	}
 	recoveryTracker := &reliability.Tracker{}
 	startupReport, startupErr := recoveryCoordinator.Run(ctx)
 	recoveryTracker.Record(startupReport)
@@ -208,6 +221,11 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	if err := startupLease.Release(); err != nil {
 		return fmt.Errorf("release startup recovery lock: %w", err)
 	}
+	go func() {
+		if err := dependencyMonitor.Run(ctx); err != nil {
+			logger.ErrorContext(ctx, "dependency monitor stopped", "error_type", fmt.Sprintf("%T", err))
+		}
+	}()
 	mutate := func(ctx context.Context, transactionID domain.ID, component string, action func() (any, error)) (any, error) {
 		return withMutationLock(mutationLock, transactionID, component, func() (any, error) {
 			if !recoveryTracker.Ready() {
@@ -251,6 +269,7 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 			return nil, err
 		}
 		status.LastRecovery = recoveryTracker.Last()
+		status.Dependencies = dependencyMonitor.Snapshot()
 		if !recoveryTracker.Ready() {
 			status.Ready = false
 			status.RecoveryRequired = true

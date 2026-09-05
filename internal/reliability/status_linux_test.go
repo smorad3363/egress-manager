@@ -42,7 +42,7 @@ func TestInspectReturnsSecretFreeRecoveryStatusWhileMutationIsActive(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Ready || !status.RecoveryRequired || !status.MutationLock.Active || status.MutationLock.Owner == nil || len(status.Unfinished) != 1 || journal.limit != MaximumRecoveryOperations {
+	if status.Ready || !status.RecoveryRequired || !status.MutationLock.Active || status.MutationLock.Owner == nil || len(status.Unfinished) != 1 || status.Dependencies == nil || journal.limit != MaximumRecoveryOperations {
 		t.Fatalf("recovery status = %#v", status)
 	}
 	encoded, err := json.Marshal(status)

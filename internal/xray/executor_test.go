@@ -80,6 +80,18 @@ func TestFragmentExecutorValidatesInstallsRestartsVerifiesAndCommits(t *testing.
 	}
 }
 
+func TestFragmentExecutorVerifiesRuntimeWithoutMutationDependencies(t *testing.T) {
+	t.Parallel()
+	installation, _ := executableFragmentPlan(t)
+	runner := &xrayScriptedRunner{t: t, steps: []xrayRunnerStep{
+		{name: "xray", contains: []string{"run -test -confdir"}},
+		{name: "systemctl", contains: []string{"is-active --quiet xray.service"}},
+	}}
+	if err := (FragmentExecutor{Runner: runner, Installation: installation}).VerifyRuntime(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFragmentExecutorRejectsStalePlanBeforeJournal(t *testing.T) {
 	t.Parallel()
 	installation, plan := executableFragmentPlan(t)

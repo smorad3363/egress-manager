@@ -82,6 +82,7 @@ type Monitor struct {
 	Interval time.Duration
 	Now      func() time.Time
 
+	runMu  sync.Mutex
 	mu     sync.RWMutex
 	states map[string]dependencyState
 }
@@ -127,6 +128,8 @@ func (monitor *Monitor) RunOnce(ctx context.Context) {
 	if ctx == nil || monitor.Validate() != nil {
 		return
 	}
+	monitor.runMu.Lock()
+	defer monitor.runMu.Unlock()
 	type result struct {
 		name        string
 		observation DependencyObservation

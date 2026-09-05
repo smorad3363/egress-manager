@@ -174,6 +174,10 @@ func printStatus(writer io.Writer, status reliability.RecoveryStatus) {
 	for _, operation := range status.Unfinished {
 		fmt.Fprintf(writer, "- %s %s %s updated %s\n", operation.ID, operation.Operation, operation.State, operation.UpdatedAt.UTC().Format(time.RFC3339))
 	}
+	fmt.Fprintf(writer, "dependencies: %d\n", len(status.Dependencies))
+	for _, dependency := range status.Dependencies {
+		fmt.Fprintf(writer, "- %s: %s failures %d checked %s\n", dependency.Name, dependency.Status, dependency.ConsecutiveFailures, dependency.LastChecked.UTC().Format(time.RFC3339))
+	}
 	fmt.Fprintf(writer, "observed at: %s\n", status.ObservedAt.UTC().Format(time.RFC3339))
 }
 

@@ -28,6 +28,7 @@ type RecoveryStatus struct {
 	RecoveryRequired bool               `json:"recovery_required"`
 	MutationLock     Status             `json:"mutation_lock"`
 	Unfinished       []OperationSummary `json:"unfinished_operations"`
+	Dependencies     []DependencyStatus `json:"dependencies"`
 	ObservedAt       time.Time          `json:"observed_at"`
 }
 
@@ -62,6 +63,7 @@ func Inspect(ctx context.Context, journal Journal, lock FileLock, now time.Time)
 		RecoveryRequired: recoveryRequired,
 		MutationLock:     lockStatus,
 		Unfinished:       summaries,
+		Dependencies:     []DependencyStatus{},
 		ObservedAt:       now.UTC(),
 	}, nil
 }

@@ -95,9 +95,10 @@ func TestDaemonAndWebLifecycle(t *testing.T) {
 		t.Fatal("typed inventory response omitted capability states")
 	}
 	var recoveryStatus reliability.RecoveryStatus
-	if err := malformedClient.Call(context.Background(), ipc.OperationRecoveryStatus, struct{}{}, &recoveryStatus); err != nil {
-		t.Fatalf("typed recovery status call failed: %v", err)
-	}
+	waitFor(t, 8*time.Second, func() bool {
+		recoveryStatus = reliability.RecoveryStatus{}
+		return malformedClient.Call(context.Background(), ipc.OperationRecoveryStatus, struct{}{}, &recoveryStatus) == nil && len(recoveryStatus.Dependencies) == 6
+	})
 	if !recoveryStatus.Ready || recoveryStatus.RecoveryRequired || recoveryStatus.MutationLock.Active {
 		t.Fatalf("unexpected recovery status = %#v", recoveryStatus)
 	}

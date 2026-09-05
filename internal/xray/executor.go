@@ -190,6 +190,33 @@ func (executor FragmentExecutor) verify(ctx context.Context, foreignHash, candid
 	return executor.run(ctx, system.Command{Name: "systemctl", Args: []string{"is-active", "--quiet", executor.Installation.ServiceName}})
 }
 
+// ValidateRuntimeConfiguration checks the current composed configuration without
+// changing the managed fragment or any foreign Xray file.
+func (executor FragmentExecutor) ValidateRuntimeConfiguration(ctx context.Context) error {
+	if ctx == nil || executor.Runner == nil {
+		return fmt.Errorf("Xray runtime verification dependencies are required")
+	}
+	if err := validateManagedInstallation(executor.Installation); err != nil {
+		return err
+	}
+	snapshot, err := SnapshotConfdir(executor.Installation)
+	if err != nil {
+		return err
+	}
+	if err := executor.validateEffectiveCandidate(ctx, snapshot, snapshot.fragmentData, snapshot.Fragment.Exists); err != nil {
+		return err
+	}
+	return nil
+}
+
+// VerifyRuntime validates the current configuration and service without mutation.
+func (executor FragmentExecutor) VerifyRuntime(ctx context.Context) error {
+	if err := executor.ValidateRuntimeConfiguration(ctx); err != nil {
+		return err
+	}
+	return executor.run(ctx, system.Command{Name: "systemctl", Args: []string{"is-active", "--quiet", executor.Installation.ServiceName}})
+}
+
 func (executor FragmentExecutor) failWithRollback(ctx context.Context, operation domain.Transaction, from domain.TransactionState, detail string, cause error) error {
 	snapshot, snapshotErr := executor.openSnapshot(operation)
 	if snapshotErr != nil {

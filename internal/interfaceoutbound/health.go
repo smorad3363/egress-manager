@@ -67,7 +67,7 @@ func (tester Tester) Test(ctx context.Context, outbound domain.Outbound, credent
 			health.Detail = "lifecycle_unavailable"
 			return health
 		}
-		if hasHandshake(output) {
+		if HasHandshakeEvidence(output) {
 			health.Status = domain.HealthHealthy
 			health.TransportReachable = domain.ProbePassed
 			health.Detail = "wireguard_handshake_observed"
@@ -98,7 +98,8 @@ func capabilityStatus(supported bool) domain.ProbeStatus {
 	return domain.ProbeUnsupported
 }
 
-func hasHandshake(output []byte) bool {
+// HasHandshakeEvidence accepts only bounded WireGuard latest-handshakes output.
+func HasHandshakeEvidence(output []byte) bool {
 	if len(output) == 0 || len(output) > 4096 {
 		return false
 	}
