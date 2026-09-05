@@ -6,12 +6,12 @@ phase: 11
 phase_name: reliability-recovery
 
 active_spec: specs/011-reliability-recovery/spec.md
-active_task: dependency-health-monitoring
+active_task: dependency-health-monitoring-integration
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: implement bounded observational dependency health monitoring with debounced transitions; any automated reconciliation must reuse the global lock and journaled paths
+next_action: connect fixed daemon probes for HAProxy, sing-box, native interfaces, writable Xray, nftables/iproute2, and required executables; expose sanitized snapshots through recovery status without adding automatic mutation
 
 dirty_work_expected: false
 
@@ -20,8 +20,7 @@ tests:
   result: pass
   commands:
     - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test ./... && go vet ./..."
-    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test -race ./internal/inventory ./internal/routing ./internal/singbox ./internal/routeengine ./internal/app ./internal/reliability"
-    - docker build --tag egress-manager-network-lab --file tests/network/Dockerfile . && docker run --rm --privileged egress-manager-network-lab
+    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test -race ./internal/reliability"
 
 network_transaction:
   status: none
@@ -118,9 +117,10 @@ recent_decisions:
   - Global lock contention uses stable IPC code busy, CLI exit code 4, and HTTP 409 without falsely claiming rollback was attempted.
   - Startup and manual recovery replay only validated applied routing and sing-box state; pending database edits remain unapplied.
   - Reconciliation rollback restores validated nftables leak protection before policy routes when reboot erased the volatile snapshot.
+  - Dependency monitoring is observational by default and has no direct mutation or reconciliation callback.
 
 touched_areas:
-  - dual-family route and policy-rule inventory
-  - applied sing-box and routing reconciliation
-  - nftables leak-protection rollback ordering
-  - startup and manual recovery coordination
+  - dependency health state model
+  - bounded concurrent health probes
+  - debounced health transitions
+  - sanitized monitoring snapshots
