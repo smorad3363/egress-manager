@@ -142,6 +142,21 @@ func renderNFT(intents []RouteIntent, tableExisted bool) []byte {
 	return []byte(builder.String())
 }
 
+// BuildRecoveryNFT reconstructs leak protection when persistent routing state
+// survives a reboot but its volatile nftables snapshot does not.
+func BuildRecoveryNFT(intents []RouteIntent, tableExisted bool) ([]byte, error) {
+	if _, _, err := BuildIPBatches(intents); err != nil {
+		return nil, err
+	}
+	ordered := append([]RouteIntent{}, intents...)
+	sort.Slice(ordered, func(i, j int) bool { return ordered[i].ID < ordered[j].ID })
+	content := renderNFT(ordered, tableExisted)
+	if len(content) > maximumNativeBytes {
+		return nil, fmt.Errorf("recovery firewall exceeds limit")
+	}
+	return content, nil
+}
+
 func nftSelector(intent RouteIntent, ipv4 bool) string {
 	selector := fmt.Sprintf("iifname \"%s\"", intent.IngressInterface)
 	if intent.Source.Kind != domain.RouteSourceSubnet || intent.Source.Subnet.Addr().Is4() != ipv4 {

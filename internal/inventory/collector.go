@@ -89,6 +89,20 @@ func (collector Collector) Collect(ctx context.Context) (Inventory, error) {
 	} else {
 		result.PolicyRules = parsed
 	}
+	if output, err := collector.run(ctx, timeout, system.Command{Name: "ip", Args: []string{"-j", "-6", "route", "show", "table", "all"}}); err != nil {
+		result.Warnings = append(result.Warnings, "IPv6 route inventory unavailable")
+	} else if parsed, err := parseRoutes(output); err != nil || len(result.Routes)+len(parsed) > maximumRoutes {
+		result.Warnings = append(result.Warnings, "IPv6 route inventory malformed or oversized")
+	} else {
+		result.Routes = append(result.Routes, parsed...)
+	}
+	if output, err := collector.run(ctx, timeout, system.Command{Name: "ip", Args: []string{"-j", "-6", "rule", "show"}}); err != nil {
+		result.Warnings = append(result.Warnings, "IPv6 policy rule inventory unavailable")
+	} else if parsed, err := parsePolicyRules(output); err != nil || len(result.PolicyRules)+len(parsed) > maximumPolicyRules {
+		result.Warnings = append(result.Warnings, "IPv6 policy rule inventory malformed or oversized")
+	} else {
+		result.PolicyRules = append(result.PolicyRules, parsed...)
+	}
 	if output, err := collector.run(ctx, timeout, system.Command{Name: "ss", Args: []string{"-H", "-lntu", "-p"}}); err != nil {
 		result.Warnings = append(result.Warnings, "listener inventory unavailable")
 	} else if parsed, err := parseListeners(output); err != nil {

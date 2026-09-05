@@ -182,6 +182,21 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		{Component: "nat", Recover: executor.Recover},
 		{Component: "journal_check", Recover: verifyRecoveryJournal},
 		{Component: "interface_reconcile", Recover: reconcileInterfaces},
+		{Component: "route_reconcile", Recover: func(ctx context.Context) error {
+			state, err := routing.InspectState(configuration.RoutingStatePath)
+			if err != nil || !state.Exists {
+				return err
+			}
+			host, err := collector.Collect(ctx)
+			if err != nil {
+				return err
+			}
+			operationID, err := logging.NewOperationID(nil)
+			if err != nil {
+				return err
+			}
+			return routeExecutor.ReconcileApplied(ctx, domain.ID("route_reconcile_"+operationID), host, configuration.ProtectedManagementCIDRs)
+		}},
 		{Component: "journal_final", Recover: verifyRecoveryJournal},
 	}}
 	recoveryTracker := &reliability.Tracker{}

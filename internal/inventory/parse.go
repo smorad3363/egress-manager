@@ -61,7 +61,7 @@ type ipRouteDocument struct {
 	Destination string          `json:"dst"`
 	Gateway     string          `json:"gateway"`
 	Device      string          `json:"dev"`
-	Protocol    string          `json:"protocol"`
+	Protocol    json.RawMessage `json:"protocol"`
 	Table       json.RawMessage `json:"table"`
 	Metric      int             `json:"metric"`
 }
@@ -85,7 +85,7 @@ func parseRoutes(data []byte) ([]Route, error) {
 			Destination: destination,
 			Gateway:     document.Gateway,
 			Interface:   document.Device,
-			Protocol:    document.Protocol,
+			Protocol:    rawScalar(document.Protocol),
 			Table:       rawScalar(document.Table),
 			Metric:      document.Metric,
 			Default:     isDefault,
@@ -95,14 +95,15 @@ func parseRoutes(data []byte) ([]Route, error) {
 }
 
 type ipRuleDocument struct {
-	Priority    int             `json:"priority"`
-	Protocol    json.RawMessage `json:"protocol"`
-	Source      string          `json:"src"`
-	Destination string          `json:"dst"`
-	Table       json.RawMessage `json:"table"`
-	FWMark      string          `json:"fwmark"`
-	Input       string          `json:"iif"`
-	Output      string          `json:"oif"`
+	Priority     int             `json:"priority"`
+	Protocol     json.RawMessage `json:"protocol"`
+	Source       string          `json:"src"`
+	SourceLength *int            `json:"srclen"`
+	Destination  string          `json:"dst"`
+	Table        json.RawMessage `json:"table"`
+	FWMark       string          `json:"fwmark"`
+	Input        string          `json:"iif"`
+	Output       string          `json:"oif"`
 }
 
 func parsePolicyRules(data []byte) ([]PolicyRule, error) {
@@ -119,6 +120,13 @@ func parsePolicyRules(data []byte) ([]PolicyRule, error) {
 			return nil, fmt.Errorf("policy rule inventory contains invalid priority")
 		}
 		source := document.Source
+		if document.SourceLength != nil {
+			address, err := netip.ParseAddr(source)
+			if err != nil || *document.SourceLength < 0 || *document.SourceLength > address.BitLen() {
+				return nil, fmt.Errorf("policy rule inventory contains invalid source prefix")
+			}
+			source = netip.PrefixFrom(address, *document.SourceLength).Masked().String()
+		}
 		if source == "" {
 			source = "all"
 		}

@@ -168,6 +168,9 @@ func validTunnelAddress(prefix netip.Prefix, ipv4 bool) bool {
 }
 
 func BuildPlan(settings Settings, routes []domain.Route, outbounds []domain.Outbound, host inventory.Inventory, resolved ResolvedEndpoints, state State) (ExecutionPlan, error) {
+	if err := requireRoutingInventory(host); err != nil {
+		return ExecutionPlan{}, err
+	}
 	if err := settings.validate(); err != nil {
 		return ExecutionPlan{}, err
 	}
@@ -186,6 +189,11 @@ func BuildPlan(settings Settings, routes []domain.Route, outbounds []domain.Outb
 		return ExecutionPlan{}, err
 	}
 	usedTables := existingNumericTables(host.Routes)
+	for _, rule := range host.PolicyRules {
+		if table, err := strconv.ParseUint(rule.Table, 10, 32); err == nil && table > 0 {
+			usedTables[uint32(table)] = struct{}{}
+		}
+	}
 	usedPriorities := existingPriorities(host.PolicyRules)
 	usedPrefixes := existingPrefixes(host)
 	releaseOwnedResources(state.Routes, host, usedTables, usedPriorities, &usedPrefixes)
@@ -553,6 +561,12 @@ func releaseOwnedResources(previous []RouteIntent, host inventory.Inventory, tab
 	for _, intent := range previous {
 		table := strconv.FormatUint(uint64(intent.RoutingTable), 10)
 		foreignTable := false
+		for _, rule := range host.PolicyRules {
+			if rule.Table == table && rule.Protocol != OwnedRouteProtocol {
+				foreignTable = true
+				break
+			}
+		}
 		for _, route := range host.Routes {
 			if route.Table == table && route.Protocol != OwnedRouteProtocol {
 				foreignTable = true

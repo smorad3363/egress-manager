@@ -98,18 +98,7 @@ func (executor Executor) VerifyRuntime(ctx context.Context, plan Plan) error {
 	if currentRoutes.Hash != expectedRoutes.Hash || currentSingBox.Hash != expectedSingBox.Hash || currentInterfaces.Hash != plan.Review.InterfaceStateHash {
 		return ErrStateChanged
 	}
-	if err := executor.verify(ctx, plan); err != nil {
-		return err
-	}
-	state, err := routing.ParseState(plan.routing.Candidate(), true)
-	if err != nil {
-		return err
-	}
-	nft, err := executor.output(ctx, system.Command{Name: "nft", Args: []string{"-j", "list", "table", routing.OwnedNFTFamily, routing.OwnedNFTTable}})
-	if err != nil {
-		return err
-	}
-	return routing.VerifyNFTRuntime(state.Routes, nft)
+	return executor.verify(ctx, plan)
 }
 
 func (executor Executor) Execute(ctx context.Context, id domain.ID, plan Plan) (ApplyResponse, error) {
@@ -308,14 +297,35 @@ func (executor Executor) restore(ctx context.Context, candidate []byte, snapshot
 	if err := executor.restoreSingBox(ctx, snapshot.SingBox); err != nil {
 		return err
 	}
+	var previous routing.State
 	if snapshot.Routing.Exists {
-		previous, parseErr := routing.ParseState(snapshot.Routing.Content, true)
-		if parseErr != nil {
-			return parseErr
+		previous, err = routing.ParseState(snapshot.Routing.Content, true)
+		if err != nil {
+			return err
 		}
 		if err := executor.verifyTUNs(ctx, snapshot.Routing.Content); err != nil && len(previous.Routes) != 0 {
 			return err
 		}
+	}
+	if !snapshot.NFT.Exists && len(previous.Routes) != 0 {
+		current, err := executor.inspectNFT(ctx)
+		if err != nil {
+			return err
+		}
+		protection, err := routing.BuildRecoveryNFT(previous.Routes, current.Exists)
+		if err != nil {
+			return err
+		}
+		if err := executor.run(ctx, system.Command{Name: "nft", Args: []string{"--check", "--file", "-"}, Stdin: protection}); err != nil {
+			return err
+		}
+		if err := executor.run(ctx, system.Command{Name: "nft", Args: []string{"--file", "-"}, Stdin: protection}); err != nil {
+			return err
+		}
+	} else if err := executor.restoreNFT(ctx, snapshot.NFT); err != nil {
+		return err
+	}
+	if snapshot.Routing.Exists {
 		ipv4, ipv6, batchErr := routing.BuildIPBatches(previous.Routes)
 		if batchErr != nil {
 			return batchErr
@@ -330,9 +340,6 @@ func (executor Executor) restore(ctx context.Context, candidate []byte, snapshot
 				return err
 			}
 		}
-	}
-	if err := executor.restoreNFT(ctx, snapshot.NFT); err != nil {
-		return err
 	}
 	return restoreOwnedFile(executor.RoutingStatePath, snapshot.Routing, func(content []byte, exists bool) error {
 		_, err := routing.ParseState(content, exists)
@@ -475,6 +482,13 @@ func (executor Executor) verify(ctx context.Context, plan Plan) error {
 	}
 	state, err := routing.ParseState(plan.routing.Candidate(), true)
 	if err != nil {
+		return err
+	}
+	nftJSON, err := executor.output(ctx, system.Command{Name: "nft", Args: []string{"-j", "list", "table", routing.OwnedNFTFamily, routing.OwnedNFTTable}})
+	if err != nil {
+		return err
+	}
+	if err := routing.VerifyNFTRuntime(state.Routes, nftJSON); err != nil {
 		return err
 	}
 	for _, intent := range state.Routes {

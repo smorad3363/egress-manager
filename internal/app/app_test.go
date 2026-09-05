@@ -105,7 +105,7 @@ func TestDaemonAndWebLifecycle(t *testing.T) {
 	if err := malformedClient.Call(context.Background(), ipc.OperationRecoveryRun, struct{}{}, &recoveryReport); err != nil {
 		t.Fatalf("typed recovery run failed: %v", err)
 	}
-	if !recoveryReport.Succeeded || len(recoveryReport.Steps) != 9 {
+	if !recoveryReport.Succeeded || len(recoveryReport.Steps) != 10 {
 		t.Fatalf("unexpected recovery report = %#v", recoveryReport)
 	}
 

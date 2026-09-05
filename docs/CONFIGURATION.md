@@ -56,6 +56,8 @@ egressctl recover --config /etc/egress-manager/config.json --ipc-key /etc/egress
 
 If subsystem startup recovery fails, the daemon remains available in degraded mode for authenticated inspection and `egressctl recover`. Ordinary apply operations are rejected with `recovery_required` until recovery succeeds and no unfinished transaction remains. `status --json` includes the latest sanitized recovery report. Authentication, database, configuration, or lock initialization failures remain fatal.
 
+Route recovery replays the last applied routing and sing-box files, not pending route/outbound edits in the database. Keep these applied files on persistent storage. Complete IPv4/IPv6 inventory and current management-path checks are required. Foreign collisions or missing applied files leave recovery degraded; no replacement policy is guessed. Native-interface profiles continue to be reconstructed from encrypted desired state under the private runtime directory.
+
 Provision an administrator without placing the password in process arguments:
 
 ```sh

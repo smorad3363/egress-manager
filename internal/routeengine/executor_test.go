@@ -22,14 +22,16 @@ import (
 )
 
 type routeEngineRunner struct {
-	t              *testing.T
-	nftInstalled   bool
-	ipv4Installed  bool
-	ipv6Installed  bool
-	failValidation bool
-	failIPv6       bool
-	ipv4Batch      string
-	ipv6Batch      string
+	t               *testing.T
+	nftInstalled    bool
+	ipv4Installed   bool
+	ipv6Installed   bool
+	failValidation  bool
+	failIPv6        bool
+	failNFTApply    bool
+	requireNFTForIP bool
+	ipv4Batch       string
+	ipv6Batch       string
 }
 
 type runtimeInspectionRunner struct {
@@ -55,12 +57,28 @@ func (runner *routeEngineRunner) Run(_ context.Context, command system.Command) 
 		return system.Result{ExitCode: 0}, nil
 	case joined == "nft list table inet egm_egress":
 		return system.Result{Stdout: []byte("table inet egm_egress {\n}\n"), ExitCode: 0}, nil
+	case joined == "nft -j list table inet egm_egress":
+		plan := coordinatedTestPlan(runner.t)
+		state, err := routing.ParseState(plan.routing.Candidate(), true)
+		if err != nil {
+			runner.t.Fatal(err)
+		}
+		content, err := routing.NFTRuntimeTemplate(state.Routes)
+		if err != nil {
+			runner.t.Fatal(err)
+		}
+		content = []byte(strings.ReplaceAll(string(content), `"counter":null`, `"counter":{"packets":0,"bytes":0}`))
+		return system.Result{Stdout: content, ExitCode: 0}, nil
 	case joined == "nft --check --file -":
 		if runner.failValidation {
 			return system.Result{ExitCode: 1}, errors.New("invalid nft candidate")
 		}
 		return system.Result{ExitCode: 0}, nil
 	case joined == "nft --file -":
+		if runner.failNFTApply {
+			runner.failNFTApply = false
+			return system.Result{ExitCode: 1}, errors.New("interrupted nft apply")
+		}
 		runner.nftInstalled = strings.Contains(string(command.Stdin), "table inet egm_egress {")
 		return system.Result{ExitCode: 0}, nil
 	case strings.HasPrefix(joined, "sing-box check -c "):
@@ -73,6 +91,9 @@ func (runner *routeEngineRunner) Run(_ context.Context, command system.Command) 
 		name := command.Args[len(command.Args)-1]
 		return system.Result{Stdout: []byte(`[{"ifname":"` + name + `"}]`), ExitCode: 0}, nil
 	case joined == "ip -4 -batch -":
+		if runner.requireNFTForIP && !runner.nftInstalled {
+			return system.Result{ExitCode: 1}, errors.New("policy routing restored before leak protection")
+		}
 		runner.ipv4Installed = true
 		runner.ipv4Batch = string(command.Stdin)
 		return system.Result{ExitCode: 0}, nil

@@ -6,26 +6,22 @@ phase: 11
 phase_name: reliability-recovery
 
 active_spec: specs/011-reliability-recovery/spec.md
-active_task: reboot-reconciliation
+active_task: dependency-health-monitoring
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: add complete dual-family inventory and restart reconciliation from applied route state without silently activating unreviewed desired changes; degraded emergency IPC and journal-gated mutations are implemented
+next_action: implement bounded observational dependency health monitoring with debounced transitions; any automated reconciliation must reuse the global lock and journaled paths
 
 dirty_work_expected: false
 
 tests:
-  last_run: 2026-09-05
+  last_run: 2026-09-06
   result: pass
   commands:
-    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test -race ./internal/routeengine && go vet ./internal/routeengine"
-    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test -race ./internal/interfaceoutbound ./internal/app ./internal/reliability"
     - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test ./... && go vet ./..."
-    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test -race ./..."
-    - PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=<installed-chrome> pnpm --dir web test:e2e
+    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test -race ./internal/inventory ./internal/routing ./internal/singbox ./internal/routeengine ./internal/app ./internal/reliability"
     - docker build --tag egress-manager-network-lab --file tests/network/Dockerfile . && docker run --rm --privileged egress-manager-network-lab
-    - XRAY_NATIVE_BINARY=<pinned-xray-v26.7.28> XRAY_LOCATION_ASSET=<pinned-assets> go test ./internal/xray -run 'TestRepresentative|TestNative' -v
 
 network_transaction:
   status: none
@@ -120,10 +116,11 @@ recent_decisions:
   - Startup and manual recovery use one dependency-ordered coordinator and fail if any unfinished journal entry remains after all known component recoverers run.
   - Recovery reports expose only step names, success flags, and timestamps; internal errors remain in privileged structured logs.
   - Global lock contention uses stable IPC code busy, CLI exit code 4, and HTTP 409 without falsely claiming rollback was attempted.
+  - Startup and manual recovery replay only validated applied routing and sing-box state; pending database edits remain unapplied.
+  - Reconciliation rollback restores validated nftables leak protection before policy routes when reboot erased the volatile snapshot.
 
 touched_areas:
-  - runtime transaction journals
-  - startup and reboot recovery
-  - cross-component operation locking
-  - dependency health monitoring
-  - emergency recovery CLI
+  - dual-family route and policy-rule inventory
+  - applied sing-box and routing reconciliation
+  - nftables leak-protection rollback ordering
+  - startup and manual recovery coordination

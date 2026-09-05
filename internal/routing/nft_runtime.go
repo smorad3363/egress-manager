@@ -11,6 +11,16 @@ import (
 
 type nftObject = map[string]any
 
+// NFTRuntimeTemplate renders the expected inspection document without volatile
+// handles or counter values. It contains no outbound credentials.
+func NFTRuntimeTemplate(intents []RouteIntent) ([]byte, error) {
+	objects, err := expectedNFTObjects(intents)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(map[string]any{"nftables": objects})
+}
+
 // VerifyNFTRuntime checks the complete owned table, including rule ordering and
 // expressions. Only kernel handles and anonymous counter values are volatile.
 func VerifyNFTRuntime(intents []RouteIntent, content []byte) error {

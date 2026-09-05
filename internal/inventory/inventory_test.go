@@ -139,14 +139,16 @@ func TestCollectorReturnsPartialStateAndDetectsBackends(t *testing.T) {
 	t.Parallel()
 
 	runner := &fakeRunner{results: map[string]system.Result{
-		"ip -j address show":         {Stdout: []byte(`[{"ifname":"eth0","operstate":"UP","mtu":1500,"addr_info":[]}]`), ExitCode: 0},
-		"ip -j route show table all": {Stdout: []byte(`malformed`), ExitCode: 0},
-		"ip -j rule show":            {Stdout: []byte(`[{"priority":32766,"src":"all","table":"main"}]`), ExitCode: 0},
-		"ss -H -lntu -p":             {Stdout: []byte("tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:*\n"), ExitCode: 0},
-		"ps -eo comm=,args=":         {Stdout: []byte("haproxy /usr/sbin/haproxy -f /etc/haproxy/haproxy.cfg\npython /opt/marzban/main.py\n"), ExitCode: 0},
-		"nft --version":              {Stdout: []byte("nftables v1.0.9\n"), ExitCode: 0},
-		"iptables --version":         {Stdout: []byte("iptables v1.8.9 (nf_tables)\n"), ExitCode: 0},
-		"haproxy -vv":                {Stdout: []byte("HAProxy version 2.8.5\n"), ExitCode: 0},
+		"ip -j address show":            {Stdout: []byte(`[{"ifname":"eth0","operstate":"UP","mtu":1500,"addr_info":[]}]`), ExitCode: 0},
+		"ip -j route show table all":    {Stdout: []byte(`malformed`), ExitCode: 0},
+		"ip -j rule show":               {Stdout: []byte(`[{"priority":32766,"src":"all","table":"main"}]`), ExitCode: 0},
+		"ip -j -6 route show table all": {Stdout: []byte(`[{"dst":"2001:db8::/32","protocol":242,"table":20001}]`), ExitCode: 0},
+		"ip -j -6 rule show":            {Stdout: []byte(`[{"priority":21001,"src":"2001:db8::","srclen":32,"table":20001,"protocol":242}]`), ExitCode: 0},
+		"ss -H -lntu -p":                {Stdout: []byte("tcp LISTEN 0 4096 0.0.0.0:22 0.0.0.0:*\n"), ExitCode: 0},
+		"ps -eo comm=,args=":            {Stdout: []byte("haproxy /usr/sbin/haproxy -f /etc/haproxy/haproxy.cfg\npython /opt/marzban/main.py\n"), ExitCode: 0},
+		"nft --version":                 {Stdout: []byte("nftables v1.0.9\n"), ExitCode: 0},
+		"iptables --version":            {Stdout: []byte("iptables v1.8.9 (nf_tables)\n"), ExitCode: 0},
+		"haproxy -vv":                   {Stdout: []byte("HAProxy version 2.8.5\n"), ExitCode: 0},
 	}}
 	collector := Collector{
 		Runner: runner,
@@ -157,8 +159,11 @@ func TestCollectorReturnsPartialStateAndDetectsBackends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Interfaces) != 1 || len(result.Routes) != 0 || len(result.PolicyRules) != 1 || len(result.Listeners) != 1 {
+	if len(result.Interfaces) != 1 || len(result.Routes) != 1 || len(result.PolicyRules) != 2 || len(result.Listeners) != 1 {
 		t.Fatalf("inventory = %#v", result)
+	}
+	if result.Routes[0].Protocol != "242" || result.PolicyRules[1].Source != "2001:db8::/32" {
+		t.Fatal("IPv6 ownership or split source prefix was lost")
 	}
 	if !reflect.DeepEqual(result.Warnings, []string{"route inventory malformed"}) {
 		t.Fatalf("warnings = %#v", result.Warnings)
