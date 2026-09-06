@@ -7,12 +7,6 @@ import (
 	"github.com/egress-manager/egress-manager/internal/system"
 )
 
-// The legacy adapter tests below still validate their parser and mutation-safety helpers.
-// Restore only their in-memory candidate catalog inside the test binary.
-func init() {
-	knownCandidates = append([]candidate(nil), legacyCandidateCatalog...)
-}
-
 type noTouchFiles struct{ t *testing.T }
 
 func (files noTouchFiles) Inspect(path string) (FileMetadata, error) {
@@ -33,10 +27,9 @@ func (runner noTouchRunner) Run(_ context.Context, command system.Command) (syst
 }
 
 func TestProjectBoundaryDoesNotInspectForeignXray(t *testing.T) {
-	previous := knownCandidates
-	knownCandidates = nil
-	defer func() { knownCandidates = previous }()
-
+	if len(knownCandidates) != 0 {
+		t.Fatalf("production Xray candidate catalog must be empty, got %d entries", len(knownCandidates))
+	}
 	report, err := (Discoverer{Runner: noTouchRunner{t: t}, Files: noTouchFiles{t: t}}).Discover(context.Background())
 	if err != nil {
 		t.Fatal(err)
