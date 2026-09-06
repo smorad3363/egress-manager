@@ -6,23 +6,24 @@ phase: 11
 phase_name: reliability-recovery
 
 active_spec: specs/011-reliability-recovery/spec.md
-active_task: emergency-rollback
+active_task: ubuntu-installer-release
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: run and record the disposable Linux VM real-reboot gate in docs/recovery/FAILURE_INJECTION.md; all locally automatable Phase 11 failure injections are green
+next_action: publish the Ubuntu installer branch to GitHub, require the 22.04/24.04/26.04 installation matrix to pass, then tag v0.1.0-alpha.1
 
 dirty_work_expected: false
 
 tests:
   last_run: 2026-09-06
-  result: pass
+  result: pending_remote
   commands:
     - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test ./... && go vet ./..."
     - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 go test -race ./internal/app ./internal/reliability ./internal/routeengine ./internal/ipc ./cmd/egressctl
     - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 go test -race ./internal/app ./internal/reliability ./internal/routeengine ./internal/ipc ./internal/haproxy ./internal/nat ./internal/singbox ./internal/interfaceoutbound ./internal/xray ./cmd/egressctl
     - docker run --rm --privileged --volume <fresh-probes>:/current:ro --env EGRESS_*_PROBE=/current/<probe> egress-manager-network-lab
+    - C:/Program Files/Git/usr/bin/sh.exe -n scripts/install/install.sh scripts/install/verify.sh scripts/release/build-linux.sh
 
 network_transaction:
   status: none
@@ -35,6 +36,9 @@ blockers:
   - A real disposable Linux VM reboot gate requires an external VM runner or prepared test host; this workstation exposes no QEMU, Vagrant, Multipass, VMware runner, or non-Docker WSL distribution.
 
 recent_decisions:
+  - The first public installer supports systemd-based Ubuntu 22.04, 24.04, and 26.04 on amd64 and arm64; unsupported distributions fail closed.
+  - Installation performs no firewall or routing mutation, preserves existing managed configuration and data, and pins sing-box v1.13.20 by architecture-specific SHA-256.
+  - The unprivileged web service shares only a dedicated group-writable SQLite directory; privileged runtime state remains in a root-only directory.
   - English roadmap is authoritative; Persian copy is reference-only.
   - Git and STATE.yaml are the primary recovery mechanism.
   - Go 1.27.1 verification uses the official Docker image because the Windows download endpoint returned HTTP 404.
@@ -135,6 +139,8 @@ recent_decisions:
   - The privileged lab simulates cold volatile-state loss by removing the owned TUN, nftables table, and dual-stack policy state, then proves persisted-state reconciliation and an idempotent second run.
 
 touched_areas:
+  - Ubuntu installation, systemd packaging, release archives, and three-version CI
+  - unprivileged web database permissions and filesystem boundary
   - authenticated sing-box rollback
   - authenticated native-interface rollback
   - authenticated writable-Xray rollback

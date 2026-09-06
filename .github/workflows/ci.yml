@@ -42,6 +42,35 @@ jobs:
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm test:e2e
 
+  ubuntu-install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, ubuntu-24.04, ubuntu-26.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.1"
+          cache: true
+      - name: Build installer artifact
+        env:
+          VERSION: ci
+          COMMIT: ${{ github.sha }}
+        run: sh scripts/release/build-linux.sh
+      - name: Install and start services
+        run: sudo env EGRESS_ARTIFACT_FILE="${{ github.workspace }}/dist/egress-manager-linux-amd64.tar.gz" sh scripts/install/install.sh
+      - name: Verify service boundary and health
+        run: |
+          sudo /usr/local/lib/egress-manager/verify.sh
+          test "$(systemctl show egress-web.service --property=User --value)" = "egress-web"
+          test "$(stat -c '%a:%U:%G' /var/lib/egress-manager/private)" = "700:root:root"
+          test "$(stat -c '%a:%U:%G' /var/lib/egress-manager/database)" = "770:root:egress-manager"
+          test "$(stat -c '%a:%U:%G' /var/lib/egress-manager/database/egress-manager.db)" = "660:root:egress-manager"
+          sudo systemd-analyze verify /etc/systemd/system/egressd.service /etc/systemd/system/egress-web.service /etc/systemd/system/egress-manager-sing-box.service
+
   network-lab:
     runs-on: ubuntu-24.04
     steps:

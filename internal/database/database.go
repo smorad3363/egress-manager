@@ -49,7 +49,10 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 	if err := database.PingContext(ctx); err != nil {
 		return closeOnError(fmt.Errorf("ping SQLite: %w", err))
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	// egressd and the unprivileged egress-web process share the database through
+	// a dedicated operating-system group. The containing directory remains the
+	// access boundary; no permissions are granted to other users.
+	if err := os.Chmod(path, 0o660); err != nil {
 		return closeOnError(fmt.Errorf("set database permissions: %w", err))
 	}
 	if err := Migrate(ctx, database); err != nil {

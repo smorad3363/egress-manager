@@ -1,0 +1,19 @@
+[Unit]
+Description=Egress Manager owned sing-box instance
+Documentation=https://github.com/smorad3363/egress-manager
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=egress-manager
+UMask=0077
+ExecStart=/usr/local/lib/egress-manager/bin/sing-box run -c /var/lib/egress-manager/private/sing-box.json
+Restart=on-failure
+RestartSec=2s
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

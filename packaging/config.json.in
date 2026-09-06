@@ -1,0 +1,19 @@
+{
+  "listen_address": "127.0.0.1",
+  "listen_port": @@PANEL_PORT@@,
+  "data_directory": "/var/lib/egress-manager/private",
+  "database_path": "/var/lib/egress-manager/database/egress-manager.db",
+  "control_socket_path": "/run/egress-manager/egressd.sock",
+  "operation_lock_path": "/var/lib/egress-manager/private/operation.lock",
+  "haproxy_config_path": "/var/lib/egress-manager/private/haproxy.cfg",
+  "haproxy_runtime_socket_path": "/run/egress-manager/haproxy-runtime.sock",
+  "haproxy_pid_path": "/run/egress-manager/haproxy.pid",
+  "sing_box_config_path": "/var/lib/egress-manager/private/sing-box.json",
+  "routing_state_path": "/var/lib/egress-manager/private/routing.json",
+  "bypass_state_path": "/var/lib/egress-manager/private/bypass.json",
+  "interface_state_path": "/run/egress-manager/interface-outbounds/state.json",
+  "interface_runtime_directory": "/run/egress-manager/interface-outbounds",
+  "session_cookie_name": "egress_session",
+  "ssh_ports": [@@SSH_PORTS@@],
+  "protected_management_cidrs": []
+}

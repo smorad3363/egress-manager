@@ -18,16 +18,16 @@ Both services read the same strict JSON configuration and IPC shared key. Unknow
 {
   "listen_address": "127.0.0.1",
   "listen_port": 43127,
-  "data_directory": "/var/lib/egress-manager",
-  "database_path": "/var/lib/egress-manager/egress-manager.db",
+  "data_directory": "/var/lib/egress-manager/private",
+  "database_path": "/var/lib/egress-manager/database/egress-manager.db",
   "control_socket_path": "/run/egress-manager/egressd.sock",
-  "operation_lock_path": "/var/lib/egress-manager/operation.lock",
-  "haproxy_config_path": "/var/lib/egress-manager/haproxy.cfg",
+  "operation_lock_path": "/var/lib/egress-manager/private/operation.lock",
+  "haproxy_config_path": "/var/lib/egress-manager/private/haproxy.cfg",
   "haproxy_runtime_socket_path": "/run/egress-manager/haproxy-runtime.sock",
   "haproxy_pid_path": "/run/egress-manager/haproxy.pid",
-  "sing_box_config_path": "/var/lib/egress-manager/sing-box.json",
-  "routing_state_path": "/var/lib/egress-manager/routing.json",
-  "bypass_state_path": "/var/lib/egress-manager/bypass.json",
+  "sing_box_config_path": "/var/lib/egress-manager/private/sing-box.json",
+  "routing_state_path": "/var/lib/egress-manager/private/routing.json",
+  "bypass_state_path": "/var/lib/egress-manager/private/bypass.json",
   "interface_state_path": "/run/egress-manager/interface-outbounds/state.json",
   "interface_runtime_directory": "/run/egress-manager/interface-outbounds",
   "session_cookie_name": "egress_session",
@@ -71,4 +71,4 @@ Provision an administrator without placing the password in process arguments:
 printf '%s\n' "$EGRESS_ADMIN_PASSWORD" | egress-web provision-admin --username operator --password-stdin --config /etc/egress-manager/config.json --ipc-key /etc/egress-manager/ipc.key
 ```
 
-The installer will generate the key and choose a free, non-protected panel port in Phase 11.
+The installer generates the key, discovers active SSH listeners, and chooses a free, non-protected panel port. It keeps the group-writable SQLite directory separate from root-only privileged runtime state.

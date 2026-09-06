@@ -1,0 +1,26 @@
+[Unit]
+Description=Egress Manager privileged daemon
+Documentation=https://github.com/smorad3363/egress-manager
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=egress-manager
+UMask=0007
+RuntimeDirectory=egress-manager
+RuntimeDirectoryMode=0770
+Environment=PATH=/usr/local/lib/egress-manager/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/local/lib/egress-manager/bin/egressd --config /etc/egress-manager/config.json --ipc-key /etc/egress-manager/ipc.key
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=30s
+PrivateTmp=true
+ProtectHome=true
+ProtectHostname=true
+ProtectClock=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target
