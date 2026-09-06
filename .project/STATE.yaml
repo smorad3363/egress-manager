@@ -11,7 +11,7 @@ status: in_progress
 
 last_green_ref: HEAD
 
-next_action: run the full Phase 11 verification gate, rebuild the privileged network lab, and assess the remaining real reboot and failure-injection acceptance gaps
+next_action: add deterministic failure-injection coverage for authenticated journal corruption and dependency/runtime loss, while keeping real disposable-host reboot as an explicit external acceptance gap
 
 dirty_work_expected: false
 
@@ -21,8 +21,8 @@ tests:
   commands:
     - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test ./... && go vet ./..."
     - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 go test -race ./internal/app ./internal/reliability ./internal/routeengine ./internal/ipc ./cmd/egressctl
-    - docker build -t egress-manager-network-lab -f tests/network/Dockerfile .
-    - docker run --rm --privileged egress-manager-network-lab
+    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 go test -race ./internal/app ./internal/reliability ./internal/routeengine ./internal/ipc ./internal/haproxy ./internal/nat ./internal/singbox ./internal/interfaceoutbound ./internal/xray ./cmd/egressctl
+    - docker run --rm --privileged --volume <fresh-probes>:/current:ro --env EGRESS_*_PROBE=/current/<probe> egress-manager-network-lab
 
 network_transaction:
   status: none
@@ -129,6 +129,7 @@ recent_decisions:
   - Sing-box, native-interface, and writable-Xray rollback authenticate snapshot and candidate and require exact current owned/runtime evidence; Xray also requires unchanged foreign confdir state.
   - New HAProxy transactions authenticate both snapshot and candidate; manual rollback additionally requires exact current owned configuration, healthy Runtime API state, and native validation of the prior configuration.
   - New nftables and iptables NAT transactions authenticate both snapshot and candidate; manual rollback compares only exact owned state, validates rollback natively before transition, and keeps legacy plaintext records crash-recovery-only.
+  - The post-rollback gate used freshly compiled probes mounted into the pinned lab image because Docker registry DNS prevented an identical image rebuild; two privileged runs passed and the unavailable rebuild is recorded honestly.
 
 touched_areas:
   - authenticated sing-box rollback
