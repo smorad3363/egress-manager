@@ -148,6 +148,10 @@ func (server *Server) serveConnection(ctx context.Context, connection net.Conn) 
 			code = "recovery_required"
 			message = "Host recovery is required before mutation."
 		}
+		if errors.As(err, &coded) && coded.IPCErrorCode() == "bypass_active" {
+			code = "bypass_active"
+			message = "Emergency bypass is active; run recovery before applying routes."
+		}
 		server.writeFailure(connection, request.OperationID, code, message)
 		return
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/config"
 	"github.com/egress-manager/egress-manager/internal/ipc"
 	"github.com/egress-manager/egress-manager/internal/reliability"
+	"github.com/egress-manager/egress-manager/internal/routeengine"
 )
 
 const (
@@ -21,16 +22,19 @@ const (
 	exitUsage            = 2
 	exitRecoveryRequired = 3
 	exitBusy             = 4
+	exitPrivilege        = 5
 )
 
 type statusFetcher func(context.Context, string, string) (reliability.RecoveryStatus, error)
 type recoveryRunner func(context.Context, string, string) (reliability.RecoveryReport, error)
+type bypassRunner func(context.Context, string, string) (routeengine.BypassResponse, error)
+type privilegeChecker func() bool
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, fetchStatus, runRecovery))
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, fetchStatus, runRecovery, runBypass, isPrivileged))
 }
 
-func run(arguments []string, stdout, stderr io.Writer, fetch statusFetcher, recover recoveryRunner) int {
+func run(arguments []string, stdout, stderr io.Writer, fetch statusFetcher, recover recoveryRunner, bypass bypassRunner, privileged privilegeChecker) int {
 	if len(arguments) == 1 && arguments[0] == "--version" {
 		fmt.Fprintf(stdout, "egressctl %s (%s, %s)\n", buildinfo.Version, buildinfo.Commit, buildinfo.Date)
 		return exitOK
@@ -43,7 +47,9 @@ func run(arguments []string, stdout, stderr io.Writer, fetch statusFetcher, reco
 	case "status":
 		return runStatus(arguments[1:], stdout, stderr, fetch)
 	case "recover":
-		return runRecover(arguments[1:], stdout, stderr, recover)
+		return runRecover(arguments[1:], stdout, stderr, recover, privileged)
+	case "bypass":
+		return runBypassCommand(arguments[1:], stdout, stderr, bypass, privileged)
 	default:
 		printUsage(stderr)
 		return exitUsage
@@ -84,7 +90,7 @@ func runStatus(arguments []string, stdout, stderr io.Writer, fetch statusFetcher
 	return exitOK
 }
 
-func runRecover(arguments []string, stdout, stderr io.Writer, recover recoveryRunner) int {
+func runRecover(arguments []string, stdout, stderr io.Writer, recover recoveryRunner, privileged privilegeChecker) int {
 	flags := flag.NewFlagSet("egressctl recover", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	configPath := flags.String("config", "/etc/egress-manager/config.json", "absolute configuration path")
@@ -96,6 +102,10 @@ func runRecover(arguments []string, stdout, stderr io.Writer, recover recoveryRu
 	if flags.NArg() != 0 {
 		fmt.Fprintln(stderr, "egressctl recover: unexpected positional arguments")
 		return exitUsage
+	}
+	if !privileged() {
+		fmt.Fprintln(stderr, "egressctl recover: local administrator privilege is required")
+		return exitPrivilege
 	}
 	report, err := recover(context.Background(), *configPath, *keyPath)
 	if err != nil {
@@ -121,6 +131,52 @@ func runRecover(arguments []string, stdout, stderr io.Writer, recover recoveryRu
 	return exitOK
 }
 
+func runBypassCommand(arguments []string, stdout, stderr io.Writer, bypass bypassRunner, privileged privilegeChecker) int {
+	flags := flag.NewFlagSet("egressctl bypass", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath := flags.String("config", "/etc/egress-manager/config.json", "absolute configuration path")
+	keyPath := flags.String("ipc-key", "/etc/egress-manager/ipc.key", "absolute IPC shared-key path")
+	jsonOutput := flags.Bool("json", false, "emit machine-readable JSON")
+	if err := flags.Parse(arguments); err != nil {
+		return exitUsage
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "egressctl bypass: unexpected positional arguments")
+		return exitUsage
+	}
+	if !privileged() {
+		fmt.Fprintln(stderr, "egressctl bypass: local administrator privilege is required")
+		return exitPrivilege
+	}
+	response, err := bypass(context.Background(), *configPath, *keyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "egressctl bypass: %v\n", err)
+		if ipc.IsRemoteError(err, "busy") {
+			return exitBusy
+		}
+		return exitFailure
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(response); err != nil {
+			fmt.Fprintf(stderr, "egressctl bypass: encode output: %v\n", err)
+			return exitFailure
+		}
+	} else {
+		state := "activated"
+		if response.AlreadyActive {
+			state = "already active"
+		}
+		fmt.Fprintf(stdout, "bypass: %s\n", state)
+		fmt.Fprintf(stdout, "transaction: %s\n", response.TransactionID)
+	}
+	if response.State != "COMMITTED" {
+		return exitFailure
+	}
+	return exitOK
+}
+
 func fetchStatus(ctx context.Context, configPath, keyPath string) (reliability.RecoveryStatus, error) {
 	var status reliability.RecoveryStatus
 	if err := callDaemon(ctx, configPath, keyPath, ipc.OperationRecoveryStatus, &status); err != nil {
@@ -135,6 +191,14 @@ func runRecovery(ctx context.Context, configPath, keyPath string) (reliability.R
 		return reliability.RecoveryReport{}, err
 	}
 	return report, nil
+}
+
+func runBypass(ctx context.Context, configPath, keyPath string) (routeengine.BypassResponse, error) {
+	var response routeengine.BypassResponse
+	if err := callDaemon(ctx, configPath, keyPath, ipc.OperationRecoveryBypass, &response); err != nil {
+		return routeengine.BypassResponse{}, err
+	}
+	return response, nil
 }
 
 func callDaemon(ctx context.Context, configPath, keyPath string, operation ipc.Operation, output any) error {
@@ -165,6 +229,14 @@ func printStatus(writer io.Writer, status reliability.RecoveryStatus) {
 	}
 	fmt.Fprintf(writer, "ready: %s\n", ready)
 	fmt.Fprintf(writer, "recovery required: %t\n", status.RecoveryRequired)
+	bypassState := status.Bypass.State
+	if bypassState == "" {
+		bypassState = reliability.BypassInactive
+	}
+	fmt.Fprintf(writer, "bypass: %s\n", bypassState)
+	if bypassState == reliability.BypassActive {
+		fmt.Fprintf(writer, "bypass operation: %s activated %s\n", status.Bypass.OperationID, status.Bypass.ActivatedAt.UTC().Format(time.RFC3339))
+	}
 	fmt.Fprintf(writer, "mutation lock: %s\n", lockState)
 	if status.MutationLock.Owner != nil {
 		owner := status.MutationLock.Owner
@@ -202,5 +274,5 @@ func printRecovery(writer io.Writer, report reliability.RecoveryReport) {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: egressctl <status|recover> [--config PATH] [--ipc-key PATH] [--json]")
+	fmt.Fprintln(writer, "usage: egressctl <status|recover|bypass> [--config PATH] [--ipc-key PATH] [--json]")
 }

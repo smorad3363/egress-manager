@@ -170,6 +170,13 @@ func newDependencyMonitor(options dependencyMonitorOptions) (*reliability.Monito
 			return observation, nil
 		}},
 		{Name: "routing", Check: func(ctx context.Context) (reliability.DependencyObservation, error) {
+			bypass, err := routeengine.InspectBypassState(options.configuration.BypassStatePath)
+			if err != nil {
+				return unhealthyDependency("bypass_state_invalid", domain.ProbeFailed), nil
+			}
+			if bypass.Active {
+				return disabledDependency("bypass_active"), nil
+			}
 			state, err := routing.InspectState(options.configuration.RoutingStatePath)
 			if err != nil {
 				return unhealthyDependency("configuration_invalid", domain.ProbeFailed), nil

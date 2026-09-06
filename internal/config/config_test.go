@@ -59,6 +59,7 @@ func TestLoadDefaultsRoutingStatePathForExistingConfigurations(t *testing.T) {
 	configuration := Default(directory)
 	configuration.ListenPort = 43127
 	configuration.RoutingStatePath = ""
+	configuration.BypassStatePath = ""
 	configuration.OperationLockPath = ""
 	configuration.InterfaceStatePath = ""
 	configuration.InterfaceRuntimeDirectory = ""
@@ -78,6 +79,9 @@ func TestLoadDefaultsRoutingStatePathForExistingConfigurations(t *testing.T) {
 	}
 	if loaded.OperationLockPath != filepath.Join(directory, "operation.lock") {
 		t.Fatalf("operation lock path = %q", loaded.OperationLockPath)
+	}
+	if loaded.BypassStatePath != filepath.Join(directory, "bypass.json") {
+		t.Fatalf("bypass state path = %q", loaded.BypassStatePath)
 	}
 	if loaded.InterfaceStatePath != "/run/egress-manager/interface-outbounds/state.json" || loaded.InterfaceRuntimeDirectory != "/run/egress-manager/interface-outbounds" {
 		t.Fatalf("interface runtime defaults = %q %q", loaded.InterfaceStatePath, loaded.InterfaceRuntimeDirectory)

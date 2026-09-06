@@ -90,7 +90,7 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	haproxyExecutor := managedHAProxy.Executor{Runner: runner, Journal: store, Runtime: haproxyRuntime, ConfigPath: configuration.HAProxyConfigPath, PIDPath: configuration.HAProxyPIDPath}
 	singboxExecutor := managedSingBox.Executor{Runner: runner, Journal: store, Protector: protector, ConfigPath: configuration.SingBoxConfigPath}
 	interfaceExecutor := managedInterface.Executor{Runner: runner, Journal: store, Protector: protector, StatePath: configuration.InterfaceStatePath, RuntimeDirectory: configuration.InterfaceRuntimeDirectory}
-	routeExecutor := routeengine.Executor{Runner: runner, Journal: store, Protector: protector, SingBoxConfigPath: configuration.SingBoxConfigPath, RoutingStatePath: configuration.RoutingStatePath, InterfaceStatePath: configuration.InterfaceStatePath, InterfaceRuntimeDirectory: configuration.InterfaceRuntimeDirectory}
+	routeExecutor := routeengine.Executor{Runner: runner, Journal: store, Protector: protector, SingBoxConfigPath: configuration.SingBoxConfigPath, RoutingStatePath: configuration.RoutingStatePath, BypassStatePath: configuration.BypassStatePath, InterfaceStatePath: configuration.InterfaceStatePath, InterfaceRuntimeDirectory: configuration.InterfaceRuntimeDirectory}
 	collector := inventory.Collector{Runner: runner, Files: inventory.OSFiles{}, Timeout: 2 * time.Second}
 	loadInterfacePlan := func(ctx context.Context) (managedInterface.ExecutionPlan, error) {
 		stored, err := store.ListOutbounds(ctx, "", managedInterface.MaximumOutbounds+1)
@@ -173,32 +173,55 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}
 		return nil
 	}
-	recoveryCoordinator := reliability.Coordinator{Steps: []reliability.RecoveryStep{
-		{Component: "interface", Recover: interfaceExecutor.Recover},
-		{Component: "singbox", Recover: singboxExecutor.Recover},
-		{Component: "haproxy", Recover: haproxyExecutor.Recover},
-		{Component: "xray", Recover: recoverXray},
-		{Component: "routing", Recover: routeExecutor.Recover},
-		{Component: "nat", Recover: executor.Recover},
-		{Component: "journal_check", Recover: verifyRecoveryJournal},
-		{Component: "interface_reconcile", Recover: reconcileInterfaces},
-		{Component: "route_reconcile", Recover: func(ctx context.Context) error {
-			state, err := routing.InspectState(configuration.RoutingStatePath)
-			if err != nil || !state.Exists {
-				return err
+	reconcileRoutes := func(ctx context.Context, resumeBypass bool) error {
+		bypass, err := routeExecutor.BypassStatus()
+		if err != nil {
+			return err
+		}
+		if bypass.Active && !resumeBypass {
+			return nil
+		}
+		state, err := routing.InspectState(configuration.RoutingStatePath)
+		if err != nil {
+			return err
+		}
+		if !state.Exists {
+			if bypass.Active {
+				return routeExecutor.DeactivateBypass()
 			}
-			host, err := collector.Collect(ctx)
-			if err != nil {
-				return err
-			}
-			operationID, err := logging.NewOperationID(nil)
-			if err != nil {
-				return err
-			}
-			return routeExecutor.ReconcileApplied(ctx, domain.ID("route_reconcile_"+operationID), host, configuration.ProtectedManagementCIDRs)
-		}},
-		{Component: "journal_final", Recover: verifyRecoveryJournal},
-	}}
+			return nil
+		}
+		host, err := collector.Collect(ctx)
+		if err != nil {
+			return err
+		}
+		operationID, err := logging.NewOperationID(nil)
+		if err != nil {
+			return err
+		}
+		if resumeBypass {
+			return routeExecutor.ResumeApplied(ctx, domain.ID("route_reconcile_"+operationID), host, configuration.ProtectedManagementCIDRs)
+		}
+		return routeExecutor.ReconcileApplied(ctx, domain.ID("route_reconcile_"+operationID), host, configuration.ProtectedManagementCIDRs)
+	}
+	newRecoveryCoordinator := func(resumeBypass bool) reliability.Coordinator {
+		return reliability.Coordinator{Steps: []reliability.RecoveryStep{
+			{Component: "interface", Recover: interfaceExecutor.Recover},
+			{Component: "singbox", Recover: singboxExecutor.Recover},
+			{Component: "haproxy", Recover: haproxyExecutor.Recover},
+			{Component: "xray", Recover: recoverXray},
+			{Component: "routing", Recover: routeExecutor.Recover},
+			{Component: "nat", Recover: executor.Recover},
+			{Component: "journal_check", Recover: verifyRecoveryJournal},
+			{Component: "interface_reconcile", Recover: reconcileInterfaces},
+			{Component: "route_reconcile", Recover: func(ctx context.Context) error {
+				return reconcileRoutes(ctx, resumeBypass)
+			}},
+			{Component: "journal_final", Recover: verifyRecoveryJournal},
+		}}
+	}
+	startupRecoveryCoordinator := newRecoveryCoordinator(false)
+	manualRecoveryCoordinator := newRecoveryCoordinator(true)
 	dependencyMonitor, err := newDependencyMonitor(dependencyMonitorOptions{
 		configuration:     configuration,
 		runner:            runner,
@@ -213,7 +236,7 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		return err
 	}
 	recoveryTracker := &reliability.Tracker{}
-	startupReport, startupErr := recoveryCoordinator.Run(ctx)
+	startupReport, startupErr := startupRecoveryCoordinator.Run(ctx)
 	recoveryTracker.Record(startupReport)
 	if startupErr != nil {
 		logger.ErrorContext(ctx, "startup recovery degraded", "component", startupReport.FailedComponent)
@@ -270,6 +293,14 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		}
 		status.LastRecovery = recoveryTracker.Last()
 		status.Dependencies = dependencyMonitor.Snapshot()
+		bypass, bypassErr := routeExecutor.BypassStatus()
+		if bypassErr != nil {
+			status.Bypass.State = reliability.BypassInvalid
+			status.Ready = false
+			status.RecoveryRequired = true
+		} else if bypass.Active {
+			status.Bypass = reliability.BypassStatus{State: reliability.BypassActive, OperationID: bypass.OperationID, ActivatedAt: bypass.ActivatedAt}
+		}
 		if !recoveryTracker.Ready() {
 			status.Ready = false
 			status.RecoveryRequired = true
@@ -283,12 +314,22 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 			return nil, err
 		}
 		return withMutationLock(mutationLock, domain.ID(logging.OperationID(ctx)), "recovery", func() (any, error) {
-			report, recoveryErr := recoveryCoordinator.Run(ctx)
+			report, recoveryErr := manualRecoveryCoordinator.Run(ctx)
 			recoveryTracker.Record(report)
 			if recoveryErr != nil {
 				logger.ErrorContext(ctx, "manual recovery failed", "component", report.FailedComponent)
 			}
 			return report, nil
+		})
+	}); err != nil {
+		return err
+	}
+	if err := server.Handle(ipc.OperationRecoveryBypass, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		if err := decodeEmptyPayload(payload); err != nil {
+			return nil, err
+		}
+		return withMutationLock(mutationLock, domain.ID(logging.OperationID(ctx)), "bypass", func() (any, error) {
+			return routeExecutor.Bypass(ctx, domain.ID(logging.OperationID(ctx)))
 		})
 	}); err != nil {
 		return err
@@ -811,6 +852,13 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		outboundMutex.Lock()
 		defer outboundMutex.Unlock()
 		return mutate(ctx, request.TransactionID, "routing", func() (any, error) {
+			bypass, err := routeExecutor.BypassStatus()
+			if err != nil {
+				return nil, err
+			}
+			if bypass.Active {
+				return nil, routeengine.BypassActiveError{}
+			}
 			plan, err := loadRoutePlan(ctx)
 			if err != nil {
 				return nil, err

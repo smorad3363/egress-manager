@@ -46,6 +46,7 @@ type Executor struct {
 	Protector                 JournalProtector
 	SingBoxConfigPath         string
 	RoutingStatePath          string
+	BypassStatePath           string
 	InterfaceStatePath        string
 	InterfaceRuntimeDirectory string
 	Timeout                   time.Duration
@@ -232,6 +233,13 @@ func (executor Executor) Recover(ctx context.Context) error {
 	var recoveryErrors []error
 	for _, operation := range operations {
 		err = nil
+		if operation.Operation == "route_engine_bypass" {
+			err = executor.recoverBypass(ctx, operation)
+			if err != nil {
+				recoveryErrors = append(recoveryErrors, err)
+			}
+			continue
+		}
 		if operation.Operation != "route_engine_apply" {
 			continue
 		}
@@ -563,6 +571,16 @@ func (executor Executor) removeOwnedIP(ctx context.Context, intents []routing.Ro
 			table := strconv.FormatUint(uint64(intent.RoutingTable), 10)
 			_, _ = executor.output(ctx, system.Command{Name: "ip", Args: []string{family, "rule", "delete", "priority", priority, "table", table, "protocol", routing.OwnedRouteProtocol}})
 			_, _ = executor.output(ctx, system.Command{Name: "ip", Args: []string{family, "route", "flush", "table", table, "proto", routing.OwnedRouteProtocol}})
+		}
+	}
+	return executor.verifyOwnedIPAbsent(ctx, intents)
+}
+
+func (executor Executor) verifyOwnedIPAbsent(ctx context.Context, intents []routing.RouteIntent) error {
+	for _, intent := range intents {
+		for _, family := range []string{"-4", "-6"} {
+			priority := strconv.FormatUint(uint64(intent.RulePriority), 10)
+			table := strconv.FormatUint(uint64(intent.RoutingTable), 10)
 			rules, err := executor.output(ctx, system.Command{Name: "ip", Args: []string{"-j", family, "rule", "show", "priority", priority}})
 			if err != nil {
 				return err
@@ -662,7 +680,8 @@ func (executor Executor) protectSnapshot(id domain.ID, snapshots ...fileSnapshot
 }
 
 func (executor Executor) validate() error {
-	if executor.Runner == nil || executor.Journal == nil || executor.Protector == nil || !filepath.IsAbs(executor.SingBoxConfigPath) || !filepath.IsAbs(executor.RoutingStatePath) || !filepath.IsAbs(executor.InterfaceStatePath) || !filepath.IsAbs(executor.InterfaceRuntimeDirectory) || filepath.Clean(executor.SingBoxConfigPath) == filepath.Clean(executor.RoutingStatePath) {
+	bypassPath := executor.BypassPath()
+	if executor.Runner == nil || executor.Journal == nil || executor.Protector == nil || !filepath.IsAbs(executor.SingBoxConfigPath) || !filepath.IsAbs(executor.RoutingStatePath) || !filepath.IsAbs(bypassPath) || !filepath.IsAbs(executor.InterfaceStatePath) || !filepath.IsAbs(executor.InterfaceRuntimeDirectory) || filepath.Clean(executor.SingBoxConfigPath) == filepath.Clean(executor.RoutingStatePath) || filepath.Clean(bypassPath) == filepath.Clean(executor.SingBoxConfigPath) || filepath.Clean(bypassPath) == filepath.Clean(executor.RoutingStatePath) {
 		return fmt.Errorf("route-engine executor dependencies and absolute owned paths are required")
 	}
 	interfaceRelative, err := filepath.Rel(filepath.Clean(executor.InterfaceRuntimeDirectory), filepath.Clean(executor.InterfaceStatePath))

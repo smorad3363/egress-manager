@@ -30,6 +30,7 @@ type Config struct {
 	HAProxyPIDPath            string         `json:"haproxy_pid_path"`
 	SingBoxConfigPath         string         `json:"sing_box_config_path"`
 	RoutingStatePath          string         `json:"routing_state_path"`
+	BypassStatePath           string         `json:"bypass_state_path"`
 	InterfaceStatePath        string         `json:"interface_state_path"`
 	InterfaceRuntimeDirectory string         `json:"interface_runtime_directory"`
 	SessionCookieName         string         `json:"session_cookie_name"`
@@ -52,6 +53,7 @@ func Default(dataDirectory string) Config {
 		HAProxyPIDPath:            filepath.Join(dataDirectory, "haproxy.pid"),
 		SingBoxConfigPath:         filepath.Join(dataDirectory, "sing-box.json"),
 		RoutingStatePath:          filepath.Join(dataDirectory, "routing.json"),
+		BypassStatePath:           filepath.Join(dataDirectory, "bypass.json"),
 		InterfaceStatePath:        filepath.Join(interfaceRuntime, "state.json"),
 		InterfaceRuntimeDirectory: interfaceRuntime,
 		SessionCookieName:         defaultCookieName,
@@ -103,6 +105,7 @@ func (configuration Config) Validate() error {
 		"haproxy_pid_path":            configuration.HAProxyPIDPath,
 		"sing_box_config_path":        configuration.SingBoxConfigPath,
 		"routing_state_path":          configuration.RoutingStatePath,
+		"bypass_state_path":           configuration.BypassStatePath,
 		"interface_state_path":        configuration.InterfaceStatePath,
 		"interface_runtime_directory": configuration.InterfaceRuntimeDirectory,
 	} {
@@ -110,7 +113,7 @@ func (configuration Config) Validate() error {
 			errs = append(errs, fmt.Errorf("%s must be absolute", name))
 		}
 	}
-	paths := []string{configuration.ControlSocketPath, configuration.OperationLockPath, configuration.HAProxyConfigPath, configuration.HAProxyRuntimeSocketPath, configuration.HAProxyPIDPath, configuration.SingBoxConfigPath, configuration.RoutingStatePath, configuration.InterfaceStatePath, configuration.InterfaceRuntimeDirectory}
+	paths := []string{configuration.ControlSocketPath, configuration.OperationLockPath, configuration.HAProxyConfigPath, configuration.HAProxyRuntimeSocketPath, configuration.HAProxyPIDPath, configuration.SingBoxConfigPath, configuration.RoutingStatePath, configuration.BypassStatePath, configuration.InterfaceStatePath, configuration.InterfaceRuntimeDirectory}
 	seenPaths := map[string]struct{}{}
 	for _, path := range paths {
 		cleaned := filepath.Clean(path)
@@ -163,6 +166,9 @@ func Load(path string) (Config, error) {
 	}
 	if configuration.OperationLockPath == "" && filepath.IsAbs(configuration.DataDirectory) {
 		configuration.OperationLockPath = filepath.Join(configuration.DataDirectory, "operation.lock")
+	}
+	if configuration.BypassStatePath == "" && filepath.IsAbs(configuration.DataDirectory) {
+		configuration.BypassStatePath = filepath.Join(configuration.DataDirectory, "bypass.json")
 	}
 	if configuration.InterfaceRuntimeDirectory == "" {
 		configuration.InterfaceRuntimeDirectory = filepath.Join("/run", "egress-manager", "interface-outbounds")

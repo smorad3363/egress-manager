@@ -76,6 +76,20 @@ func TestDependencyMonitorReportsDisabledComponentsAndDebouncesRuntimeFailure(t 
 			t.Fatalf("dependency %s status=%s want=%s", status.Name, status.Status, want)
 		}
 	}
+	if err := os.WriteFile(configuration.BypassStatePath, []byte(`{"schema":"egress-manager/bypass/v1","active":true,"operation_id":"monitor_bypass","activated_at":"2026-09-06T00:00:00Z"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	monitor, err = newDependencyMonitor(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	monitor.RunOnce(context.Background())
+	if status := dependencyByName(t, monitor.Snapshot(), "routing"); status.Status != domain.HealthDisabled || status.Detail != "bypass_active" {
+		t.Fatalf("bypassed routing status = %#v", status)
+	}
+	if err := os.Remove(configuration.BypassStatePath); err != nil {
+		t.Fatal(err)
+	}
 
 	state, err := managedSingBox.ParseState(nil, false)
 	if err != nil {

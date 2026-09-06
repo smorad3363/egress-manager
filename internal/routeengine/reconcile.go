@@ -75,3 +75,34 @@ func (executor Executor) ReconcileApplied(ctx context.Context, id domain.ID, hos
 	// Verify the full leak-control expressions, not just the table's existence.
 	return executor.VerifyRuntime(ctx, plan)
 }
+
+// ResumeApplied deliberately exits emergency bypass and restores the last
+// applied configuration. The caller must hold the global mutation lease.
+func (executor Executor) ResumeApplied(ctx context.Context, id domain.ID, host inventory.Inventory, protected []netip.Prefix) error {
+	status, err := executor.BypassStatus()
+	if err != nil {
+		return err
+	}
+	plan, exists, err := executor.BuildAppliedPlan(ctx, host, protected)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		if status.Active {
+			return executor.DeactivateBypass()
+		}
+		return nil
+	}
+	if status.Active {
+		if err := executor.DeactivateBypass(); err != nil {
+			return err
+		}
+	}
+	if executor.VerifyRuntime(ctx, plan) == nil {
+		return nil
+	}
+	if _, err := executor.Execute(ctx, id, plan); err != nil {
+		return err
+	}
+	return executor.VerifyRuntime(ctx, plan)
+}

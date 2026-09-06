@@ -6,12 +6,12 @@ phase: 11
 phase_name: reliability-recovery
 
 active_spec: specs/011-reliability-recovery/spec.md
-active_task: emergency-bypass
+active_task: emergency-rollback
 status: in_progress
 
 last_green_ref: HEAD
 
-next_action: implement egressctl bypass through authenticated privileged IPC and the global mutation lock; remove only Egress Manager-owned routing and interception while preserving desired state and all foreign network objects
+next_action: implement egressctl rollback using the latest authenticated eligible project-owned snapshot with current-state and foreign-state precondition checks
 
 dirty_work_expected: false
 
@@ -20,7 +20,9 @@ tests:
   result: pass
   commands:
     - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test ./... && go vet ./..."
-    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 sh -c "go test -race ./internal/app ./internal/reliability ./internal/routeengine ./internal/xray ./internal/interfaceoutbound ./cmd/egressctl"
+    - docker run --rm --volume <repo>:/src --volume <repo>/.cache/go:/cache --env GOMODCACHE=/cache/mod --env GOCACHE=/cache/build --workdir /src golang:1.27.1 go test -race ./internal/app ./internal/reliability ./internal/routeengine ./internal/ipc ./cmd/egressctl
+    - docker build -t egress-manager-network-lab -f tests/network/Dockerfile .
+    - docker run --rm --privileged egress-manager-network-lab
 
 network_transaction:
   status: none
@@ -119,9 +121,12 @@ recent_decisions:
   - Reconciliation rollback restores validated nftables leak protection before policy routes when reboot erased the volatile snapshot.
   - Dependency monitoring is observational by default and has no direct mutation or reconciliation callback.
   - Dependency health uses fixed 30-second polling, five-second per-probe bounds, two-sample failure and recovery debounce, and sanitized typed IPC output.
+  - Emergency bypass removes only exact applied protocol-242 policy state and inet egm_egress; NAT, services, desired/applied files, and foreign network objects remain unchanged.
+  - A strict persistent bypass marker prevents automatic startup reactivation; explicit recovery resumes the last applied state, while route Apply is rejected during bypass.
+  - Mutating egressctl commands require local administrator privilege and use stable exit code 5 when privilege is absent.
 
 touched_areas:
-  - daemon dependency monitoring
-  - HAProxy, sing-box, native interface, routing, and Xray probes
-  - recovery status IPC
-  - egressctl status output
+  - emergency bypass executor and recovery
+  - bypass persistence and status
+  - authenticated IPC and egressctl
+  - privileged network lab

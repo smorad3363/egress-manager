@@ -20,6 +20,12 @@ func TestWriteMutationErrorDistinguishesBusyBeforeApply(t *testing.T) {
 	}
 
 	response = httptest.NewRecorder()
+	WriteMutationError(response, request, "apply failed and rollback was attempted", &ipc.RemoteError{Code: "bypass_active"})
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "Emergency bypass is active") {
+		t.Fatalf("bypass mutation response = %d %s", response.Code, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
 	WriteMutationError(response, request, "apply failed and rollback was attempted", &ipc.RemoteError{Code: "operation_failed"})
 	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), `"code":"unavailable"`) {
 		t.Fatalf("failed mutation response = %d %s", response.Code, response.Body.String())

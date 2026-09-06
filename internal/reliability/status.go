@@ -22,6 +22,20 @@ type OperationSummary struct {
 	UpdatedAt time.Time               `json:"updated_at"`
 }
 
+type BypassState string
+
+const (
+	BypassInactive BypassState = "inactive"
+	BypassActive   BypassState = "active"
+	BypassInvalid  BypassState = "invalid"
+)
+
+type BypassStatus struct {
+	State       BypassState `json:"state"`
+	OperationID domain.ID   `json:"operation_id,omitempty"`
+	ActivatedAt time.Time   `json:"activated_at,omitempty"`
+}
+
 type RecoveryStatus struct {
 	LastRecovery     *RecoveryReport    `json:"last_recovery,omitempty"`
 	Ready            bool               `json:"ready"`
@@ -29,6 +43,7 @@ type RecoveryStatus struct {
 	MutationLock     Status             `json:"mutation_lock"`
 	Unfinished       []OperationSummary `json:"unfinished_operations"`
 	Dependencies     []DependencyStatus `json:"dependencies"`
+	Bypass           BypassStatus       `json:"bypass"`
 	ObservedAt       time.Time          `json:"observed_at"`
 }
 
@@ -64,6 +79,7 @@ func Inspect(ctx context.Context, journal Journal, lock FileLock, now time.Time)
 		MutationLock:     lockStatus,
 		Unfinished:       summaries,
 		Dependencies:     []DependencyStatus{},
+		Bypass:           BypassStatus{State: BypassInactive},
 		ObservedAt:       now.UTC(),
 	}, nil
 }

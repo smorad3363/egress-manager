@@ -33,6 +33,11 @@ type codedBusyError struct{}
 func (codedBusyError) Error() string        { return "internal detail" }
 func (codedBusyError) IPCErrorCode() string { return "busy" }
 
+type codedBypassError struct{}
+
+func (codedBypassError) Error() string        { return "internal bypass detail" }
+func (codedBypassError) IPCErrorCode() string { return "bypass_active" }
+
 func TestRequestAuthenticationRejectsTamperAndStaleTimestamp(t *testing.T) {
 	t.Parallel()
 
@@ -81,6 +86,11 @@ func TestAuthenticatedUnixRoundTripAndReplayRejection(t *testing.T) {
 	}
 	if err := server.Handle(OperationRecoveryRun, func(context.Context, json.RawMessage) (any, error) {
 		return nil, codedBusyError{}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Handle(OperationRoutesApply, func(context.Context, json.RawMessage) (any, error) {
+		return nil, codedBypassError{}
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -136,6 +146,9 @@ func TestAuthenticatedUnixRoundTripAndReplayRejection(t *testing.T) {
 	}
 	if err := client.Call(context.Background(), OperationRecoveryRun, struct{}{}, nil); !IsRemoteError(err, "busy") {
 		t.Fatalf("coded busy error = %v", err)
+	}
+	if err := client.Call(context.Background(), OperationRoutesApply, struct{}{}, nil); !IsRemoteError(err, "bypass_active") {
+		t.Fatalf("coded bypass error = %v", err)
 	}
 
 	request := Request{

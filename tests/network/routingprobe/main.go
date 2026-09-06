@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"net/netip"
 	"os"
@@ -11,13 +12,44 @@ import (
 
 	"github.com/egress-manager/egress-manager/internal/domain"
 	"github.com/egress-manager/egress-manager/internal/inventory"
+	"github.com/egress-manager/egress-manager/internal/routeengine"
 	"github.com/egress-manager/egress-manager/internal/routing"
+	"github.com/egress-manager/egress-manager/internal/secrets"
 	"github.com/egress-manager/egress-manager/internal/system"
 )
+
+type memoryJournal struct {
+	operation domain.Transaction
+	created   int
+}
+
+func (journal *memoryJournal) CreateOperation(_ context.Context, operation domain.Transaction) error {
+	journal.operation = operation
+	journal.created++
+	return nil
+}
+
+func (journal *memoryJournal) TransitionOperation(_ context.Context, _ domain.ID, from, to domain.TransactionState, at time.Time, detail string) error {
+	if journal.operation.State != from || !from.CanTransitionTo(to) {
+		return fmt.Errorf("invalid journal transition")
+	}
+	journal.operation.State = to
+	journal.operation.UpdatedAt = at
+	journal.operation.FailureDetail = detail
+	return nil
+}
+
+func (journal *memoryJournal) UnfinishedOperations(context.Context, int) ([]domain.Transaction, error) {
+	return nil, nil
+}
 
 func main() {
 	if len(os.Args) == 3 && os.Args[1] == "--verify-runtime" {
 		verifyRuntime(os.Args[2])
+		return
+	}
+	if len(os.Args) == 3 && os.Args[1] == "--bypass" {
+		bypassRuntime(os.Args[2])
 		return
 	}
 	if len(os.Args) != 2 {
@@ -89,6 +121,39 @@ func main() {
 		if err := os.WriteFile(filepath.Join(os.Args[1], name), content, 0o600); err != nil {
 			fail("write routing candidate")
 		}
+	}
+}
+
+func bypassRuntime(directory string) {
+	statePath := filepath.Join(directory, "routing-state.json")
+	before, err := os.ReadFile(statePath)
+	if err != nil {
+		fail("read routing state before bypass")
+	}
+	protector, err := secrets.NewProtector([32]byte{1}, rand.Reader)
+	if err != nil {
+		fail("create bypass snapshot protector")
+	}
+	journal := &memoryJournal{}
+	executor := routeengine.Executor{
+		Runner: system.ExecRunner{}, Journal: journal, Protector: protector,
+		SingBoxConfigPath: filepath.Join(directory, "sing-box.json"), RoutingStatePath: statePath,
+		BypassStatePath: filepath.Join(directory, "bypass.json"), InterfaceStatePath: filepath.Join(directory, "interfaces", "state.json"),
+		InterfaceRuntimeDirectory: filepath.Join(directory, "interfaces"),
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	response, err := executor.Bypass(ctx, "network_lab_bypass")
+	if err != nil || response.State != domain.TransactionCommitted || response.AlreadyActive {
+		fail("apply emergency bypass")
+	}
+	repeated, err := executor.Bypass(ctx, "network_lab_bypass_repeat")
+	if err != nil || repeated.State != domain.TransactionCommitted || !repeated.AlreadyActive || journal.created != 1 {
+		fail("repeat emergency bypass idempotently")
+	}
+	after, err := os.ReadFile(statePath)
+	if err != nil || string(after) != string(before) {
+		fail("bypass preserved routing state")
 	}
 }
 

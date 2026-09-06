@@ -88,5 +88,9 @@ func WriteMutationError(writer http.ResponseWriter, request *http.Request, failu
 		WriteError(writer, request, NewError(http.StatusConflict, CodeConflict, "Another host mutation is in progress.", err))
 		return
 	}
+	if ipc.IsRemoteError(err, "bypass_active") {
+		WriteError(writer, request, NewError(http.StatusConflict, CodeConflict, "Emergency bypass is active; recover before applying routes.", err))
+		return
+	}
 	WriteError(writer, request, NewError(http.StatusServiceUnavailable, CodeUnavailable, failureMessage, err))
 }

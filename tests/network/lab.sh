@@ -269,13 +269,13 @@ route_ruleset=$(ip netns exec "$router_ns" nft list table inet egm_egress)
 printf '%s\n' "$route_ruleset" | grep -E 'counter packets [1-9][0-9]* bytes [1-9][0-9]*.*egm_lab_route_ipv4_kill' >/dev/null || fail "IPv4 kill-switch counter did not increase"
 printf '%s\n' "$route_ruleset" | grep -E 'counter packets [1-9][0-9]* bytes [1-9][0-9]*.*egm_lab_route_dns_input' >/dev/null || fail "DNS input leak counter did not increase"
 
-ip netns exec "$router_ns" ip -4 rule delete priority "$route_priority" table "$route_table" protocol 242
-ip netns exec "$router_ns" ip -6 rule delete priority "$route_priority" table "$route_table" protocol 242
-ip netns exec "$router_ns" ip -4 route flush table "$route_table" proto 242
-ip netns exec "$router_ns" ip -6 route flush table "$route_table" proto 242
-ip netns exec "$router_ns" nft delete table inet egm_egress
-ip netns exec "$router_ns" nft list table inet foreign_lab >/dev/null || fail "route rollback removed a foreign nftables table"
-printf 'PASS: killed outbound blocks direct IPv4, DNS, and IPv6 leaks while endpoint and foreign state remain reachable\n'
+ip netns exec "$router_ns" "$routing_probe" --bypass "$route_candidate_dir"
+if ip netns exec "$router_ns" nft list table inet egm_egress >/dev/null 2>&1; then fail "emergency bypass left owned interception table"; fi
+if ip netns exec "$router_ns" ip -j -4 rule show priority "$route_priority" | grep -Fq '"protocol":"242"'; then fail "emergency bypass left owned IPv4 rule"; fi
+if ip netns exec "$router_ns" ip -j -6 rule show priority "$route_priority" | grep -Fq '"protocol":"242"'; then fail "emergency bypass left owned IPv6 rule"; fi
+ip netns exec "$router_ns" nft list table inet foreign_lab >/dev/null || fail "emergency bypass removed a foreign nftables table"
+[ -s "$route_candidate_dir/routing-state.json" ] || fail "emergency bypass removed persistent routing state"
+printf 'PASS: killed outbound blocks leaks; emergency bypass is idempotent and preserves desired and foreign state\n'
 
 wireguard_name=$(tr -d '\r\n' <"$interface_candidate_dir/wireguard-name")
 wireguard_id=$(tr -d '\r\n' <"$interface_candidate_dir/wireguard-id")
