@@ -10,7 +10,7 @@ systemctl is-active --quiet egress-web.service
 /usr/local/lib/egress-manager/bin/egressctl status --config "${config_path}" --ipc-key "${key_path}"
 /usr/local/lib/egress-manager/bin/sing-box version >/dev/null
 /usr/local/lib/egress-manager/bin/xray version >/dev/null
-if [ -x /usr/local/lib/egress-manager/bin/lego ]; then /usr/local/lib/egress-manager/bin/lego version >/dev/null; fi
+if [ -x /usr/local/lib/egress-manager/bin/lego ]; then /usr/local/lib/egress-manager/bin/lego --version >/dev/null; fi
 [ -x /usr/local/lib/egress-manager/manager.sh ] || { echo "verify.sh: management utility is missing" >&2; exit 1; }
 [ -L /usr/local/bin/egress-manager ] || { echo "verify.sh: egress-manager command link is missing" >&2; exit 1; }
 /usr/local/bin/egress-manager --help >/dev/null
