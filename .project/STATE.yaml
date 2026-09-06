@@ -11,7 +11,7 @@ status: in_progress
 
 last_green_ref: HEAD
 
-next_action: protect new nftables and iptables NAT journal snapshots with authenticated envelopes, preserve safe legacy crash recovery, and add exact manual rollback preconditions before making those formats eligible
+next_action: run the full Phase 11 verification gate, rebuild the privileged network lab, and assess the remaining real reboot and failure-injection acceptance gaps
 
 dirty_work_expected: false
 
@@ -128,6 +128,7 @@ recent_decisions:
   - Only the newest committed operation is considered; unsupported formats are not skipped. Route-engine apply and bypass are the first eligible authenticated formats.
   - Sing-box, native-interface, and writable-Xray rollback authenticate snapshot and candidate and require exact current owned/runtime evidence; Xray also requires unchanged foreign confdir state.
   - New HAProxy transactions authenticate both snapshot and candidate; manual rollback additionally requires exact current owned configuration, healthy Runtime API state, and native validation of the prior configuration.
+  - New nftables and iptables NAT transactions authenticate both snapshot and candidate; manual rollback compares only exact owned state, validates rollback natively before transition, and keeps legacy plaintext records crash-recovery-only.
 
 touched_areas:
   - authenticated sing-box rollback
@@ -135,3 +136,4 @@ touched_areas:
   - authenticated writable-Xray rollback
   - rollback dispatcher
   - authenticated HAProxy rollback
+  - authenticated nftables and iptables NAT rollback

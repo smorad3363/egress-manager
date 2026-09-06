@@ -1,6 +1,7 @@
 package nat
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/egress-manager/egress-manager/internal/database"
 	"github.com/egress-manager/egress-manager/internal/domain"
+	"github.com/egress-manager/egress-manager/internal/secrets"
 	"github.com/egress-manager/egress-manager/internal/system"
 )
 
@@ -71,6 +73,15 @@ func testExecutorStore(t *testing.T) *database.Store {
 	return database.NewStore(connection)
 }
 
+func natTestProtector(t *testing.T) *secrets.Protector {
+	t.Helper()
+	protector, err := secrets.NewProtector([32]byte{6, 5, 4, 3}, bytes.NewReader(bytes.Repeat([]byte{8}, 16384)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return protector
+}
+
 func executableTestPlan(t *testing.T) Plan {
 	t.Helper()
 	forward := testForward()
@@ -93,7 +104,7 @@ func TestExecutorCommitsValidatedVerifiedPlan(t *testing.T) {
 		{command: "nft --file -", stdin: "table ip egm_nat4", result: system.Result{ExitCode: 0}},
 	}}
 	verifier := &fakeVerifier{}
-	executor := Executor{Runner: runner, Journal: store, Verifier: verifier, Now: func() time.Time { return time.Unix(1_700_000_000, 0) }}
+	executor := Executor{Runner: runner, Journal: store, Verifier: verifier, Protector: natTestProtector(t), Now: func() time.Time { return time.Unix(1_700_000_000, 0) }}
 	if err := executor.Execute(context.Background(), "nat_success", `{}`, plan); err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +133,7 @@ func TestExecutorRollsBackVerificationFailure(t *testing.T) {
 		{command: "nft --file -", stdin: "delete table ip egm_nat4", result: system.Result{ExitCode: 0}},
 	}}
 	verifier := &fakeVerifier{err: errors.New("remote unreachable")}
-	executor := Executor{Runner: runner, Journal: store, Verifier: verifier}
+	executor := Executor{Runner: runner, Journal: store, Verifier: verifier, Protector: natTestProtector(t)}
 	if err := executor.Execute(context.Background(), "nat_rollback", `{}`, plan); err == nil || !strings.Contains(err.Error(), "remote unreachable") {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -145,7 +156,7 @@ func TestExecutorNativeValidationFailureDoesNotApply(t *testing.T) {
 		{command: "nft list tables", result: system.Result{ExitCode: 0}},
 		{command: "nft --check --file -", result: system.Result{ExitCode: 1}, err: errors.New("invalid candidate")},
 	}}
-	executor := Executor{Runner: runner, Journal: store, Verifier: &fakeVerifier{}}
+	executor := Executor{Runner: runner, Journal: store, Verifier: &fakeVerifier{}, Protector: natTestProtector(t)}
 	if err := executor.Execute(context.Background(), "nat_invalid", `{}`, plan); err == nil {
 		t.Fatal("Execute() accepted failed native validation")
 	}
@@ -170,7 +181,7 @@ func TestExecutorApplyFailureRollsBackWithoutDeletingForeignState(t *testing.T) 
 		{command: "nft --file -", result: system.Result{ExitCode: 1}, err: errors.New("interrupted apply")},
 		{command: "nft list tables", result: system.Result{Stdout: []byte("table inet foreign\n"), ExitCode: 0}},
 	}}
-	executor := Executor{Runner: runner, Journal: store, Verifier: &fakeVerifier{}}
+	executor := Executor{Runner: runner, Journal: store, Verifier: &fakeVerifier{}, Protector: natTestProtector(t)}
 	if err := executor.Execute(context.Background(), "nat_apply_fail", `{}`, plan); err == nil || !strings.Contains(err.Error(), "interrupted apply") {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -205,7 +216,7 @@ func TestExecutorRestoresPreviousOwnedTableSnapshot(t *testing.T) {
 		{command: "nft --check --file -", stdin: "old marker", result: system.Result{ExitCode: 0}},
 		{command: "nft --file -", stdin: "old marker", result: system.Result{ExitCode: 0}},
 	}}
-	executor := Executor{Runner: runner, Journal: store, Verifier: &fakeVerifier{err: errors.New("verification failed")}}
+	executor := Executor{Runner: runner, Journal: store, Verifier: &fakeVerifier{err: errors.New("verification failed")}, Protector: natTestProtector(t)}
 	if err := executor.Execute(context.Background(), "nat_restore", `{}`, plan); err == nil {
 		t.Fatal("Execute() succeeded despite verification failure")
 	}
@@ -213,7 +224,8 @@ func TestExecutorRestoresPreviousOwnedTableSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if operation.State != domain.TransactionRolledBack || operation.PreviousSnapshot != previous {
+	restored, _, _, openErr := executor.openNFTJournal(operation, false)
+	if operation.State != domain.TransactionRolledBack || openErr != nil || restored != previous {
 		t.Fatalf("operation = %#v", operation)
 	}
 	runner.assertDone()

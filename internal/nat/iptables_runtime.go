@@ -50,6 +50,9 @@ func (executor Executor) executeIPTables(ctx context.Context, id domain.ID, requ
 	if executor.Runner == nil || executor.Journal == nil {
 		return fmt.Errorf("iptables executor dependencies are required")
 	}
+	if executor.Protector == nil {
+		return fmt.Errorf("NAT journal protector is required")
+	}
 	if err := validateExecutablePlan(plan); err != nil {
 		return err
 	}
@@ -72,10 +75,18 @@ func (executor Executor) executeIPTables(ctx context.Context, id domain.ID, requ
 	if err != nil {
 		return fmt.Errorf("encode iptables snapshot: %w", err)
 	}
+	protectedSnapshot, err := executor.protectJournal(id, "snapshot", snapshot)
+	if err != nil {
+		return err
+	}
+	protectedCandidate, err := executor.protectJournal(id, "candidate", []byte(plan.Candidate))
+	if err != nil {
+		return err
+	}
 	now := executor.now()
 	operation := domain.Transaction{
 		ID: id, Operation: "nat_apply_iptables", State: domain.TransactionPrepared,
-		RequestedChange: requestedChange, PreviousSnapshot: string(snapshot), CandidateConfig: plan.Candidate,
+		RequestedChange: requestedChange, PreviousSnapshot: protectedSnapshot, CandidateConfig: protectedCandidate,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := executor.Journal.CreateOperation(ctx, operation); err != nil {
@@ -117,8 +128,12 @@ type iptablesRecoverySnapshot struct {
 }
 
 func (executor Executor) recoverIPTables(ctx context.Context, operation domain.Transaction) error {
+	encoded, _, err := executor.openJournalField(operation.ID, "snapshot", operation.PreviousSnapshot, true)
+	if err != nil {
+		return err
+	}
 	var snapshot iptablesRecoverySnapshot
-	if err := json.Unmarshal([]byte(operation.PreviousSnapshot), &snapshot); err != nil {
+	if err := json.Unmarshal(encoded, &snapshot); err != nil {
 		return fmt.Errorf("decode interrupted iptables snapshot: %w", err)
 	}
 	if _, _, _, err := iptablesExecutables(snapshot.Family); err != nil {

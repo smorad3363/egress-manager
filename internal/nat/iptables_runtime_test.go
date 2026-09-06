@@ -2,9 +2,11 @@ package nat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egress-manager/egress-manager/internal/domain"
 	"github.com/egress-manager/egress-manager/internal/system"
@@ -38,7 +40,7 @@ func TestIPTablesExecutorCommitsValidatedVerifiedPlan(t *testing.T) {
 		{command: "iptables -t filter -C FORWARD -m comment --comment egm_anchor_forward -j EGM_FORWARD", result: system.Result{ExitCode: 0}},
 		{command: "ip route get 10.10.0.5", result: system.Result{ExitCode: 0}},
 	}}
-	executor := Executor{Runner: runner, Journal: store}
+	executor := Executor{Runner: runner, Journal: store, Protector: natTestProtector(t)}
 	if err := executor.Execute(context.Background(), "iptables_success", `{}`, plan); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +89,7 @@ COMMIT
 		{command: "iptables-restore --test --noflush", stdin: "-X EGM_PREROUTING", result: system.Result{ExitCode: 0}},
 		{command: "iptables-restore --noflush", stdin: "-D FORWARD", result: system.Result{ExitCode: 0}},
 	}}
-	executor := Executor{Runner: runner, Journal: store}
+	executor := Executor{Runner: runner, Journal: store, Protector: natTestProtector(t)}
 	if err := executor.Execute(context.Background(), "iptables_rollback", `{}`, plan); err == nil || !strings.Contains(err.Error(), "missing anchor") {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -126,8 +128,29 @@ func TestIPTablesPlanRejectsStaleOwnedState(t *testing.T) {
 		{command: "iptables-save -t nat", result: system.Result{Stdout: []byte(changedNAT), ExitCode: 0}},
 		{command: "iptables-save -t filter", result: system.Result{Stdout: []byte(emptyIPTablesFilter), ExitCode: 0}},
 	}}
-	if err := (Executor{Runner: runner, Journal: store}).Execute(context.Background(), "iptables_stale", `{}`, plan); !errors.Is(err, ErrHostStateChanged) {
+	if err := (Executor{Runner: runner, Journal: store, Protector: natTestProtector(t)}).Execute(context.Background(), "iptables_stale", `{}`, plan); !errors.Is(err, ErrHostStateChanged) {
 		t.Fatalf("Execute() error = %v", err)
 	}
 	runner.assertDone()
+}
+
+func TestIPTablesRecoveryAcceptsLegacyPlaintextSnapshot(t *testing.T) {
+	store := testExecutorStore(t)
+	snapshot, err := json.Marshal(iptablesRecoverySnapshot{Family: IPv4, State: IPTablesState{NatRules: []string{}, FilterRules: []string{}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	operation := domain.Transaction{ID: "iptables_legacy_recovery", Operation: "nat_apply_iptables", State: domain.TransactionPrepared, RequestedChange: `{}`, PreviousSnapshot: string(snapshot), CandidateConfig: executableIPTablesPlan(t).Candidate, CreatedAt: now, UpdatedAt: now}
+	if err := store.CreateOperation(context.Background(), operation); err != nil {
+		t.Fatal(err)
+	}
+	executor := Executor{Runner: &scriptedRunner{t: t}, Journal: store}
+	if err := executor.Recover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	operation, _ = store.Operation(context.Background(), operation.ID)
+	if operation.State != domain.TransactionFailed || operation.FailureDetail != "interrupted_before_apply" {
+		t.Fatalf("operation = %#v", operation)
+	}
 }

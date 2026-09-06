@@ -85,7 +85,7 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	}()
 	runner := system.ExecRunner{}
 	xrayDiscoverer := managedXray.Discoverer{Runner: runner, Files: managedXray.OSFileSystem{}, Timeout: 2 * time.Second}
-	executor := nat.Executor{Runner: runner, Journal: store, Verifier: nat.SystemVerifier{Runner: runner}}
+	executor := nat.Executor{Runner: runner, Journal: store, Verifier: nat.SystemVerifier{Runner: runner}, Protector: protector}
 	haproxyRuntime := managedHAProxy.RuntimeClient{SocketPath: configuration.HAProxyRuntimeSocketPath, Dialer: managedHAProxy.NetDialer{}, Timeout: 2 * time.Second}
 	haproxyExecutor := managedHAProxy.Executor{Runner: runner, Journal: store, Runtime: haproxyRuntime, Protector: protector, ConfigPath: configuration.HAProxyConfigPath, PIDPath: configuration.HAProxyPIDPath}
 	singboxExecutor := managedSingBox.Executor{Runner: runner, Journal: store, Protector: protector, ConfigPath: configuration.SingBoxConfigPath}
@@ -398,6 +398,11 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 					return nil, err
 				}
 				component = "haproxy"
+			case "nat_apply", "nat_apply_iptables":
+				if err := executor.RollbackCommitted(ctx, operation); err != nil {
+					return nil, err
+				}
+				component = "nat"
 			default:
 				return nil, reliability.NoRollbackAvailableError{}
 			}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/egress-manager/egress-manager/internal/domain"
+	"github.com/egress-manager/egress-manager/internal/secrets"
 	"github.com/egress-manager/egress-manager/internal/system"
 )
 
@@ -24,12 +25,18 @@ type Verifier interface {
 	Verify(context.Context, Plan) error
 }
 
+type JournalProtector interface {
+	Seal(string, []byte) (secrets.Envelope, error)
+	Open(string, secrets.Envelope) ([]byte, error)
+}
+
 type Executor struct {
-	Runner   system.Runner
-	Journal  Journal
-	Verifier Verifier
-	Timeout  time.Duration
-	Now      func() time.Time
+	Runner    system.Runner
+	Journal   Journal
+	Verifier  Verifier
+	Protector JournalProtector
+	Timeout   time.Duration
+	Now       func() time.Time
 }
 
 func InspectOwnedTable(ctx context.Context, runner system.Runner, family AddressFamily, timeout time.Duration) (bool, error) {
@@ -53,6 +60,9 @@ func (executor Executor) Execute(ctx context.Context, id domain.ID, requestedCha
 	if executor.Runner == nil || executor.Journal == nil || executor.Verifier == nil {
 		return fmt.Errorf("NAT executor dependencies are required")
 	}
+	if executor.Protector == nil {
+		return fmt.Errorf("NAT journal protector is required")
+	}
 	if err := validateExecutablePlan(plan); err != nil {
 		return err
 	}
@@ -70,10 +80,18 @@ func (executor Executor) Execute(ctx context.Context, id domain.ID, requestedCha
 	if !exists {
 		snapshot = "absent"
 	}
+	protectedSnapshot, err := executor.protectJournal(id, "snapshot", []byte(snapshot))
+	if err != nil {
+		return err
+	}
+	protectedCandidate, err := executor.protectJournal(id, "candidate", []byte(plan.Candidate))
+	if err != nil {
+		return err
+	}
 	now := executor.now()
 	operation := domain.Transaction{
 		ID: id, Operation: "nat_apply", State: domain.TransactionPrepared,
-		RequestedChange: requestedChange, PreviousSnapshot: snapshot, CandidateConfig: plan.Candidate,
+		RequestedChange: requestedChange, PreviousSnapshot: protectedSnapshot, CandidateConfig: protectedCandidate,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := executor.Journal.CreateOperation(ctx, operation); err != nil {
@@ -166,7 +184,11 @@ func (executor Executor) rollback(ctx context.Context, operation domain.Transact
 }
 
 func (executor Executor) restoreSnapshot(ctx context.Context, operation domain.Transaction) error {
-	family, table, err := ownedTableFromCandidate(operation.CandidateConfig)
+	snapshot, candidate, _, err := executor.openNFTJournal(operation, true)
+	if err != nil {
+		return err
+	}
+	family, table, err := ownedTableFromCandidate(candidate)
 	if err != nil {
 		return err
 	}
@@ -175,16 +197,16 @@ func (executor Executor) restoreSnapshot(ctx context.Context, operation domain.T
 	if inspectErr != nil {
 		return inspectErr
 	}
-	if operation.PreviousSnapshot == "absent" && !exists {
+	if snapshot == "absent" && !exists {
 		return nil
 	}
 	var rollback strings.Builder
 	if exists {
 		fmt.Fprintf(&rollback, "delete table %s %s\n", family, table)
 	}
-	if operation.PreviousSnapshot != "absent" {
-		rollback.WriteString(operation.PreviousSnapshot)
-		if !strings.HasSuffix(operation.PreviousSnapshot, "\n") {
+	if snapshot != "absent" {
+		rollback.WriteString(snapshot)
+		if !strings.HasSuffix(snapshot, "\n") {
 			rollback.WriteByte('\n')
 		}
 	}
