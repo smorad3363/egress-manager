@@ -72,7 +72,18 @@ func TestNativeTCPListenerRelaysThroughSelectedXrayOutboundAndFailsClosed(t *tes
 			backendAccepts.Add(1)
 			go func() {
 				defer connection.Close()
-				_, _ = io.Copy(connection, connection)
+				buffer := make([]byte, 32*1024)
+				for {
+					n, readErr := connection.Read(buffer)
+					if n > 0 {
+						if _, writeErr := connection.Write(buffer[:n]); writeErr != nil {
+							return
+						}
+					}
+					if readErr != nil {
+						return
+					}
+				}
 			}()
 		}
 	}()
@@ -87,7 +98,8 @@ func TestNativeTCPListenerRelaysThroughSelectedXrayOutboundAndFailsClosed(t *tes
 		"log": map[string]any{"loglevel": "warning"},
 		"inbounds": []any{map[string]any{
 			"listen": "127.0.0.1", "port": serverPort, "protocol": "vless",
-			"settings": map[string]any{"clients": []any{map[string]any{"id": nativeRelayUUID}}, "decryption": "none"},
+			"settings":       map[string]any{"clients": []any{map[string]any{"id": nativeRelayUUID}}, "decryption": "none"},
+			"streamSettings": map[string]any{"network": "tcp"},
 		}},
 		"outbounds": []any{map[string]any{"protocol": "freedom", "tag": "direct"}},
 	}
@@ -97,7 +109,7 @@ func TestNativeTCPListenerRelaysThroughSelectedXrayOutboundAndFailsClosed(t *tes
 
 	outbound := domain.Outbound{
 		ID: "native_vless", Name: "Native VLESS", Adapter: domain.OutboundAdapterXray, Type: domain.OutboundVLESS,
-		Server: domain.Endpoint{Host: "127.0.0.1", Port: uint16(serverPort)},
+		Server:       domain.Endpoint{Host: "127.0.0.1", Port: uint16(serverPort)},
 		Capabilities: domain.Capabilities{TCP: true}, Health: domain.UnknownOutboundHealth(), Enabled: true, SecretMetadata: []string{"uuid"},
 	}
 	credential, err := json.Marshal(CredentialDocument{Version: credentialVersion, Outbound: map[string]any{
@@ -140,7 +152,7 @@ func TestNativeTCPListenerRelaysThroughSelectedXrayOutboundAndFailsClosed(t *tes
 	received := make([]byte, len(payload))
 	if _, err := io.ReadFull(connection, received); err != nil {
 		_ = connection.Close()
-		t.Fatalf("read relayed payload: %v", err)
+		t.Fatalf("read relayed payload: %v; backend_accepts=%d; relay_stderr=%q; server_stderr=%q", err, backendAccepts.Load(), relayProcess.stderr.String(), server.stderr.String())
 	}
 	_ = connection.Close()
 	if !bytes.Equal(received, payload) {

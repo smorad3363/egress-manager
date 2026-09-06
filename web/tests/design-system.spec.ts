@@ -190,11 +190,11 @@ test("outbound console tests, stores, manages, and applies without exposing cred
 
   await page.getByRole("button", { name: "Disable" }).click();
   expect(calls).toContain("PUT /api/v1/outbounds");
-  await page.getByRole("button", { name: "Review & apply" }).click();
+  await page.getByRole("button", { name: "Review sing-box apply" }).click();
   const plan = page.getByRole("dialog");
   await expect(plan.getByRole("heading", { name: "Review sing-box plan" })).toBeVisible();
   await expect(plan.getByText("candidate-hash")).toHaveCount(0);
-  await plan.getByRole("button", { name: "Apply atomically" }).click();
+  await plan.getByRole("button", { name: "Apply sing-box" }).click();
   await expect(plan).toBeHidden();
   expect(calls).toContain("POST /api/v1/outbounds/apply");
 });

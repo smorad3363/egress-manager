@@ -242,7 +242,7 @@ test("listener relay console performs CRUD and exact plan/apply without exposing
   await page.getByRole("button", { name: "Review & apply" }).click();
   dialog = page.getByRole("dialog");
   await expect(dialog.getByRole("heading", { name: "Review listener relay plan" })).toBeVisible();
-  await expect(dialog.getByText("candidate-hash", { exact: false })).toBeVisible();
+  await expect(dialog.getByText("candidate-ha…", { exact: true })).toBeVisible();
   await expect(dialog.getByText("11111111-2222-4333-8444-555555555555")).toHaveCount(0);
   await dialog.getByRole("button", { name: "Apply atomically" }).click();
   expect(applyBody).toEqual({ expected_state_hash: "state-hash-123", expected_candidate_hash: "candidate-hash-456" });
@@ -309,7 +309,7 @@ test("Persian mode is RTL and exposes the live relay workflow", async ({ page })
   const relayDialog = page.getByRole("dialog");
   await expect(relayDialog.getByRole("heading", { name: "ساخت رله ورودی" })).toBeVisible();
   await expect(relayDialog.getByLabel("پورت شنود")).toBeVisible();
-  await relayDialog.getByRole("button", { name: "لغو" }).click();
+  await relayDialog.getByRole("button", { name: "انصراف" }).click();
 
   await navigation.getByRole("button", { name: "خروجی‌ها" }).click();
   await expect(page.getByRole("heading", { name: "اتصال‌های خروجی" })).toBeVisible();
