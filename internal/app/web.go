@@ -91,7 +91,7 @@ func RunWeb(ctx context.Context, options WebOptions) error {
 	}
 	apiServer, err := api.NewServer(api.ServerConfig{
 		SessionCookieName: configuration.SessionCookieName,
-		SecureCookies:     true,
+		SecureCookies:     configuration.TLSCertificatePath != "",
 	}, logger, authentication, sessions, control, store, store, store, store, store, health)
 	if err != nil {
 		return err
