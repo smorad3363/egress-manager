@@ -2,16 +2,19 @@
 set -eu
 
 repository="smorad3363/egress-manager"
-version="${EGRESS_VERSION:-v0.1.0-alpha.3}"
+version="${EGRESS_VERSION:-v0.1.0-alpha.4}"
 bundle_root="${EGRESS_BUNDLE_ROOT:-}"
 skip_start="${EGRESS_SKIP_START:-0}"
+public_http="${EGRESS_PUBLIC_HTTP:-1}"
 
 usage() {
   cat <<'EOF_USAGE'
-Usage: install.sh [--version TAG] [--bundle-root DIR] [--skip-start]
+Usage: install.sh [--version TAG] [--bundle-root DIR] [--skip-start] [--public-http|--local-only]
 
 Online mode downloads one complete release bundle for this Ubuntu version and architecture.
 Offline mode runs from an extracted bundle and performs no external network access.
+By default the browser panel listens on 0.0.0.0 over plain HTTP for direct browser access.
+Use --local-only to bind it to 127.0.0.1 instead.
 Supported hosts: Ubuntu 22.04, 24.04, and 26.04 on amd64 or arm64 with systemd.
 EOF_USAGE
 }
@@ -21,6 +24,8 @@ while [ "$#" -gt 0 ]; do
     --version) [ "$#" -ge 2 ] || { usage >&2; exit 2; }; version="$2"; shift 2 ;;
     --bundle-root) [ "$#" -ge 2 ] || { usage >&2; exit 2; }; bundle_root="$2"; shift 2 ;;
     --skip-start) skip_start=1; shift ;;
+    --public-http) public_http=1; shift ;;
+    --local-only) public_http=0; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "install.sh: unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -90,11 +95,13 @@ if [ -z "${bundle_root}" ]; then
   [ -n "${expected}" ] && [ "${expected}" = "${actual}" ] || fail "release bundle checksum mismatch"
   python3 -m zipfile -e "${archive}" "${temporary_directory}/extracted"
   extracted_root="${temporary_directory}/extracted/${bundle_name}"
-  [ -x "${extracted_root}/install.sh" ] || fail "release bundle is incomplete"
+  [ -f "${extracted_root}/install.sh" ] || fail "release bundle is incomplete"
+  mode_arg="--public-http"
+  [ "${public_http}" = "1" ] || mode_arg="--local-only"
   if [ "${skip_start}" = "1" ]; then
-    sh "${extracted_root}/install.sh" --bundle-root "${extracted_root}" --skip-start
+    sh "${extracted_root}/install.sh" --bundle-root "${extracted_root}" --skip-start "${mode_arg}"
   else
-    sh "${extracted_root}/install.sh" --bundle-root "${extracted_root}"
+    sh "${extracted_root}/install.sh" --bundle-root "${extracted_root}" "${mode_arg}"
   fi
   exit $?
 fi
@@ -117,7 +124,7 @@ installed_version="$(sed -n '1p' "${bundle_root}/VERSION")"
 package_directory="${bundle_root}/package"
 for file in \
   bin/egressd bin/egress-web bin/egressctl bin/sing-box bin/xray \
-  config.json.in verify.sh VERSION RUNTIME_VERSIONS web/index.html \
+  config.json.in verify.sh manager.sh VERSION RUNTIME_VERSIONS web/index.html \
   systemd/egressd.service systemd/egress-web.service systemd/egress-manager-sing-box.service; do
   [ -f "${package_directory}/${file}" ] || fail "release bundle is incomplete: ${file}"
 done
@@ -140,6 +147,9 @@ done
 
 if [ -e /usr/local/bin/egressctl ] && { [ ! -L /usr/local/bin/egressctl ] || [ "$(readlink /usr/local/bin/egressctl)" != "/usr/local/lib/egress-manager/bin/egressctl" ]; }; then
   fail "/usr/local/bin/egressctl already exists and is not owned by Egress Manager"
+fi
+if [ -e /usr/local/bin/egress-manager ] && { [ ! -L /usr/local/bin/egress-manager ] || [ "$(readlink /usr/local/bin/egress-manager)" != "/usr/local/lib/egress-manager/manager.sh" ]; }; then
+  fail "/usr/local/bin/egress-manager already exists and is not owned by Egress Manager"
 fi
 
 for protected_path in \
@@ -177,7 +187,9 @@ done
 /usr/local/lib/egress-manager/bin/egressctl --version >/dev/null
 /usr/local/lib/egress-manager/bin/sing-box version >/dev/null
 /usr/local/lib/egress-manager/bin/xray version >/dev/null
+install -o root -g root -m 0755 "${package_directory}/manager.sh" /usr/local/lib/egress-manager/manager.sh
 ln -sfn /usr/local/lib/egress-manager/bin/egressctl /usr/local/bin/egressctl
+ln -sfn /usr/local/lib/egress-manager/manager.sh /usr/local/bin/egress-manager
 
 web_stage="/usr/local/lib/egress-manager/web.new.$$"
 rm -rf -- "${web_stage}"
@@ -222,6 +234,28 @@ if [ ! -e /etc/egress-manager/config.json ]; then
   install -o root -g egress-manager -m 0640 "${temporary_directory}/config.json" /etc/egress-manager/config.json
 fi
 
+configure_http_mode() {
+  tmp="${temporary_directory}/config-http.json"
+  if [ "${public_http}" = "1" ]; then
+    sed 's/^[[:space:]]*"listen_address":[[:space:]]*"[^"]*"/  "listen_address": "0.0.0.0"/' /etc/egress-manager/config.json > "${tmp}"
+    if grep -q '^[[:space:]]*"allow_insecure_http"[[:space:]]*:' "${tmp}"; then
+      sed 's/^[[:space:]]*"allow_insecure_http":[[:space:]]*[^,]*/  "allow_insecure_http": true/' "${tmp}" > "${tmp}.2"
+      mv "${tmp}.2" "${tmp}"
+    else
+      awk '{ print; if ($0 ~ /^[[:space:]]*"listen_port"[[:space:]]*:/) print "  \"allow_insecure_http\": true," }' "${tmp}" > "${tmp}.2"
+      mv "${tmp}.2" "${tmp}"
+    fi
+  else
+    sed 's/^[[:space:]]*"listen_address":[[:space:]]*"[^"]*"/  "listen_address": "127.0.0.1"/' /etc/egress-manager/config.json > "${tmp}"
+    if grep -q '^[[:space:]]*"allow_insecure_http"[[:space:]]*:' "${tmp}"; then
+      sed 's/^[[:space:]]*"allow_insecure_http":[[:space:]]*[^,]*/  "allow_insecure_http": false/' "${tmp}" > "${tmp}.2"
+      mv "${tmp}.2" "${tmp}"
+    fi
+  fi
+  install -o root -g egress-manager -m 0640 "${tmp}" /etc/egress-manager/config.json
+}
+configure_http_mode
+
 install -o root -g root -m 0644 "${package_directory}/systemd/egressd.service" /etc/systemd/system/egressd.service
 install -o root -g root -m 0644 "${package_directory}/systemd/egress-web.service" /etc/systemd/system/egress-web.service
 install -o root -g root -m 0644 "${package_directory}/systemd/egress-manager-sing-box.service" /etc/systemd/system/egress-manager-sing-box.service
@@ -257,6 +291,14 @@ fi
 /usr/local/lib/egress-manager/verify.sh
 
 printf 'Installed Egress Manager %s.\n' "${installed_version}"
-printf 'Panel (local only): http://127.0.0.1:%s/\n' "${panel_port}"
-printf 'Login: http://127.0.0.1:%s/login\n' "${panel_port}"
+if [ "${public_http}" = "1" ]; then
+  server_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+  [ -n "${server_ip}" ] || server_ip="SERVER_IP"
+  printf 'Panel: http://%s:%s/login\n' "${server_ip}" "${panel_port}"
+  printf 'WARNING: public HTTP mode is enabled; login credentials and session traffic are not encrypted.\n'
+  printf 'If a host firewall blocks the port, run: sudo egress-manager firewall-open\n'
+else
+  printf 'Panel (local only): http://127.0.0.1:%s/login\n' "${panel_port}"
+fi
+printf 'Management: sudo egress-manager\n'
 printf 'Xray is bundled for Egress Manager validation/integration and is not enabled as a standalone system service.\n'
