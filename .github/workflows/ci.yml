@@ -85,7 +85,7 @@ jobs:
           target="${{ matrix.os }}"
           ubuntu="${target#ubuntu-}"
           UBUNTU_VERSION="${ubuntu}" ARCHITECTURE=amd64 sh scripts/release/build-offline-bundle.sh
-      - name: Install only from extracted bundle
+      - name: Install only from Python-extracted ZIP
         run: |
           target="${{ matrix.os }}"
           ubuntu="${target#ubuntu-}"
@@ -93,8 +93,9 @@ jobs:
           rm -rf /tmp/egress-offline-ci
           mkdir -p /tmp/egress-offline-ci
           python3 -m zipfile -e "dist/${bundle}.zip" /tmp/egress-offline-ci
-          sudo sh "/tmp/egress-offline-ci/${bundle}/install.sh"
-      - name: Verify service boundary, bundled runtimes, UI, and health
+          test -f "/tmp/egress-offline-ci/${bundle}/install.sh"
+          sudo sh "/tmp/egress-offline-ci/${bundle}/install.sh" --public-http
+      - name: Verify service boundary, bundled runtimes, UI, manager, and health
         run: |
           sudo /usr/local/lib/egress-manager/verify.sh
           test "$(systemctl show egress-web.service --property=User --value)" = "egress-web"
@@ -103,8 +104,27 @@ jobs:
           test "$(sudo stat -c '%a:%U:%G' /var/lib/egress-manager/database/egress-manager.db)" = "660:root:egress-manager"
           test -x /usr/local/lib/egress-manager/bin/sing-box
           test -x /usr/local/lib/egress-manager/bin/xray
+          test -x /usr/local/lib/egress-manager/manager.sh
+          test -L /usr/local/bin/egress-manager
           test -f /usr/local/lib/egress-manager/web/index.html
+          grep -q '"listen_address": "0.0.0.0"' /etc/egress-manager/config.json
+          grep -q '"allow_insecure_http": true' /etc/egress-manager/config.json
+          sudo /usr/local/bin/egress-manager --help >/dev/null
           sudo systemd-analyze verify /etc/systemd/system/egressd.service /etc/systemd/system/egress-web.service /etc/systemd/system/egress-manager-sing-box.service
+      - name: Verify browser login works over plain HTTP
+        run: |
+          port="$(sed -n 's/^[[:space:]]*"listen_port":[[:space:]]*\([0-9][0-9]*\),*$/\1/p' /etc/egress-manager/config.json)"
+          printf '%s\n' 'ci-password-12345' | sudo /usr/local/lib/egress-manager/bin/egress-web provision-admin --username ci-admin --password-stdin
+          rm -f /tmp/egress-cookies /tmp/egress-headers
+          curl --fail --silent --show-error \
+            -D /tmp/egress-headers \
+            -c /tmp/egress-cookies \
+            -H 'Content-Type: application/json' \
+            --data '{"username":"ci-admin","password":"ci-password-12345"}' \
+            "http://127.0.0.1:${port}/api/v1/auth/login" >/tmp/egress-login.json
+          grep -qi '^Set-Cookie: egress_session=' /tmp/egress-headers
+          ! grep -qi '^Set-Cookie:.*; Secure' /tmp/egress-headers
+          curl --fail --silent --show-error -b /tmp/egress-cookies "http://127.0.0.1:${port}/api/v1/auth/session" >/dev/null
 
   network-lab:
     runs-on: ubuntu-24.04
