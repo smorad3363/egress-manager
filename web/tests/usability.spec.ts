@@ -313,7 +313,7 @@ test("Persian mode is RTL and exposes the live relay workflow", async ({ page })
 
   await navigation.getByRole("button", { name: "خروجی‌ها" }).click();
   await expect(page.getByRole("heading", { name: "اتصال‌های خروجی" })).toBeVisible();
-  await expect(page.getByText("رله Xray")).toBeVisible();
+  await expect(page.getByText("رله Xray", { exact: true })).toBeVisible();
 });
 
 test("Xray empty state explains bundled runtime and scan button really rescans", async ({ page }) => {
