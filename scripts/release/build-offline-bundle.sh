@@ -92,7 +92,7 @@ find "${bundle_directory}/debs" -type f -name '*.deb' | grep -q . || { echo "bui
   cd "${output_directory}"
   zip -q -r "${bundle_name}.zip" "${bundle_name}"
   tar -czf "${bundle_name}.tar.gz" "${bundle_name}"
+  sha256sum "${bundle_name}.zip" > "${bundle_name}.zip.sha256"
+  sha256sum "${bundle_name}.tar.gz" > "${bundle_name}.tar.gz.sha256"
 )
-sha256sum "${zip_archive}" > "${zip_archive}.sha256"
-sha256sum "${tar_archive}" > "${tar_archive}.sha256"
 printf '%s\n%s\n' "${zip_archive}" "${tar_archive}"
