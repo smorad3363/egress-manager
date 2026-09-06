@@ -20,16 +20,28 @@ const liveRoute = {
 const liveOutbound = {
   id: "wg_primary",
   name: "Primary WireGuard",
+  adapter: "sing-box",
   type: "wireguard",
+  server: { host: "192.0.2.20", port: 51820 },
+  capabilities: { tcp: true, udp: true },
   enabled: true,
-  health: { status: "healthy" },
+  health: {
+    status: "healthy",
+    configuration_valid: "passed",
+    transport_reachable: "passed",
+    internet_reachable: "passed",
+    external_ip: "203.0.113.20",
+    tcp: "passed",
+    udp: "passed",
+  },
+  secret_metadata: [],
 };
 
 async function mockLiveDashboard(page: Page) {
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/api/v1/control/health") {
-      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ status: "ok", version: "v0.1.0-alpha.8", checks: { database: "ok" } }) });
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ status: "ok", version: "v0.1.0-alpha.8", checks: { database: "ok", egressd: "ok" } }) });
       return;
     }
     if (url.pathname === "/api/v1/routes") {
@@ -37,7 +49,7 @@ async function mockLiveDashboard(page: Page) {
       return;
     }
     if (url.pathname === "/api/v1/outbounds") {
-      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ outbound: liveOutbound, revision: 2 }], next_cursor: "" }) });
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ outbound: liveOutbound, revision: 2, created_at: "2026-09-06T12:00:00Z", updated_at: "2026-09-06T12:00:00Z" }], next_cursor: "" }) });
       return;
     }
     if (url.pathname === "/api/v1/port-forwards/counters") {
@@ -83,7 +95,7 @@ test("dashboard uses live API data and only exposes finished pages", async ({ pa
   await expect(navigation.getByRole("button", { name: "Settings" })).toHaveCount(0);
 
   await page.getByRole("button", { name: /View all/ }).click();
-  await expect(page.getByRole("heading", { name: "Egress routes" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Interface & subnet routes" })).toBeVisible();
 
   await navigation.getByRole("button", { name: "Dashboard" }).click();
   await page.locator(".topbar").getByRole("button", { name: "New route" }).click();
