@@ -183,20 +183,22 @@ systemctl enable egressd.service egress-web.service
 systemctl restart egressd.service
 systemctl restart egress-web.service
 
-for attempt in 1 2 3 4 5 6 7 8 9 10; do
-  if systemctl is-active --quiet egressd.service && systemctl is-active --quiet egress-web.service; then
+panel_port="$(sed -n 's/^[[:space:]]*"listen_port":[[:space:]]*\([0-9][0-9]*\),*$/\1/p' /etc/egress-manager/config.json)"
+ready=0
+for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+  if systemctl is-active --quiet egressd.service && systemctl is-active --quiet egress-web.service && curl --fail --silent --max-time 2 "http://127.0.0.1:${panel_port}/api/v1/health" >/dev/null; then
+    ready=1
     break
   fi
   sleep 1
 done
 
-if ! systemctl is-active --quiet egressd.service || ! systemctl is-active --quiet egress-web.service; then
+if [ "${ready}" != "1" ]; then
   systemctl --no-pager --full status egressd.service egress-web.service >&2 || true
-  fail "services did not become active"
+  journalctl --no-pager --lines=30 --unit=egressd.service --unit=egress-web.service >&2 || true
+  fail "services did not become healthy"
 fi
 
-panel_port="$(sed -n 's/^[[:space:]]*"listen_port":[[:space:]]*\([0-9][0-9]*\),*$/\1/p' /etc/egress-manager/config.json)"
-curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:${panel_port}/api/v1/health" >/dev/null || fail "health check failed"
 /usr/local/lib/egress-manager/bin/egressctl status --config /etc/egress-manager/config.json --ipc-key /etc/egress-manager/ipc.key
 
 printf 'Installed Egress Manager %s.\n' "${installed_version}"
