@@ -3,6 +3,7 @@ Description=Egress Manager owned Xray listener relay instance
 Documentation=https://github.com/smorad3363/egress-manager
 After=network-online.target
 Wants=network-online.target
+ConditionPathExists=/var/lib/egress-manager/private/xray-relay.json
 
 [Service]
 Type=simple
