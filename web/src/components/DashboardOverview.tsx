@@ -18,6 +18,7 @@ type Route = {
 type StoredRoute = { route: Route; revision: number };
 type Outbound = { id: string; name: string; enabled: boolean; health: { status: string } };
 type StoredOutbound = { outbound: Outbound; revision: number };
+type StoredRelay = { relay: { id: string; name: string; listen_address: string; listen_port: number; network: string; outbound_id: string; enabled: boolean }; revision: number };
 type StoredForward = { forward: { id: string; name: string; enabled: boolean }; revision: number };
 type Counter = { forward_id: string; accepted_packets: number; accepted_bytes: number; dropped_packets: number; dropped_bytes: number };
 type CounterSnapshot = { items: Counter[] };
@@ -27,6 +28,7 @@ type Snapshot = {
   health: HealthDocument | null;
   routes: StoredRoute[] | null;
   outbounds: StoredOutbound[] | null;
+  relays: StoredRelay[] | null;
   forwards: StoredForward[] | null;
   counters4: Counter[] | null;
   counters6: Counter[] | null;
@@ -40,25 +42,28 @@ type LoadState = { status: "loading" } | { status: "error"; message: string } | 
 type DashboardOverviewProps = {
   onOpenRoutes: () => void;
   onCreateRoute: () => void;
+  onOpenRelays: () => void;
+  onCreateRelay: () => void;
   onOpenNetwork: () => void;
 };
 
-export function DashboardOverview({ onOpenRoutes, onCreateRoute, onOpenNetwork }: DashboardOverviewProps) {
+export function DashboardOverview({ onOpenRoutes, onCreateRoute, onOpenRelays, onCreateRelay, onOpenNetwork }: DashboardOverviewProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
 
   const load = useCallback(async () => {
     setState({ status: "loading" });
-    const [health, routes, outbounds, forwards, counters4, counters6, haproxy] = await Promise.all([
+    const [health, routes, outbounds, relays, forwards, counters4, counters6, haproxy] = await Promise.all([
       settle<HealthDocument>("health", "/api/v1/control/health"),
       settle<{ items: StoredRoute[] }>("routes", "/api/v1/routes?limit=100"),
       settle<{ items: StoredOutbound[] }>("outbounds", "/api/v1/outbounds?limit=100"),
+      settle<{ items: StoredRelay[] }>("listener relays", "/api/v1/relays?limit=100"),
       settle<{ items: StoredForward[] }>("port forwards", "/api/v1/port-forwards?limit=100"),
       settle<CounterSnapshot>("IPv4 counters", "/api/v1/port-forwards/counters?family=ipv4"),
       settle<CounterSnapshot>("IPv6 counters", "/api/v1/port-forwards/counters?family=ipv6"),
       settle<HAProxyStats>("HAProxy", "/api/v1/haproxy/stats"),
     ]);
 
-    const results = [health, routes, outbounds, forwards, counters4, counters6, haproxy];
+    const results = [health, routes, outbounds, relays, forwards, counters4, counters6, haproxy];
     const successful = results.filter((result) => result.ok).length;
     if (successful === 0) {
       setState({ status: "error", message: "The server did not return live dashboard data." });
@@ -71,6 +76,7 @@ export function DashboardOverview({ onOpenRoutes, onCreateRoute, onOpenNetwork }
         health: health.ok ? health.value : null,
         routes: routes.ok ? routes.value.items : null,
         outbounds: outbounds.ok ? outbounds.value.items : null,
+        relays: relays.ok ? relays.value.items : null,
         forwards: forwards.ok ? forwards.value.items : null,
         counters4: counters4.ok ? counters4.value.items : null,
         counters6: counters6.ok ? counters6.value.items : null,
@@ -93,11 +99,13 @@ export function DashboardOverview({ onOpenRoutes, onCreateRoute, onOpenNetwork }
   const snapshot = state.snapshot;
   const routes = snapshot.routes ?? [];
   const outbounds = snapshot.outbounds ?? [];
+  const relays = snapshot.relays ?? [];
   const forwards = snapshot.forwards ?? [];
   const counters = [...(snapshot.counters4 ?? []), ...(snapshot.counters6 ?? [])];
   const enabledRoutes = routes.filter((item) => item.route.enabled).length;
   const enabledOutbounds = outbounds.filter((item) => item.outbound.enabled).length;
   const healthyOutbounds = outbounds.filter((item) => item.outbound.health.status === "healthy").length;
+  const enabledRelays = relays.filter((item) => item.relay.enabled).length;
   const enabledForwards = forwards.filter((item) => item.forward.enabled).length;
   const totals = counters.reduce((current, item) => ({
     acceptedPackets: current.acceptedPackets + item.accepted_packets,
@@ -113,7 +121,7 @@ export function DashboardOverview({ onOpenRoutes, onCreateRoute, onOpenNetwork }
       <div>
         <p className="eyebrow">LIVE SERVER DATA</p>
         <h2 id="overview-title">Current server overview</h2>
-        <p>Everything on this page comes from the server API. No sample traffic, routes, or service values are shown.</p>
+        <p>Everything on this page comes from the server API. No sample traffic, routes, relays, or service values are shown.</p>
       </div>
       <div className="page-heading__meta"><span>Last update</span><strong>{formatTime(snapshot.refreshedAt)}</strong><Button size="sm" variant="ghost" onClick={() => void load()}>Refresh</Button></div>
     </div>
@@ -123,6 +131,7 @@ export function DashboardOverview({ onOpenRoutes, onCreateRoute, onOpenNetwork }
     <div className="forward-summary" aria-label="Current configuration summary">
       <SummaryCard label="Routes" value={snapshot.routes ? `${enabledRoutes} / ${routes.length}` : "—"} detail="enabled / saved" />
       <SummaryCard label="Outbounds" value={snapshot.outbounds ? `${enabledOutbounds} / ${outbounds.length}` : "—"} detail={snapshot.outbounds ? `${healthyOutbounds} healthy` : "unavailable"} />
+      <SummaryCard label="Listener relays" value={snapshot.relays ? `${enabledRelays} / ${relays.length}` : "—"} detail="enabled / saved" />
       <SummaryCard label="Port forwards" value={snapshot.forwards ? `${enabledForwards} / ${forwards.length}` : "—"} detail="enabled / saved" />
       <SummaryCard label="Forwarded traffic" value={snapshot.counters4 || snapshot.counters6 ? formatBytes(totals.acceptedBytes) : "—"} detail={snapshot.counters4 || snapshot.counters6 ? `${formatNumber(totals.acceptedPackets)} accepted packets` : "counters unavailable"} />
     </div>
@@ -136,6 +145,11 @@ export function DashboardOverview({ onOpenRoutes, onCreateRoute, onOpenNetwork }
           <StatusRow name="HAProxy" detail={snapshot.haproxy?.info?.pid ? `PID ${snapshot.haproxy.info.pid}${snapshot.haproxy.info.version ? ` · ${snapshot.haproxy.info.version}` : ""}` : snapshot.haproxy ? "runtime reachable" : "not running or unavailable"} status={snapshot.haproxy ? "healthy" : "unavailable"} />
           <StatusRow name="Outbound health" detail={snapshot.outbounds ? `${healthyOutbounds} healthy of ${outbounds.length} saved` : "status unavailable"} status={snapshot.outbounds ? (healthyOutbounds === enabledOutbounds ? "healthy" : "attention") : "unavailable"} />
         </ul>
+      </Card>
+
+      <Card className="health-card">
+        <div className="card-header"><div><p className="eyebrow">LISTENER RELAYS</p><h3>Fixed-destination relays</h3></div><div className="row-actions"><Button size="sm" variant="ghost" onClick={onCreateRelay}>Create relay</Button><Button size="sm" variant="ghost" onClick={onOpenRelays}>View all</Button></div></div>
+        {!snapshot.relays ? <StatePanel tone="error" title="Relays unavailable" description="The listener relay list could not be loaded from the server." action="Try again" onAction={() => void load()} /> : relays.length === 0 ? <StatePanel title="No listener relays" description="No listener-to-destination relays are stored in the database." action="Create relay" onAction={onCreateRelay} /> : <ul className="service-list">{relays.slice(0, 4).map((item) => <li key={item.relay.id}><span className="service-dot" aria-hidden="true" /><span><strong>{item.relay.name}</strong><small><code>{item.relay.listen_address}:{item.relay.listen_port}</code> · {item.relay.network.toUpperCase()} · {outboundNames.get(item.relay.outbound_id) || item.relay.outbound_id}</small></span><Badge tone={item.relay.enabled ? "success" : "neutral"}>{item.relay.enabled ? "Enabled" : "Disabled"}</Badge></li>)}</ul>}
       </Card>
 
       <Card className="health-card">
