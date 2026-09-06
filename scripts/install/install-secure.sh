@@ -2,7 +2,7 @@
 set -eu
 
 repository="smorad3363/egress-manager"
-version="${EGRESS_VERSION:-v0.1.0-alpha.5}"
+version="${EGRESS_VERSION:-v0.1.0-alpha.6}"
 bundle_root="${EGRESS_BUNDLE_ROOT:-}"
 skip_start="${EGRESS_SKIP_START:-0}"
 ca_mode="auto"
@@ -66,11 +66,12 @@ fi
 if [ -z "${bundle_root}" ]; then
   command -v curl >/dev/null 2>&1 || fail "curl is required for online bootstrap"
   command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required for online bootstrap"
-  if ! command -v python3 >/dev/null 2>&1; then
+  if ! python3 -c 'import json, zipfile' >/dev/null 2>&1; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y --no-install-recommends python3-minimal ca-certificates
+    apt-get install -y --no-install-recommends --no-remove python3 ca-certificates
   fi
+  python3 -c 'import json, zipfile' >/dev/null 2>&1 || fail "a complete Python 3 standard library is required for the online bootstrap"
 
   temporary_directory="$(mktemp -d)"
   cleanup_bootstrap() { rm -rf -- "${temporary_directory}"; }
@@ -117,6 +118,7 @@ fresh_database=0
 sh "${core_installer}" --bundle-root "${bundle_root}" --skip-start --public-http
 
 for command in python3 openssl curl ss ip; do command -v "${command}" >/dev/null 2>&1 || fail "required command missing after bundle installation: ${command}"; done
+python3 -c 'import json, ipaddress, tempfile' >/dev/null 2>&1 || fail "complete Python 3 standard library missing after bundle installation"
 install -o root -g root -m 0755 "${package_directory}/bin/lego" /usr/local/lib/egress-manager/bin/lego
 install -o root -g root -m 0755 "${package_directory}/tls-renew.sh" /usr/local/lib/egress-manager/tls-renew.sh
 /usr/local/lib/egress-manager/bin/lego --version >/dev/null
