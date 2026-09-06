@@ -64,6 +64,14 @@ set_insecure_http() {
   rm -f "${tmp}"
 }
 
+reset_services() {
+  systemctl reset-failed egressd.service egress-web.service >/dev/null 2>&1 || true
+}
+
+reset_web() {
+  systemctl reset-failed egress-web.service >/dev/null 2>&1 || true
+}
+
 case "${1:-menu}" in
   menu)
     while :; do
@@ -109,10 +117,21 @@ case "${1:-menu}" in
   url)
     show_url
     ;;
-  start|stop|restart)
+  start)
     need_root "$@"
-    systemctl "$1" egressd.service egress-web.service
-    [ "$1" = stop ] || show_url
+    reset_services
+    systemctl start egressd.service egress-web.service
+    show_url
+    ;;
+  stop)
+    need_root "$@"
+    systemctl stop egressd.service egress-web.service
+    ;;
+  restart)
+    need_root "$@"
+    reset_services
+    systemctl restart egressd.service egress-web.service
+    show_url
     ;;
   logs)
     journalctl -u egressd.service -u egress-web.service -n 100 --no-pager
@@ -121,6 +140,7 @@ case "${1:-menu}" in
     need_root "$@"
     set_json_string listen_address 0.0.0.0
     set_insecure_http true
+    reset_web
     systemctl restart egress-web.service
     echo "Public HTTP mode enabled. Login credentials and session traffic are NOT encrypted."
     show_url
@@ -129,6 +149,7 @@ case "${1:-menu}" in
     need_root "$@"
     set_json_string listen_address 127.0.0.1
     set_insecure_http false
+    reset_web
     systemctl restart egress-web.service
     show_url
     ;;
@@ -138,6 +159,7 @@ case "${1:-menu}" in
     case "$port" in ''|*[!0-9]*) echo "Port must be numeric" >&2; exit 2;; esac
     [ "$port" -ge 1024 ] && [ "$port" -le 65535 ] || { echo "Port must be 1024-65535" >&2; exit 2; }
     set_json_number listen_port "$port"
+    reset_web
     systemctl restart egress-web.service
     show_url
     ;;
