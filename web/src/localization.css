@@ -1,0 +1,92 @@
+.language-switcher {
+  display: inline-flex;
+  align-items: center;
+  min-width: 92px;
+}
+
+.language-switcher select {
+  width: 100%;
+  min-height: 36px;
+  padding: 0 30px 0 10px;
+  border: 1px solid var(--border, #243444);
+  border-radius: 8px;
+  background: var(--surface-2, #0f1923);
+  color: var(--text, #eef4f8);
+  font: inherit;
+  cursor: pointer;
+}
+
+.language-switcher--compact {
+  min-width: 82px;
+}
+
+.login-language {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.unavailable-page {
+  max-width: 760px;
+}
+
+.unavailable-page code {
+  display: inline-block;
+  margin-top: 8px;
+}
+
+html[dir="rtl"] body {
+  text-align: right;
+}
+
+html[dir="rtl"] .app-shell,
+html[dir="rtl"] .login-shell,
+html[dir="rtl"] .dialog,
+html[dir="rtl"] .toast {
+  direction: rtl;
+}
+
+html[dir="rtl"] .topbar,
+html[dir="rtl"] .inventory-heading,
+html[dir="rtl"] .forward-heading,
+html[dir="rtl"] .card-header,
+html[dir="rtl"] .dialog__actions,
+html[dir="rtl"] .row-actions,
+html[dir="rtl"] .page-heading,
+html[dir="rtl"] .navigation button,
+html[dir="rtl"] .sidebar__footer,
+html[dir="rtl"] .login-brand {
+  direction: rtl;
+}
+
+html[dir="rtl"] code,
+html[dir="rtl"] pre,
+html[dir="rtl"] kbd,
+html[dir="rtl"] .tabular,
+html[dir="rtl"] .outbound-endpoint,
+html[dir="rtl"] .xray-path,
+html[dir="rtl"] .pid {
+  direction: ltr;
+  text-align: left;
+  unicode-bidi: embed;
+}
+
+html[dir="rtl"] input,
+html[dir="rtl"] textarea {
+  direction: auto;
+  text-align: start;
+}
+
+html[dir="rtl"] select {
+  text-align: start;
+}
+
+html[dir="rtl"] .command-search input {
+  direction: auto;
+}
+
+@media (max-width: 900px) {
+  .language-switcher {
+    min-width: 76px;
+  }
+}
