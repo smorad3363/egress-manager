@@ -91,13 +91,16 @@ func RunWeb(ctx context.Context, options WebOptions) error {
 	}
 	apiServer, err := api.NewServer(api.ServerConfig{
 		SessionCookieName: configuration.SessionCookieName,
-		SecureCookies:     configuration.TLSCertificatePath != "",
+		SecureCookies:     true,
 	}, logger, authentication, sessions, control, store, store, store, store, store, health)
 	if err != nil {
 		return err
 	}
 
 	handler := apiServer.Handler()
+	if configuration.TLSCertificatePath == "" && configuration.AllowInsecureHTTP {
+		handler = insecureSessionCookieHandler(handler)
+	}
 	assetsPath := options.AssetsPath
 	if assetsPath == "" {
 		assetsPath = defaultWebAssetsPath
@@ -151,6 +154,40 @@ func RunWeb(ctx context.Context, options WebOptions) error {
 		}
 		return nil
 	}
+}
+
+type insecureCookieWriter struct {
+	http.ResponseWriter
+	wroteHeader bool
+}
+
+func (writer *insecureCookieWriter) WriteHeader(status int) {
+	if writer.wroteHeader {
+		return
+	}
+	cookies := writer.Header()["Set-Cookie"]
+	for index, cookie := range cookies {
+		cookie = strings.ReplaceAll(cookie, "; Secure", "")
+		cookie = strings.ReplaceAll(cookie, "; secure", "")
+		cookies[index] = cookie
+	}
+	writer.wroteHeader = true
+	writer.ResponseWriter.WriteHeader(status)
+}
+
+func (writer *insecureCookieWriter) Write(data []byte) (int, error) {
+	if !writer.wroteHeader {
+		writer.WriteHeader(http.StatusOK)
+	}
+	return writer.ResponseWriter.Write(data)
+}
+
+func (writer *insecureCookieWriter) Unwrap() http.ResponseWriter { return writer.ResponseWriter }
+
+func insecureSessionCookieHandler(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		next.ServeHTTP(&insecureCookieWriter{ResponseWriter: writer}, request)
+	})
 }
 
 func panelHandler(apiHandler http.Handler, assetsPath string) (http.Handler, error) {
