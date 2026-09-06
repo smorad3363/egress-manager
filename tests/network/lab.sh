@@ -327,7 +327,19 @@ if [ "$wireguard_transport_emulated" = true ]; then
 else
     ip -n "$server_ns" route add 10.203.1.0/24 dev wgsrv0
 fi
-ip netns exec "$router_ns" timeout 5 ping -c 1 -W 3 10.210.0.2 >/dev/null || fail "WireGuard native interface baseline failed"
+wireguard_ready=false
+for attempt in 1 2 3 4 5 6 7 8 9 10; do
+    if ip netns exec "$router_ns" timeout 2 ping -c 1 -W 1 10.210.0.2 >/dev/null; then
+        wireguard_ready=true
+        break
+    fi
+    sleep 0.2
+done
+if [ "$wireguard_ready" != true ]; then
+    ip netns exec "$router_ns" wg show >&2 || true
+    ip netns exec "$server_ns" wg show >&2 || true
+    fail "WireGuard native interface baseline failed"
+fi
 ip netns exec "$router_ns" env EGRESS_ROUTE_ADAPTER=interface EGRESS_ROUTE_TYPE=wireguard EGRESS_ROUTE_INTERFACE="$wireguard_name" EGRESS_ROUTE_OUTBOUND_ID="$wireguard_id" "$routing_probe" "$wireguard_candidate_dir"
 wireguard_table=$(tr -d '\r\n' <"$wireguard_candidate_dir/table")
 wireguard_priority=$(tr -d '\r\n' <"$wireguard_candidate_dir/priority")
