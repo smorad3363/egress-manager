@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release tag (for example v0.1.0-alpha.9)
+        description: Release tag (for example v0.1.0-alpha.10)
         required: true
         type: string
 
@@ -21,11 +21,11 @@ jobs:
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       github.event_name == 'workflow_dispatch' ||
-      contains(github.event.head_commit.message, '[release-alpha9]')
+      contains(github.event.head_commit.message, '[release-alpha10]')
     runs-on: ubuntu-22.04
     timeout-minutes: 100
     env:
-      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || (startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.0-alpha.9') }}
+      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || (startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.0-alpha.10') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -113,4 +113,4 @@ jobs:
             --target "${GITHUB_SHA}" \
             --prerelease \
             --title "Egress Manager ${RELEASE_VERSION}" \
-            --notes "Alpha.9 adds project-owned listener relays: traffic accepted on a selected local TCP/UDP listener is sent through an explicitly selected managed Xray outbound to one fixed destination, with no direct fallback. The first managed Xray relay adapter imports VLESS REALITY/XHTTP links, encrypts credentials at rest, generates a private project-owned Xray configuration, validates it with the bundled/pinned Xray runtime, and applies it through the isolated egress-manager-xray-relay.service without rewriting or restarting standalone Xray, Marzban, or 3x-ui. Planning rejects protected management/SSH ports, overlapping desired listeners, and collisions with foreign listeners. Relay mutations use revisioned SQLite state, authenticated plan hashes, transactional apply, rollback, startup recovery, and manual rollback. The production browser console adds English/Persian Relays CRUD and live Dashboard relay counts. CI exercises browser CRUD/plan/apply, native Xray 26.7.28 relay behavior including fail-closed operation, network-lab checks, and secure installation/preservation gates on Ubuntu 22.04, 24.04, and 26.04. Existing configuration, administrator database, TLS material, and Alpha.6+ package-preservation protections are retained."
+            --notes "Alpha.10 makes the Xray boundary fully project-owned. The production Xray console now shows only Egress Manager-managed Xray outbounds, listener relays, and owned runtime paths. Normal startup and health monitoring no longer inspect standalone Xray, Marzban, 3x-ui/Sanaei, or other proxy-panel configuration or services through the legacy discovery catalog. Managed relays continue to use the bundled Xray runtime, private Egress Manager configuration, isolated egress-manager-xray-relay.service, atomic apply/rollback/recovery, and fail-closed behavior. Alpha.10 also restores the installed VERSION marker and verifies it against the running daemon. Existing Egress Manager database, administrator accounts, TLS material, management port, and package-preservation protections are retained across repeat secure installs."
