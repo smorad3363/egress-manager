@@ -12,6 +12,7 @@ UMask=0007
 RuntimeDirectory=egress-manager
 RuntimeDirectoryMode=0770
 Environment=PATH=/usr/local/lib/egress-manager/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStartPre=/bin/sh -c '/usr/local/lib/egress-manager/bin/egressd --version | cut -d" " -f2 > /usr/local/lib/egress-manager/VERSION.tmp && chmod 0644 /usr/local/lib/egress-manager/VERSION.tmp && mv /usr/local/lib/egress-manager/VERSION.tmp /usr/local/lib/egress-manager/VERSION'
 ExecStart=/usr/local/lib/egress-manager/bin/egressd --config /etc/egress-manager/config.json --ipc-key /etc/egress-manager/ipc.key
 Restart=on-failure
 RestartSec=2s
