@@ -7,14 +7,20 @@ bundle_root="${EGRESS_BUNDLE_ROOT:-}"
 skip_start="${EGRESS_SKIP_START:-0}"
 ca_mode="auto"
 requested_ip="${EGRESS_SERVER_IP:-}"
+admin_mode="${EGRESS_ADMIN_MODE:-auto}"
+admin_user="${EGRESS_ADMIN_USER:-operator}"
 
 usage() {
   cat <<'EOF_USAGE'
-Usage: install-secure.sh [--version TAG] [--bundle-root DIR] [--ip ADDRESS] [--public-ca|--self-signed] [--skip-start]
+Usage: install-secure.sh [--version TAG] [--bundle-root DIR] [--ip ADDRESS] [--public-ca|--self-signed] [--skip-start] [--skip-admin|--admin-user USER]
 
 Online mode downloads the complete bundle and attempts a publicly trusted Let's Encrypt
 short-lived IP certificate. If public issuance is unavailable, installation continues with
 a self-signed certificate whose SAN is the server IP.
+
+On a fresh interactive installation, the installer asks for an administrator username and
+password after HTTPS becomes healthy. Use --skip-admin for non-interactive provisioning or
+--admin-user USER to force the administrator prompt with a preset username.
 
 When executed directly from a transferred offline bundle, no external CA is contacted by
 default and a self-signed IP certificate is created. Use --public-ca to opt into ACME.
@@ -29,6 +35,8 @@ while [ "$#" -gt 0 ]; do
     --public-ca) ca_mode="public"; shift ;;
     --self-signed) ca_mode="self-signed"; shift ;;
     --skip-start) skip_start=1; shift ;;
+    --skip-admin) admin_mode="skip"; shift ;;
+    --admin-user) [ "$#" -ge 2 ] || { usage >&2; exit 2; }; admin_user="$2"; admin_mode="prompt"; shift 2 ;;
     --help|-h) usage; exit 0 ;;
     *) echo "install-secure.sh: unknown argument: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -42,6 +50,7 @@ fail() { echo "install-secure.sh: $*" >&2; exit 1; }
 [ "${ID:-}" = "ubuntu" ] || fail "supported distributions: Ubuntu 22.04, 24.04, 26.04"
 case "${VERSION_ID:-}" in 22.04|24.04|26.04) ubuntu_version="${VERSION_ID}" ;; *) fail "unsupported Ubuntu release: ${VERSION_ID:-unknown}" ;; esac
 case "$(uname -m)" in x86_64|amd64) architecture="amd64" ;; aarch64|arm64) architecture="arm64" ;; *) fail "supported architectures: amd64, arm64" ;; esac
+case "${admin_mode}" in auto|skip|prompt) ;; *) fail "invalid EGRESS_ADMIN_MODE: ${admin_mode}" ;; esac
 
 script_directory=""
 case "$0" in /*|*/*) script_directory="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd || true)" ;; esac
@@ -81,6 +90,8 @@ if [ -z "${bundle_root}" ]; then
   set -- --bundle-root "${extracted_root}" "${child_ca}"
   [ -n "${requested_ip}" ] && set -- "$@" --ip "${requested_ip}"
   [ "${skip_start}" = "1" ] && set -- "$@" --skip-start
+  [ "${admin_mode}" = "skip" ] && set -- "$@" --skip-admin
+  [ "${admin_mode}" = "prompt" ] && set -- "$@" --admin-user "${admin_user}"
   sh "${extracted_root}/install.sh" "$@"
   exit $?
 fi
@@ -93,6 +104,9 @@ package_directory="${bundle_root}/package"
 for file in bin/lego tls-renew.sh systemd/egress-manager-cert-renew.service systemd/egress-manager-cert-renew.timer; do
   [ -f "${package_directory}/${file}" ] || fail "secure bundle is incomplete: ${file}"
 done
+
+fresh_database=0
+[ -e /var/lib/egress-manager/database/egress-manager.db ] || fresh_database=1
 
 # The core installer installs all application/runtime files and dependency closure, but it
 # does not start the HTTP service. TLS is configured before the first service start.
@@ -256,6 +270,41 @@ for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
   sleep 1
 done
 [ "${ready}" = "1" ] || { systemctl --no-pager --full status egressd.service egress-web.service >&2 || true; fail "HTTPS services did not become healthy"; }
+
+prompt_admin=0
+if [ "${admin_mode}" = "prompt" ]; then
+  prompt_admin=1
+elif [ "${admin_mode}" = "auto" ] && [ "${fresh_database}" = "1" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+  prompt_admin=1
+fi
+
+if [ "${prompt_admin}" = "1" ]; then
+  [ -r /dev/tty ] && [ -w /dev/tty ] || fail "an interactive terminal is required to provision the administrator"
+  if [ "${admin_mode}" = "auto" ]; then
+    printf 'Administrator username [%s]: ' "${admin_user}" >/dev/tty
+    IFS= read -r entered_user </dev/tty
+    [ -n "${entered_user}" ] && admin_user="${entered_user}"
+  fi
+  printf 'Administrator password (minimum 12 characters): ' >/dev/tty
+  stty -echo </dev/tty
+  trap 'stty echo </dev/tty 2>/dev/null || true' EXIT HUP INT TERM
+  IFS= read -r admin_password </dev/tty
+  stty echo </dev/tty
+  trap - EXIT HUP INT TERM
+  printf '\nConfirm administrator password: ' >/dev/tty
+  stty -echo </dev/tty
+  trap 'stty echo </dev/tty 2>/dev/null || true' EXIT HUP INT TERM
+  IFS= read -r admin_password_confirm </dev/tty
+  stty echo </dev/tty
+  trap - EXIT HUP INT TERM
+  printf '\n' >/dev/tty
+  [ "${admin_password}" = "${admin_password_confirm}" ] || fail "administrator passwords do not match"
+  [ "$(LC_ALL=C printf '%s' "${admin_password}" | wc -c)" -ge 12 ] || fail "administrator password must be at least 12 bytes"
+  printf '%s\n' "${admin_password}" | /usr/local/lib/egress-manager/bin/egress-web provision-admin --username "${admin_user}" --password-stdin
+  unset admin_password admin_password_confirm
+elif [ "${admin_mode}" = "auto" ] && [ "${fresh_database}" = "1" ]; then
+  printf 'Administrator was not provisioned because no interactive terminal is available. Run: sudo egress-manager admin operator\n'
+fi
 
 printf 'Installed Egress Manager %s with HTTPS.\n' "$(sed -n '1p' "${bundle_root}/VERSION")"
 printf 'Panel: https://%s:%s/login\n' "${server_ip}" "${panel_port}"
