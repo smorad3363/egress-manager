@@ -11,7 +11,7 @@ status: in_progress
 
 last_green_ref: HEAD
 
-next_action: extend egressctl rollback eligibility from route-engine apply/bypass to sing-box, native interface, and writable Xray authenticated snapshots with exact current-state preconditions
+next_action: protect new HAProxy and NAT journal snapshots with authenticated envelopes, preserve safe legacy crash recovery, and add exact manual rollback preconditions before making those formats eligible
 
 dirty_work_expected: false
 
@@ -126,9 +126,10 @@ recent_decisions:
   - Mutating egressctl commands require local administrator privilege and use stable exit code 5 when privilege is absent.
   - Manual rollback reuses the original committed transaction as its audit record through COMMITTED to ROLLING_BACK to ROLLED_BACK; failed restores remain unfinished for recovery retry.
   - Only the newest committed operation is considered; unsupported formats are not skipped. Route-engine apply and bypass are the first eligible authenticated formats.
+  - Sing-box, native-interface, and writable-Xray rollback authenticate snapshot and candidate and require exact current owned/runtime evidence; Xray also requires unchanged foreign confdir state.
 
 touched_areas:
-  - committed-operation journal lookup and transitions
-  - authenticated route-engine rollback
-  - recovery.rollback IPC and egressctl rollback
-  - rollback precondition and exit-code tests
+  - authenticated sing-box rollback
+  - authenticated native-interface rollback
+  - authenticated writable-Xray rollback
+  - rollback dispatcher

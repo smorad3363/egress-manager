@@ -353,19 +353,50 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 			if err != nil {
 				return nil, err
 			}
-			if len(committed) == 0 || (committed[0].Operation != "route_engine_apply" && committed[0].Operation != "route_engine_bypass") {
+			if len(committed) == 0 {
 				return nil, reliability.NoRollbackAvailableError{}
-			}
-			host, err := collector.Collect(ctx)
-			if err != nil {
-				return nil, err
 			}
 			started := time.Now().UTC()
 			operation := committed[0]
-			if err := routeExecutor.RollbackCommitted(ctx, operation, host, configuration.ProtectedManagementCIDRs); err != nil {
-				return nil, err
+			component := ""
+			switch operation.Operation {
+			case "route_engine_apply", "route_engine_bypass":
+				host, err := collector.Collect(ctx)
+				if err != nil {
+					return nil, err
+				}
+				if err := routeExecutor.RollbackCommitted(ctx, operation, host, configuration.ProtectedManagementCIDRs); err != nil {
+					return nil, err
+				}
+				component = "routing"
+			case "singbox_apply":
+				if err := singboxExecutor.RollbackCommitted(ctx, operation); err != nil {
+					return nil, err
+				}
+				component = "singbox"
+			case "interface_outbound_apply":
+				if err := interfaceExecutor.RollbackCommitted(ctx, operation); err != nil {
+					return nil, err
+				}
+				component = "interface"
+			case "xray_fragment_apply":
+				report, err := xrayDiscoverer.Discover(ctx)
+				if err != nil {
+					return nil, err
+				}
+				installation, err := selectManagedXrayInstallation(report)
+				if err != nil {
+					return nil, err
+				}
+				xrayExecutor := managedXray.FragmentExecutor{Runner: runner, Journal: store, Protector: protector, Installation: installation}
+				if err := xrayExecutor.RollbackCommitted(ctx, operation); err != nil {
+					return nil, err
+				}
+				component = "xray"
+			default:
+				return nil, reliability.NoRollbackAvailableError{}
 			}
-			return reliability.RollbackReport{Succeeded: true, Component: "routing", OperationID: operation.ID, StartedAt: started, EndedAt: time.Now().UTC()}, nil
+			return reliability.RollbackReport{Succeeded: true, Component: component, OperationID: operation.ID, StartedAt: started, EndedAt: time.Now().UTC()}, nil
 		})
 	}); err != nil {
 		return err
