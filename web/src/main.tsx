@@ -2,8 +2,10 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import { Login } from "./Login";
+import { LanguageProvider } from "./i18n";
 import "./styles.css";
 import "./auth.css";
+import "./localization.css";
 
 const root = document.getElementById("root");
 
@@ -13,6 +15,8 @@ if (!root) {
 
 createRoot(root).render(
   <StrictMode>
-    {window.location.pathname === "/login" ? <Login /> : <App />}
+    <LanguageProvider>
+      {window.location.pathname === "/login" ? <Login /> : <App />}
+    </LanguageProvider>
   </StrictMode>,
 );

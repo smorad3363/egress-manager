@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { LanguageSwitcher } from "./i18n";
 
 export function Login() {
   const [username, setUsername] = useState("operator");
@@ -34,6 +35,7 @@ export function Login() {
   return (
     <main className="login-shell">
       <section className="login-card" aria-labelledby="login-title">
+        <div className="login-language"><LanguageSwitcher compact /></div>
         <div className="login-brand">
           <span className="login-brand__mark" aria-hidden="true">&gt;_</span>
           <div><strong>Egress</strong><span>Manager</span></div>
@@ -55,7 +57,7 @@ export function Login() {
           {error ? <p className="login-error" role="alert">{error}</p> : null}
           <button className="login-submit" type="submit" disabled={submitting}>{submitting ? "Signing in…" : "Sign in"}</button>
         </form>
-        <p className="login-note">Session cookies are restricted to this console. Use an SSH tunnel when the panel listens on localhost.</p>
+        <p className="login-note">This panel uses HTTPS. Keep the certificate valid and do not share administrator credentials.</p>
       </section>
     </main>
   );

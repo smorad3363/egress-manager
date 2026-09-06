@@ -18,9 +18,11 @@ type LoadState = { status: "loading" } | { status: "error"; message: string } | 
 
 export function NetworkInventory() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [reloadNonce, setReloadNonce] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
+    setState({ status: "loading" });
     void fetch("/api/v1/network/inventory", { credentials: "same-origin", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error(response.status === 401 ? "Sign in to inspect this gateway." : "Inventory is temporarily unavailable.");
@@ -31,13 +33,15 @@ export function NetworkInventory() {
         if (!controller.signal.aborted) setState({ status: "error", message: error instanceof Error ? error.message : "Inventory is temporarily unavailable." });
       });
     return () => controller.abort();
-  }, []);
+  }, [reloadNonce]);
+
+  const reload = () => setReloadNonce((value) => value + 1);
 
   if (state.status === "loading") {
     return <section aria-label="Loading network inventory"><div className="inventory-heading"><div><p className="eyebrow">READ ONLY</p><h2>Host network inventory</h2></div></div><div className="inventory-loading"><Skeleton /><Skeleton /><Skeleton /></div></section>;
   }
   if (state.status === "error") {
-    return <section><div className="inventory-heading"><div><p className="eyebrow">READ ONLY</p><h2>Host network inventory</h2><p>No host changes are made by this view.</p></div></div><StatePanel tone="error" title="Inventory unavailable" description={state.message} action="Try again" /></section>;
+    return <section><div className="inventory-heading"><div><p className="eyebrow">READ ONLY</p><h2>Host network inventory</h2><p>No host changes are made by this view.</p></div></div><StatePanel tone="error" title="Inventory unavailable" description={state.message} action="Try again" onAction={reload} /></section>;
   }
 
   const inventory = state.value;
