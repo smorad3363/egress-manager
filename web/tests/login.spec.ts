@@ -11,6 +11,8 @@ test("administrator login stores CSRF token and enters console", async ({ page }
   });
   await page.goto("/login");
   await expect(page.getByRole("heading", { name: "Sign in to this gateway" })).toBeVisible();
+  await expect(page.getByLabel("Username")).toBeFocused();
+  await page.getByLabel("Username").fill("operator");
   await page.getByLabel("Password").fill("correct horse battery staple");
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.waitForURL("/");
