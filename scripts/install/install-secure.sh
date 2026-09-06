@@ -2,7 +2,7 @@
 set -eu
 
 repository="smorad3363/egress-manager"
-version="${EGRESS_VERSION:-v0.1.0-alpha.7}"
+version="${EGRESS_VERSION:-v0.1.0-alpha.9}"
 bundle_root="${EGRESS_BUNDLE_ROOT:-}"
 skip_start="${EGRESS_SKIP_START:-0}"
 ca_mode="auto"
