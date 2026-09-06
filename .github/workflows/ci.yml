@@ -85,6 +85,12 @@ jobs:
           target="${{ matrix.os }}"
           ubuntu="${target#ubuntu-}"
           UBUNTU_VERSION="${ubuntu}" ARCHITECTURE=amd64 sh scripts/release/build-offline-bundle.sh
+      - name: Snapshot installed host packages
+        run: |
+          dpkg-query -W -f='${binary:Package}\t${db:Status-Status}\n' \
+            | awk '$2 == "installed" {print $1}' \
+            | LC_ALL=C sort -u > /tmp/egress-packages-before
+          python3 -c 'import json, zipfile'
       - name: Install secure panel only from Python-extracted ZIP
         run: |
           target="${{ matrix.os }}"
@@ -100,6 +106,17 @@ jobs:
           sudo sh "/tmp/egress-offline-ci/${bundle}/install.sh" \
             --bundle-root "/tmp/egress-offline-ci/${bundle}" \
             --self-signed --ip "${ipaddr}"
+      - name: Verify installer removed no host packages
+        run: |
+          python3 -c 'import json, zipfile, ipaddress, tempfile'
+          dpkg-query -W -f='${binary:Package}\t${db:Status-Status}\n' \
+            | awk '$2 == "installed" {print $1}' \
+            | LC_ALL=C sort -u > /tmp/egress-packages-after
+          removed="$(comm -23 /tmp/egress-packages-before /tmp/egress-packages-after || true)"
+          if [ -n "${removed}" ]; then
+            printf 'Installer removed pre-existing host packages:\n%s\n' "${removed}" >&2
+            exit 1
+          fi
       - name: Verify services, runtimes, TLS, UI, and manager
         run: |
           sudo /usr/local/lib/egress-manager/verify.sh
