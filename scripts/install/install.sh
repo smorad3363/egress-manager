@@ -139,8 +139,9 @@ export DEBIAN_FRONTEND=noninteractive
 
 # The bundle is an indexed local APT repository. Request only the runtime roots instead of
 # forcing every bundled .deb as a top-level package. Already-installed Ubuntu packages can
-# therefore satisfy dependencies at their current versions. Repository access is disabled,
-# and --no-remove makes package preservation a hard invariant.
+# therefore satisfy dependencies at their current versions. Repository access is disabled.
+# --no-upgrade keeps existing root packages at their installed versions; --no-remove makes
+# package preservation a hard invariant.
 set --
 while IFS= read -r dependency; do
   case "${dependency}" in ''|'#'*) continue ;; esac
@@ -167,8 +168,8 @@ apt_local() {
 }
 
 apt_local update >/dev/null
-apt_local install -s --no-install-recommends --no-remove "$@" >/dev/null || fail "offline dependency plan would remove or conflict with existing host packages; no package changes were made"
-apt_local install -y --no-install-recommends --no-remove "$@"
+apt_local install -s --no-install-recommends --no-upgrade --no-remove "$@" >/dev/null || fail "offline dependency plan would upgrade, downgrade, remove, or conflict with existing host packages; no package changes were made"
+apt_local install -y --no-install-recommends --no-upgrade --no-remove "$@"
 cleanup_apt
 trap - EXIT HUP INT TERM
 
