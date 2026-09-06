@@ -294,7 +294,7 @@ test("Xray console is project-owned and ignores foreign panel discovery data", a
   await expect(page.getByText("/usr/local/lib/egress-manager/bin/xray", { exact: true })).toBeVisible();
   await expect(page.getByText("egress-manager-xray-relay.service", { exact: true })).toBeVisible();
   await expect(page.getByText("/var/lib/egress-manager/private/xray-relay.json", { exact: true })).toBeVisible();
-  await expect(page.getByText("Reality XHTTP", { exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "Reality XHTTP", exact: true })).toBeVisible();
   await expect(page.getByText("SSH gateway", { exact: true })).toBeVisible();
   await expect(page.getByText("91.107.220.12:6111", { exact: true })).toBeVisible();
   await expect(page.getByText(/Marzban/i)).toHaveCount(0);
