@@ -64,18 +64,25 @@ function translateTextNode(node: Text) {
   node.nodeValue = `${start}${translated}${end}`;
 }
 
+function translateAttributes(element: Element) {
+  for (const name of ["placeholder", "aria-label", "title"]) {
+    const value = element.getAttribute(name);
+    if (!value) continue;
+    const translated = translateText(value);
+    if (translated !== value) element.setAttribute(name, translated);
+  }
+}
+
 function translateElement(root: Node) {
   if (root.nodeType === Node.TEXT_NODE) {
     translateTextNode(root as Text);
     return;
   }
   if (!(root instanceof Element)) return;
-  for (const name of ["placeholder", "aria-label", "title"]) {
-    const value = root.getAttribute(name);
-    if (!value) continue;
-    const translated = translateText(value);
-    if (translated !== value) root.setAttribute(name, translated);
-  }
+
+  translateAttributes(root);
+  for (const descendant of root.querySelectorAll("*")) translateAttributes(descendant);
+
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let current: Node | null = walker.nextNode();
   while (current) {
