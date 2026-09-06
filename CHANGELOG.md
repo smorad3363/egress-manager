@@ -2,6 +2,25 @@
 
 All notable changes will be documented here.
 
+## [v0.1.0-alpha.9] - 2026-09-06
+
+### Added
+
+- Project-owned listener relays that implement `listener/port -> selected managed Xray outbound -> fixed destination` for TCP, UDP, or both.
+- VLESS REALITY/XHTTP URI import for the Xray relay adapter, with credentials encrypted at rest and kept out of browser/API plan responses.
+- SQLite-backed relay CRUD with revisions, outbound foreign-key protection, optional source-CIDR allow lists, protected management/SSH-port checks, and foreign-listener collision checks.
+- A dedicated `egress-manager-xray-relay.service` using the bundled pinned Xray runtime without modifying standalone Xray, Marzban, or 3x-ui services.
+- Atomic relay plan/apply, native Xray candidate validation, authenticated rollback journals, startup recovery, and manual rollback.
+- Production English/Persian Relay console and live Dashboard relay status, including create/edit/enable/disable/delete and review/apply flows.
+- CI coverage against pinned Xray 26.7.28 plus browser CRUD, deterministic planning, fail-closed routing, rollback/recovery, and Ubuntu installation lifecycle checks.
+
+### Safety
+
+- Listener relay plans fail closed: if the selected outbound fails, traffic is not sent directly to the fixed destination.
+- Relay listeners cannot claim the panel port, detected SSH ports, or conflicting foreign listeners.
+- Existing Egress Manager configuration, administrator database, TLS material, IPC key, and runtime state remain preserved on repeat secure installs.
+- Alpha.6 package-preservation protections and Alpha.7 HTTPS installer diagnostics remain in force.
+
 ## [v0.1.0-alpha.8] - 2026-09-06
 
 ### Added
