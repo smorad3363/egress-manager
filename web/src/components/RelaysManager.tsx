@@ -237,7 +237,7 @@ export function RelaysManager({ createRequest }: { createRequest: number }) {
     <Dialog open={review !== null} onOpenChange={(open) => { if (!open) setReview(null); }} title="Review listener relay plan" description="Only safe actions and authenticated hashes are shown. Xray credentials and the generated candidate stay inside egressd.">
       {review ? <div className="plan-review">
         <div className="plan-meta"><Badge tone="warning">Atomic mutation</Badge><span>{review.enabled_relays} relays · {review.enabled_outbounds} outbounds</span><code>{shortHash(review.candidate_hash)}</code></div>
-        {review.actions.length === 0 ? <StatePanel title="No runtime changes" description="Saved relay state already matches the project-owned Xray relay runtime." /> : <ol>{review.actions.map((action, index) => <li key={`${action.kind}-${action.resource}-${index}`}><strong>{action.kind}</strong><span>{action.summary}</span><code>{action.resource}</code></li>)}</ol>}
+        {review.actions.length === 0 ? <StatePanel title="No runtime changes" description="Saved relay state already matches the project-owned Xray relay runtime." action="Close" onAction={() => setReview(null)} /> : <ol>{review.actions.map((action, index) => <li key={`${action.kind}-${action.resource}-${index}`}><strong>{action.kind}</strong><span>{action.summary}</span><code>{action.resource}</code></li>)}</ol>}
         <div className="dialog__actions"><Button variant="ghost" onClick={() => setReview(null)}>Cancel</Button><Button variant="primary" disabled={busy} onClick={apply}>Apply atomically</Button></div>
       </div> : null}
     </Dialog>
