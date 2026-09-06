@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   linux:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -23,7 +23,7 @@ jobs:
       - name: Install arm64 cross compiler
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu
+          sudo apt-get install -y --no-install-recommends gcc-aarch64-linux-gnu libc6-dev-arm64-cross
       - name: Verify backend
         run: |
           go test ./...

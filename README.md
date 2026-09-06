@@ -25,7 +25,7 @@ Project recovery state lives in `.project/STATE.yaml`.
 Alpha releases support Ubuntu 22.04, 24.04, and 26.04 on amd64 and arm64:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.1/scripts/install/install.sh | sudo sh -s -- --version v0.1.0-alpha.1
+curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.2/scripts/install/install.sh | sudo sh -s -- --version v0.1.0-alpha.2
 ```
 
 See [scripts/install/README.md](scripts/install/README.md) for verification and administrator provisioning. Installation does not change firewall or routing state.

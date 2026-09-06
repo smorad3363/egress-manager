@@ -11,7 +11,7 @@ status: in_progress
 
 last_green_ref: 55efb82f6c8d91300e1157c57cd4a49c84d0a4ff
 
-next_action: tag v0.1.0-alpha.1 and verify the GitHub release publishes checksum-verified amd64 and arm64 archives
+next_action: tag v0.1.0-alpha.2 and verify the GitHub release publishes Ubuntu-22.04-built checksum-verified amd64 and arm64 archives
 
 dirty_work_expected: false
 
@@ -37,6 +37,7 @@ blockers:
   - A real disposable Linux VM reboot gate requires an external VM runner or prepared test host; this workstation exposes no QEMU, Vagrant, Multipass, VMware runner, or non-Docker WSL distribution.
 
 recent_decisions:
+  - Release binaries build on Ubuntu 22.04 so their glibc baseline remains compatible with Ubuntu 22.04, 24.04, and 26.04; arm64 uses the matching cross libc headers.
   - The namespace lab disables inherited reverse-path filtering explicitly so disallowed-source packets reach the owned nftables source-drop rule consistently on hosted runners.
   - The first public installer supports systemd-based Ubuntu 22.04, 24.04, and 26.04 on amd64 and arm64; unsupported distributions fail closed.
   - Installation performs no firewall or routing mutation, preserves existing managed configuration and data, and pins sing-box v1.13.20 by architecture-specific SHA-256.

@@ -2,7 +2,7 @@
 set -eu
 
 repository="smorad3363/egress-manager"
-version="${EGRESS_VERSION:-v0.1.0-alpha.1}"
+version="${EGRESS_VERSION:-v0.1.0-alpha.2}"
 artifact_file="${EGRESS_ARTIFACT_FILE:-}"
 skip_dependencies="${EGRESS_SKIP_DEPENDENCIES:-0}"
 skip_start="${EGRESS_SKIP_START:-0}"
