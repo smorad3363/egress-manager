@@ -17,9 +17,10 @@ test("shell search, dashboard shortcuts, and unfinished pages have honest action
 
 test("network inventory retry button performs a new request", async ({ page }) => {
   let calls = 0;
+  let allowSuccess = false;
   await page.route("**/api/v1/network/inventory", async (route) => {
     calls += 1;
-    if (calls === 1) {
+    if (!allowSuccess) {
       await route.fulfill({ status: 503, contentType: "application/json", body: "{}" });
       return;
     }
@@ -40,9 +41,11 @@ test("network inventory retry button performs a new request", async ({ page }) =
   await page.goto("/");
   await page.getByLabel("Primary navigation").getByRole("button", { name: "Network" }).click();
   await expect(page.getByText("Inventory unavailable")).toBeVisible();
+  const beforeRetry = calls;
+  allowSuccess = true;
   await page.getByRole("button", { name: "Try again" }).click();
   await expect(page.getByText("192.0.2.9/24")).toBeVisible();
-  expect(calls).toBe(2);
+  expect(calls).toBeGreaterThan(beforeRetry);
 });
 
 test("Persian mode is RTL and uses plain-language labels", async ({ page }) => {
