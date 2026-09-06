@@ -12,7 +12,40 @@ import (
 	"github.com/egress-manager/egress-manager/internal/routeengine"
 	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
 	managedXray "github.com/egress-manager/egress-manager/internal/xray"
+	"github.com/egress-manager/egress-manager/internal/xrayrelay"
 )
+
+func (control IPCControl) ImportXrayRelayOutbound(ctx context.Context, request xrayrelay.ImportRequest) (xrayrelay.ImportResponse, error) {
+	var response xrayrelay.ImportResponse
+	if err := control.Client.Call(ctx, ipc.OperationXrayRelayImport, request, &response); err != nil {
+		return xrayrelay.ImportResponse{}, err
+	}
+	return response, nil
+}
+
+func (control IPCControl) TestXrayRelayOutbound(ctx context.Context, request xrayrelay.TestRequest) (xrayrelay.TestResponse, error) {
+	var response xrayrelay.TestResponse
+	if err := control.Client.Call(ctx, ipc.OperationXrayRelayTest, request, &response); err != nil {
+		return xrayrelay.TestResponse{}, err
+	}
+	return response, nil
+}
+
+func (control IPCControl) PlanRelays(ctx context.Context) (xrayrelay.Plan, error) {
+	var response xrayrelay.Plan
+	if err := control.Client.Call(ctx, ipc.OperationRelayPlan, struct{}{}, &response); err != nil {
+		return xrayrelay.Plan{}, err
+	}
+	return response, nil
+}
+
+func (control IPCControl) ApplyRelays(ctx context.Context, request xrayrelay.ApplyRequest) (xrayrelay.ApplyResponse, error) {
+	var response xrayrelay.ApplyResponse
+	if err := control.Client.Call(ctx, ipc.OperationRelayApply, request, &response); err != nil {
+		return xrayrelay.ApplyResponse{}, err
+	}
+	return response, nil
+}
 
 func (control IPCControl) ImportInterfaceOutbound(ctx context.Context, request managedInterface.ImportRequest) (managedInterface.ImportResponse, error) {
 	var response managedInterface.ImportResponse

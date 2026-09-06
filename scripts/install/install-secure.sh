@@ -2,7 +2,7 @@
 set -eu
 
 repository="smorad3363/egress-manager"
-version="${EGRESS_VERSION:-v0.1.0-alpha.7}"
+version="${EGRESS_VERSION:-v0.1.0-alpha.9}"
 bundle_root="${EGRESS_BUNDLE_ROOT:-}"
 skip_start="${EGRESS_SKIP_START:-0}"
 ca_mode="auto"
@@ -395,7 +395,7 @@ fi
 
 stage "Start and verify services"
 run_logged systemctl daemon-reload || fail "systemd daemon-reload failed"
-run_logged systemctl enable egressd.service egress-web.service || fail "could not enable Egress Manager services"
+run_logged systemctl enable egressd.service egress-web.service egress-manager-xray-relay.service || fail "could not enable Egress Manager services"
 if [ "${cert_mode}" = "letsencrypt" ]; then
   run_logged systemctl enable --now egress-manager-cert-renew.timer || fail "could not enable certificate renewal timer"
 else

@@ -37,11 +37,50 @@ const liveOutbound = {
   secret_metadata: [],
 };
 
+const liveXrayOutbound = {
+  id: "xray_reality",
+  name: "Reality XHTTP",
+  adapter: "xray",
+  type: "vless",
+  server: { host: "198.51.100.30", port: 443 },
+  capabilities: { tcp: true, udp: true },
+  enabled: true,
+  health: {
+    status: "healthy",
+    configuration_valid: "passed",
+    transport_reachable: "passed",
+    internet_reachable: "passed",
+    external_ip: "203.0.113.31",
+    tcp: "passed",
+    udp: "passed",
+  },
+  secret_metadata: ["uuid", "public_key", "short_id"],
+};
+
+const liveRelay = {
+  id: "ssh_gateway",
+  name: "SSH gateway",
+  listen_address: "0.0.0.0",
+  listen_port: 6111,
+  network: "tcp",
+  destination: { host: "91.107.220.12", port: 6111 },
+  outbound_id: "xray_reality",
+  source_cidrs: ["198.51.100.0/24"],
+  enabled: true,
+};
+
+function storedOutbounds() {
+  return [
+    { outbound: liveOutbound, revision: 2, created_at: "2026-09-06T12:00:00Z", updated_at: "2026-09-06T12:00:00Z" },
+    { outbound: liveXrayOutbound, revision: 3, created_at: "2026-09-06T12:00:00Z", updated_at: "2026-09-06T12:00:00Z" },
+  ];
+}
+
 async function mockLiveDashboard(page: Page) {
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url());
     if (url.pathname === "/api/v1/control/health") {
-      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ status: "ok", version: "v0.1.0-alpha.8", checks: { database: "ok", egressd: "ok" } }) });
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ status: "ok", version: "v0.1.0-alpha.9", checks: { database: "ok", egressd: "ok" } }) });
       return;
     }
     if (url.pathname === "/api/v1/routes") {
@@ -49,7 +88,11 @@ async function mockLiveDashboard(page: Page) {
       return;
     }
     if (url.pathname === "/api/v1/outbounds") {
-      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ outbound: liveOutbound, revision: 2, created_at: "2026-09-06T12:00:00Z", updated_at: "2026-09-06T12:00:00Z" }], next_cursor: "" }) });
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: storedOutbounds(), next_cursor: "" }) });
+      return;
+    }
+    if (url.pathname === "/api/v1/relays") {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ relay: liveRelay, revision: 2 }], next_cursor: "" }) });
       return;
     }
     if (url.pathname === "/api/v1/port-forwards/counters") {
@@ -83,18 +126,20 @@ test("dashboard uses live API data and only exposes finished pages", async ({ pa
   await expect(page.getByRole("heading", { name: "Current server overview" })).toBeVisible();
   await expect(page.getByText("Office VPN").first()).toBeVisible();
   await expect(page.getByText("Primary WireGuard").first()).toBeVisible();
+  await expect(page.getByText("SSH gateway").first()).toBeVisible();
   await expect(page.getByText("EU applications")).toHaveCount(0);
   await expect(page.getByText("Frankfurt · WG0")).toHaveCount(0);
   await expect(page.getByText("4.6 TB")).toHaveCount(0);
   await expect(page.getByText("99.98%")).toHaveCount(0);
 
   const navigation = page.getByLabel("Primary navigation");
-  await expect(navigation.getByRole("button")).toHaveCount(7);
+  await expect(navigation.getByRole("button")).toHaveCount(8);
+  await expect(navigation.getByRole("button", { name: "Relays" })).toBeVisible();
   await expect(navigation.getByRole("button", { name: "Firewall" })).toHaveCount(0);
   await expect(navigation.getByRole("button", { name: "Logs" })).toHaveCount(0);
   await expect(navigation.getByRole("button", { name: "Settings" })).toHaveCount(0);
 
-  await page.getByRole("button", { name: /View all/ }).click();
+  await page.locator(".routes-card").getByRole("button", { name: /View all/ }).click();
   await expect(page.getByRole("heading", { name: "Interface & subnet routes" })).toBeVisible();
 
   await navigation.getByRole("button", { name: "Dashboard" }).click();
@@ -102,10 +147,109 @@ test("dashboard uses live API data and only exposes finished pages", async ({ pa
   await expect(page.getByRole("dialog").getByRole("heading", { name: "Create egress route" })).toBeVisible();
   await page.getByRole("dialog").getByRole("button", { name: "Cancel" }).click();
 
+  await page.getByRole("search").getByPlaceholder("Search").fill("relay");
+  await page.getByRole("search").getByPlaceholder("Search").press("Enter");
+  await expect(page.getByRole("heading", { name: "Listener relays" })).toBeVisible();
+
   await page.getByRole("search").getByPlaceholder("Search").fill("Xray");
   await page.getByRole("search").getByPlaceholder("Search").press("Enter");
   await expect(page.getByRole("heading", { name: "Native Xray routing" })).toBeVisible();
   await expect(page.locator(".topbar").getByRole("button", { name: "New binding" })).toHaveCount(0);
+});
+
+test("listener relay console performs CRUD and exact plan/apply without exposing credentials", async ({ page }) => {
+  await page.addInitScript(() => window.sessionStorage.setItem("egress.csrf", "relay-csrf"));
+  let items = [{ relay: { ...liveRelay }, revision: 2 }];
+  let applyBody: Record<string, unknown> | null = null;
+
+  await page.route("**/api/v1/outbounds?limit=128", async (route) => {
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: storedOutbounds(), next_cursor: "" }) });
+  });
+  await page.route("**/api/v1/relays**", async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    if (request.method() !== "GET") expect(request.headers()["x-csrf-token"]).toBe("relay-csrf");
+    if (url.pathname.endsWith("/plan")) {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({
+        engine: "xray-relay",
+        state_hash: "state-hash-123",
+        candidate_hash: "candidate-hash-456",
+        candidate_exists: true,
+        enabled_relays: items.filter((item) => item.relay.enabled).length,
+        enabled_outbounds: 1,
+        actions: [{ kind: "replace", resource: "xray-relay", summary: "Atomically replace the project-owned Xray relay runtime." }],
+      }) });
+      return;
+    }
+    if (url.pathname.endsWith("/apply")) {
+      applyBody = request.postDataJSON() as Record<string, unknown>;
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify({ transaction_id: "relay_apply_test", state: "COMMITTED", candidate_hash: "candidate-hash-456" }) });
+      return;
+    }
+    if (request.method() === "POST") {
+      const relay = request.postDataJSON();
+      items = [...items, { relay, revision: 1 }];
+      await route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ relay, revision: 1 }) });
+      return;
+    }
+    if (request.method() === "PUT") {
+      const body = request.postDataJSON();
+      items = items.map((item) => item.relay.id === body.relay.id ? { relay: body.relay, revision: item.revision + 1 } : item);
+      const stored = items.find((item) => item.relay.id === body.relay.id)!;
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(stored) });
+      return;
+    }
+    if (request.method() === "DELETE") {
+      const body = request.postDataJSON();
+      items = items.filter((item) => item.relay.id !== body.id);
+      await route.fulfill({ status: 204, body: "" });
+      return;
+    }
+    await route.fulfill({ contentType: "application/json", body: JSON.stringify({ items, next_cursor: "" }) });
+  });
+
+  await page.goto("/");
+  await page.getByLabel("Primary navigation").getByRole("button", { name: "Relays" }).click();
+  await expect(page.getByRole("heading", { name: "Listener relays" })).toBeVisible();
+  await expect(page.getByText("91.107.220.12:6111")).toBeVisible();
+  await expect(page.getByText("Reality XHTTP").first()).toBeVisible();
+  await expect(page.getByText("11111111-2222-4333-8444-555555555555")).toHaveCount(0);
+
+  await page.locator(".topbar").getByRole("button", { name: "New relay" }).click();
+  let dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "Create listener relay" })).toBeVisible();
+  await dialog.getByLabel("Relay ID").fill("web_gateway");
+  await dialog.getByLabel("Display name").fill("Web gateway");
+  await dialog.getByLabel("Listen port").fill("7443");
+  await dialog.getByLabel("Selected outbound").selectOption("xray_reality");
+  await dialog.getByLabel("Destination host").fill("192.0.2.44");
+  await dialog.getByLabel("Destination port").fill("443");
+  await dialog.getByLabel("Source CIDRs").fill("203.0.113.0/24");
+  await dialog.getByRole("button", { name: "Save relay" }).click();
+  await expect(page.getByText("Web gateway")).toBeVisible();
+
+  const createdCard = page.locator(".outbound-card").filter({ hasText: "Web gateway" });
+  await createdCard.getByRole("button", { name: "Edit" }).click();
+  dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Display name").fill("Web gateway updated");
+  await dialog.getByRole("button", { name: "Save relay" }).click();
+  await expect(page.getByText("Web gateway updated")).toBeVisible();
+
+  const updatedCard = page.locator(".outbound-card").filter({ hasText: "Web gateway updated" });
+  await updatedCard.getByRole("button", { name: "Disable" }).click();
+  await expect(updatedCard.getByText("Disabled")).toBeVisible();
+
+  await page.getByRole("button", { name: "Review & apply" }).click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "Review listener relay plan" })).toBeVisible();
+  await expect(dialog.getByText("candidate-ha…", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("11111111-2222-4333-8444-555555555555")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Apply atomically" }).click();
+  expect(applyBody).toEqual({ expected_state_hash: "state-hash-123", expected_candidate_hash: "candidate-hash-456" });
+
+  page.once("dialog", (confirm) => confirm.accept());
+  await updatedCard.getByRole("button", { name: "Delete" }).click();
+  await expect(page.getByText("Web gateway updated")).toHaveCount(0);
 });
 
 test("network inventory retry and refresh perform new requests", async ({ page }) => {
@@ -146,7 +290,7 @@ test("network inventory retry and refresh perform new requests", async ({ page }
   expect(calls).toBeGreaterThan(beforeRefresh);
 });
 
-test("Persian mode is RTL and dashboard copy describes live server data", async ({ page }) => {
+test("Persian mode is RTL and exposes the live relay workflow", async ({ page }) => {
   await page.addInitScript(() => window.localStorage.setItem("egress.language", "fa"));
   await mockLiveDashboard(page);
 
@@ -154,15 +298,22 @@ test("Persian mode is RTL and dashboard copy describes live server data", async 
   await expect(page.locator("html")).toHaveAttribute("lang", "fa");
   await expect(page.locator("html")).toHaveAttribute("dir", "rtl");
   await expect(page.getByRole("heading", { name: "وضعیت فعلی سرور" })).toBeVisible();
-  await expect(page.getByText("همه اطلاعات این صفحه مستقیماً از سرور خوانده می‌شود و هیچ مقدار نمونه یا ساختگی نمایش داده نمی‌شود.")).toBeVisible();
-  await expect(page.getByLabel("منوی اصلی").getByRole("button", { name: "داشبورد" })).toBeVisible();
+  await expect(page.getByText("همه اطلاعات این صفحه مستقیماً از سرور خوانده می‌شود و هیچ ترافیک، مسیر، رله یا وضعیت سرویس ساختگی نمایش داده نمی‌شود.")).toBeVisible();
+  const navigation = page.getByLabel("منوی اصلی");
+  await expect(navigation.getByRole("button", { name: "داشبورد" })).toBeVisible();
+  await expect(navigation.getByRole("button", { name: "رله‌ها" })).toBeVisible();
 
-  await page.getByLabel("منوی اصلی").getByRole("button", { name: "خروجی‌ها" }).click();
+  await navigation.getByRole("button", { name: "رله‌ها" }).click();
+  await expect(page.getByRole("heading", { name: "رله‌های ورودی" })).toBeVisible();
+  await page.locator(".topbar").getByRole("button", { name: "رله جدید" }).click();
+  const relayDialog = page.getByRole("dialog");
+  await expect(relayDialog.getByRole("heading", { name: "ساخت رله ورودی" })).toBeVisible();
+  await expect(relayDialog.getByLabel("پورت شنود")).toBeVisible();
+  await relayDialog.getByRole("button", { name: "انصراف" }).click();
+
+  await navigation.getByRole("button", { name: "خروجی‌ها" }).click();
   await expect(page.getByRole("heading", { name: "اتصال‌های خروجی" })).toBeVisible();
-  await page.locator(".topbar").getByRole("button", { name: "افزودن اتصال" }).click();
-  const dialog = page.getByRole("dialog");
-  await expect(dialog.getByRole("heading", { name: "افزودن اتصال" })).toBeVisible();
-  await expect(dialog.getByText("لینک اتصال را اینجا بچسبانید. در صورت نیاز می‌توانید JSON مربوط به sing-box را هم وارد کنید.")).toBeVisible();
+  await expect(page.getByText("رله Xray", { exact: true })).toBeVisible();
 });
 
 test("Xray empty state explains bundled runtime and scan button really rescans", async ({ page }) => {

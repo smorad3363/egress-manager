@@ -1,6 +1,6 @@
 # Egress Manager
 
-Lightweight Linux control plane for safe NAT forwarding, HAProxy TCP balancing, proxy egress, and interface/subnet routing.
+Lightweight Linux control plane for safe NAT forwarding, HAProxy TCP balancing, proxy egress, listener relays, and interface/subnet routing.
 
 > [!warning]
 > Project is under active development. Do not deploy on production gateways until release gates in [the roadmap](docs/PROJECT_ROADMAP.md) pass.
@@ -25,10 +25,12 @@ Project recovery state lives in `.project/STATE.yaml`.
 Alpha releases support Ubuntu 22.04, 24.04, and 26.04 on amd64 and arm64. Release bundles include the prebuilt browser UI, pinned sing-box and Xray runtimes, lego for HTTPS certificate management, the complete Python 3 runtime needed by the installer/manager, plus per-Ubuntu offline dependency archives; Node/npm/pnpm are not required on the target host.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.8/scripts/install/install-secure.sh | sudo sh -s -- --version v0.1.0-alpha.8
+curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.9/scripts/install/install-secure.sh | sudo sh -s -- --version v0.1.0-alpha.9
 ```
 
 The secure installer exposes the browser panel directly over HTTPS on the selected high port. It attempts a Let's Encrypt short-lived IP certificate when online and falls back to an IP-matching self-signed certificate when public issuance is unavailable. Fresh interactive installs prompt for an administrator username/password.
+
+Alpha.9 adds project-owned listener relays. A saved relay accepts traffic on a selected local TCP/UDP listener, sends it through an explicitly selected managed Xray outbound, and permits only the configured fixed destination. The initial Xray relay adapter imports VLESS REALITY/XHTTP links. Credentials remain encrypted, relay apply is transactional and fail-closed, protected management ports and foreign-listener collisions are rejected, and the dedicated relay service remains isolated from standalone Xray, Marzban, and 3x-ui installations. See [docs/listener-relays.md](docs/listener-relays.md).
 
 Alpha.8 improves the browser panel for day-to-day operators: English/Persian language switching, RTL Persian layout, simpler wording, working console search, repaired navigation/retry actions, honest unavailable states for unfinished pages, and clearer Xray integration messaging. The language preference is saved in the browser.
 

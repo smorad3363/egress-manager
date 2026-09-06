@@ -9,6 +9,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/domain"
 	"github.com/egress-manager/egress-manager/internal/logging"
 	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
+	"github.com/egress-manager/egress-manager/internal/xrayrelay"
 )
 
 const maximumOutboundJSONBytes = managedSingBox.MaximumImportBytes + 1024
@@ -110,6 +111,15 @@ func (server *Server) importOutboundsHandler(writer http.ResponseWriter, request
 		WriteError(writer, request, NewError(http.StatusBadRequest, CodeBadRequest, "Invalid outbound import.", err))
 		return
 	}
+	if xrayrelay.IsCompatibleImport(input.Input) {
+		result, err := server.control.ImportXrayRelayOutbound(request.Context(), xrayrelay.ImportRequest{Input: input.Input})
+		if err != nil {
+			WriteError(writer, request, NewError(http.StatusConflict, CodeConflict, "Outbound import rejected.", err))
+			return
+		}
+		_ = WriteJSON(writer, http.StatusCreated, result)
+		return
+	}
 	result, err := server.control.ImportSingBox(request.Context(), input)
 	if err != nil {
 		WriteError(writer, request, NewError(http.StatusConflict, CodeConflict, "Outbound import rejected.", err))
@@ -126,6 +136,24 @@ func (server *Server) testOutboundsHandler(writer http.ResponseWriter, request *
 	}
 	if (input.ID == "") == (input.Input == "") || input.ID != "" && input.ExpectedRevision < 1 {
 		WriteError(writer, request, NewError(http.StatusBadRequest, CodeBadRequest, "Provide exactly one import input or stored outbound with its revision.", nil))
+		return
+	}
+	useXray := input.Input != "" && xrayrelay.IsCompatibleImport(input.Input)
+	if input.ID != "" {
+		stored, lookupErr := server.outbounds.Outbound(request.Context(), input.ID)
+		if lookupErr != nil {
+			WriteError(writer, request, NewError(http.StatusNotFound, CodeNotFound, "Outbound not found.", lookupErr))
+			return
+		}
+		useXray = stored.Outbound.Adapter == domain.OutboundAdapterXray
+	}
+	if useXray {
+		result, err := server.control.TestXrayRelayOutbound(request.Context(), xrayrelay.TestRequest{ID: input.ID, ExpectedRevision: input.ExpectedRevision, Input: input.Input})
+		if err != nil {
+			WriteError(writer, request, NewError(http.StatusServiceUnavailable, CodeUnavailable, "Outbound test failed.", err))
+			return
+		}
+		_ = WriteJSON(writer, http.StatusOK, result)
 		return
 	}
 	result, err := server.control.TestSingBox(request.Context(), input)

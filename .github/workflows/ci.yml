@@ -19,6 +19,19 @@ jobs:
           cache: true
       - run: go test ./...
       - run: go vet ./...
+      - name: Verify listener relay against pinned Xray 26.7.28
+        run: |
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "${tmp}"' EXIT
+          curl --fail --location --silent --show-error \
+            https://github.com/XTLS/Xray-core/releases/download/v26.7.28/Xray-linux-64.zip \
+            --output "${tmp}/xray.zip"
+          printf '%s  %s\n' \
+            '8195d909f1109b8f3d99eefe401a3c451d7bf4af71f24d3815420f77e5dd2a40' \
+            "${tmp}/xray.zip" | sha256sum -c -
+          unzip -q "${tmp}/xray.zip" -d "${tmp}/xray"
+          chmod 0755 "${tmp}/xray/xray"
+          XRAY_NATIVE_BINARY="${tmp}/xray/xray" go test ./internal/xrayrelay -run '^TestNative' -count=1
       - name: Verify installer shell syntax
         run: sh -n scripts/install/install.sh scripts/install/install-secure.sh scripts/release/build-offline-bundle.sh
 
@@ -126,10 +139,12 @@ jobs:
             printf 'Installer removed pre-existing host packages:\n%s\n' "${removed}" >&2
             exit 1
           fi
-      - name: Verify services, runtimes, TLS, UI, manager, and install log
+      - name: Verify services, runtimes, TLS, UI, manager, relay unit, and install log
         run: |
           sudo /usr/local/lib/egress-manager/verify.sh
           test "$(systemctl show egress-web.service --property=User --value)" = "egress-web"
+          test "$(systemctl is-enabled egress-manager-xray-relay.service)" = "enabled"
+          grep -Fq 'ConditionPathExists=/var/lib/egress-manager/private/xray-relay.json' /etc/systemd/system/egress-manager-xray-relay.service
           test "$(sudo stat -c '%a:%U:%G' /var/lib/egress-manager/private)" = "700:root:root"
           test "$(sudo stat -c '%a:%U:%G' /var/lib/egress-manager/database)" = "770:root:egress-manager"
           test "$(sudo stat -c '%a:%U:%G' /var/lib/egress-manager/database/egress-manager.db)" = "660:root:egress-manager"
@@ -142,6 +157,7 @@ jobs:
           test -f /usr/local/lib/egress-manager/web/index.html
           sudo grep -q '"listen_address": "0.0.0.0"' /etc/egress-manager/config.json
           sudo grep -q '"allow_insecure_http": false' /etc/egress-manager/config.json
+          sudo grep -q '"xray_relay_config_path": "/var/lib/egress-manager/private/xray-relay.json"' /etc/egress-manager/config.json
           sudo grep -q '"tls_certificate_path": "/etc/egress-manager/tls/server.crt"' /etc/egress-manager/config.json
           sudo grep -q '"tls_private_key_path": "/etc/egress-manager/tls/server.key"' /etc/egress-manager/config.json
           test "$(sudo stat -c '%a:%U:%G' /etc/egress-manager/tls/server.key)" = "640:root:egress-manager"
@@ -153,6 +169,7 @@ jobs:
             /etc/systemd/system/egressd.service \
             /etc/systemd/system/egress-web.service \
             /etc/systemd/system/egress-manager-sing-box.service \
+            /etc/systemd/system/egress-manager-xray-relay.service \
             /etc/systemd/system/egress-manager-cert-renew.service \
             /etc/systemd/system/egress-manager-cert-renew.timer
           latest_log="$(sudo sh -c 'ls -1t /var/log/egress-manager/install-*.log | head -n 1')"

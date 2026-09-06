@@ -24,6 +24,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/routeengine"
 	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
 	managedXray "github.com/egress-manager/egress-manager/internal/xray"
+	"github.com/egress-manager/egress-manager/internal/xrayrelay"
 )
 
 const (
@@ -54,6 +55,10 @@ type ControlService interface {
 	TestSingBox(context.Context, managedSingBox.TestRequest) (managedSingBox.TestResponse, error)
 	PlanSingBox(context.Context) (managedSingBox.Plan, error)
 	ApplySingBox(context.Context, managedSingBox.ApplyRequest) (managedSingBox.ApplyResponse, error)
+	ImportXrayRelayOutbound(context.Context, xrayrelay.ImportRequest) (xrayrelay.ImportResponse, error)
+	TestXrayRelayOutbound(context.Context, xrayrelay.TestRequest) (xrayrelay.TestResponse, error)
+	PlanRelays(context.Context) (xrayrelay.Plan, error)
+	ApplyRelays(context.Context, xrayrelay.ApplyRequest) (xrayrelay.ApplyResponse, error)
 	PlanRoutes(context.Context) (routeengine.Review, error)
 	ApplyRoutes(context.Context, routeengine.ApplyRequest) (routeengine.ApplyResponse, error)
 	DiscoverXray(context.Context) (managedXray.Report, error)
@@ -98,6 +103,13 @@ type RouteRepository interface {
 	ListRoutes(context.Context, domain.ID, int) ([]database.StoredRoute, error)
 }
 
+type RelayRepository interface {
+	CreateRelay(context.Context, domain.Relay, time.Time) (database.StoredRelay, error)
+	UpdateRelay(context.Context, domain.Relay, int64, time.Time) (database.StoredRelay, error)
+	DeleteRelay(context.Context, domain.ID, int64) error
+	ListRelays(context.Context, domain.ID, int) ([]database.StoredRelay, error)
+}
+
 type XrayBindingRepository interface {
 	CreateXrayBinding(context.Context, domain.XrayBinding, time.Time) (database.StoredXrayBinding, error)
 	UpdateXrayBinding(context.Context, domain.XrayBinding, int64, time.Time) (database.StoredXrayBinding, error)
@@ -120,16 +132,17 @@ type Server struct {
 	haproxy   HAProxyRepository
 	outbounds OutboundRepository
 	routes    RouteRepository
+	relays    RelayRepository
 	xray      XrayBindingRepository
 	health    http.Handler
 	now       func() time.Time
 }
 
-func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, sessions SessionService, control ControlService, forwards ForwardRepository, haproxy HAProxyRepository, outbounds OutboundRepository, routes RouteRepository, xray XrayBindingRepository, health http.Handler) (*Server, error) {
+func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, sessions SessionService, control ControlService, forwards ForwardRepository, haproxy HAProxyRepository, outbounds OutboundRepository, routes RouteRepository, relays RelayRepository, xray XrayBindingRepository, health http.Handler) (*Server, error) {
 	if config.SessionCookieName == "" || !config.SecureCookies {
 		return nil, fmt.Errorf("secure session cookie configuration is required")
 	}
-	if logger == nil || login == nil || sessions == nil || control == nil || forwards == nil || haproxy == nil || outbounds == nil || routes == nil || xray == nil || health == nil {
+	if logger == nil || login == nil || sessions == nil || control == nil || forwards == nil || haproxy == nil || outbounds == nil || routes == nil || relays == nil || xray == nil || health == nil {
 		return nil, fmt.Errorf("API dependencies are required")
 	}
 	return &Server{
@@ -142,6 +155,7 @@ func NewServer(config ServerConfig, logger *slog.Logger, login LoginService, ses
 		haproxy:   haproxy,
 		outbounds: outbounds,
 		routes:    routes,
+		relays:    relays,
 		xray:      xray,
 		health:    health,
 		now:       time.Now,
@@ -174,6 +188,9 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("/api/v1/routes/plan", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.planRoutesHandler))))
 	mux.Handle("/api/v1/routes/apply", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.applyRoutesHandler))))
 	mux.Handle("/api/v1/routes", server.requireSession(http.HandlerFunc(server.routesHandler)))
+	mux.Handle("/api/v1/relays/plan", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.planRelaysHandler))))
+	mux.Handle("/api/v1/relays/apply", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.applyRelaysHandler))))
+	mux.Handle("/api/v1/relays", server.requireSession(http.HandlerFunc(server.relaysHandler)))
 	mux.Handle("/api/v1/xray/discovery", server.method(http.MethodGet, server.requireSession(http.HandlerFunc(server.xrayDiscoveryHandler))))
 	mux.Handle("/api/v1/xray/bindings", server.requireSession(http.HandlerFunc(server.xrayBindingsHandler)))
 	mux.Handle("/api/v1/xray/plan", server.method(http.MethodPost, server.requireSession(http.HandlerFunc(server.xrayPlanHandler))))

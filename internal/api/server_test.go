@@ -25,6 +25,7 @@ import (
 	"github.com/egress-manager/egress-manager/internal/secrets"
 	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
 	managedXray "github.com/egress-manager/egress-manager/internal/xray"
+	"github.com/egress-manager/egress-manager/internal/xrayrelay"
 )
 
 type healthyControl struct {
@@ -109,6 +110,26 @@ func (control *healthyControl) ApplySingBox(_ context.Context, request managedSi
 	control.calls++
 	control.lastSingBoxApply = request
 	return managedSingBox.ApplyResponse{TransactionID: request.TransactionID, State: domain.TransactionCommitted}, nil
+}
+
+func (control *healthyControl) ImportXrayRelayOutbound(_ context.Context, request xrayrelay.ImportRequest) (xrayrelay.ImportResponse, error) {
+	control.calls++
+	return xrayrelay.ImportResponse{}, nil
+}
+
+func (control *healthyControl) TestXrayRelayOutbound(_ context.Context, request xrayrelay.TestRequest) (xrayrelay.TestResponse, error) {
+	control.calls++
+	return xrayrelay.TestResponse{}, nil
+}
+
+func (control *healthyControl) PlanRelays(context.Context) (xrayrelay.Plan, error) {
+	control.calls++
+	return xrayrelay.Plan{Engine: "xray-relay", StateHash: "state", CandidateHash: "candidate"}, nil
+}
+
+func (control *healthyControl) ApplyRelays(_ context.Context, request xrayrelay.ApplyRequest) (xrayrelay.ApplyResponse, error) {
+	control.calls++
+	return xrayrelay.ApplyResponse{TransactionID: request.TransactionID, State: domain.TransactionCommitted, CandidateHash: request.ExpectedCandidateHash}, nil
 }
 
 func (control *healthyControl) PlanRoutes(context.Context) (routeengine.Review, error) {
@@ -202,6 +223,7 @@ func newTestAPIServer(t *testing.T) (*Server, *healthyControl) {
 		authService,
 		sessions,
 		control,
+		store,
 		store,
 		store,
 		store,
