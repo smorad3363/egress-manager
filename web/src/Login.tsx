@@ -3,7 +3,7 @@ import type { FormEvent } from "react";
 import { LanguageSwitcher } from "./i18n";
 
 export function Login() {
-  const [username, setUsername] = useState("operator");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -17,7 +17,7 @@ export function Login() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ username, password }),
+        body: JSON.stringify({ username: username.trim(), password }),
       });
       const data = await response.json().catch(() => null) as { csrf_token?: string; message?: string } | null;
       if (!response.ok || !data?.csrf_token) {
@@ -43,19 +43,19 @@ export function Login() {
         <div className="login-copy">
           <p className="eyebrow">SECURE CONSOLE</p>
           <h1 id="login-title">Sign in to this gateway</h1>
-          <p>Use the administrator account provisioned on this server.</p>
+          <p>Enter the administrator username and password created on this server.</p>
         </div>
         <form className="login-form" onSubmit={submit}>
           <label>
             <span>Username</span>
-            <input autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required />
+            <input autoFocus autoComplete="username" value={username} onChange={(event) => setUsername(event.target.value)} required />
           </label>
           <label>
             <span>Password</span>
-            <input autoFocus type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
+            <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required />
           </label>
           {error ? <p className="login-error" role="alert">{error}</p> : null}
-          <button className="login-submit" type="submit" disabled={submitting}>{submitting ? "Signing in…" : "Sign in"}</button>
+          <button className="login-submit" type="submit" disabled={submitting || !username.trim() || !password}>{submitting ? "Signing in…" : "Sign in"}</button>
         </form>
         <p className="login-note">This panel uses HTTPS. Keep the certificate valid and do not share administrator credentials.</p>
       </section>

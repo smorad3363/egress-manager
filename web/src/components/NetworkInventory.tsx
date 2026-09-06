@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Badge } from "./ui/Badge";
+import { Button } from "./ui/Button";
 import { Card } from "./ui/Card";
 import { Skeleton } from "./ui/Skeleton";
 import { StatePanel } from "./ui/StatePanel";
@@ -49,7 +50,7 @@ export function NetworkInventory() {
   const available = inventory.capabilities.filter((capability) => capability.available).length;
   return (
     <section aria-labelledby="inventory-title">
-      <div className="inventory-heading"><div><p className="eyebrow">READ ONLY</p><h2 id="inventory-title">Host network inventory</h2><p>Live interfaces, routes, listeners, DNS, and installed network services.</p></div><div className="page-heading__meta"><span>Observed</span><strong>{new Date(inventory.generated_at).toLocaleTimeString()}</strong></div></div>
+      <div className="inventory-heading"><div><p className="eyebrow">READ ONLY</p><h2 id="inventory-title">Host network inventory</h2><p>Live interfaces, routes, listeners, DNS, and installed network services.</p></div><div className="page-heading__meta"><span>Observed</span><strong>{new Date(inventory.generated_at).toLocaleTimeString()}</strong><Button size="sm" variant="ghost" onClick={reload}>Refresh</Button></div></div>
 
       {inventory.warnings.length > 0 ? <div className="inventory-warning" role="status"><strong>Partial inventory</strong><span>{inventory.warnings.join(" · ")}</span></div> : null}
 

@@ -1,22 +1,37 @@
 import { expect, test } from "@playwright/test";
+import type { Page } from "@playwright/test";
 
-test("desktop shell exposes navigation, data, dialog, and keyboard focus", async ({ page }) => {
+async function mockDashboard(page: Page) {
+  await page.route("**/api/v1/control/health", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ status: "ok", version: "v0.1.0-alpha.8", checks: { database: "ok" } }) }));
+  await page.route("**/api/v1/routes?limit=100", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ route: { id: "office", name: "Office route", source: { kind: "subnet", subnet: "10.10.0.0/16" }, outbound_id: "primary", failure_policy: "block", dns_policy: "follow_outbound", dns_servers: ["1.1.1.1"], ipv4_policy: "follow_outbound", ipv6_policy: "block", kill_switch: true, enabled: true }, revision: 1 }] }) }));
+  await page.route("**/api/v1/routes?limit=100", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ route: { id: "office", name: "Office route", source: { kind: "subnet", subnet: "10.10.0.0/16" }, outbound_id: "primary", failure_policy: "block", dns_policy: "follow_outbound", dns_servers: ["1.1.1.1"], ipv4_policy: "follow_outbound", ipv6_policy: "block", kill_switch: true, enabled: true }, revision: 1 }] }) }));
+  await page.route("**/api/v1/outbounds?limit=100", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ outbound: { id: "primary", name: "Primary outbound", enabled: true, health: { status: "healthy" } }, revision: 1 }] }) }));
+  await page.route("**/api/v1/outbounds?limit=128", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ outbound: { id: "primary", name: "Primary outbound", type: "socks5", enabled: true, health: { status: "healthy" } }, revision: 1 }] }) }));
+  await page.route("**/api/v1/port-forwards?limit=100", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [] }) }));
+  await page.route("**/api/v1/port-forwards/counters?family=ipv4", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [] }) }));
+  await page.route("**/api/v1/port-forwards/counters?family=ipv6", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [] }) }));
+  await page.route("**/api/v1/haproxy/stats", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ info: { version: "3.0", pid: 10 }, stats: [] }) }));
+}
+
+test("desktop shell exposes live data, finished navigation, real dialog, and keyboard focus", async ({ page }) => {
+  await mockDashboard(page);
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Traffic is flowing normally." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Current server overview" })).toBeVisible();
   if (process.env.VISUAL_QA) {
     await page.screenshot({ path: "test-results/dashboard.png", fullPage: true });
   }
-  await expect(page.getByLabel("Primary navigation").getByRole("button")).toHaveCount(10);
+  await expect(page.getByLabel("Primary navigation").getByRole("button")).toHaveCount(7);
   await expect(page.getByRole("table")).toBeVisible();
 
   await page.keyboard.press("Tab");
   await expect(page.getByRole("link", { name: "Skip to content" })).toBeFocused();
 
-  await page.getByRole("button", { name: "New route" }).click();
-  await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.getByLabel("Route name")).toBeFocused();
+  await page.locator(".topbar").getByRole("button", { name: "New route" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByRole("heading", { name: "Create egress route" })).toBeVisible();
+  await expect(dialog.getByLabel("Route ID")).toBeFocused();
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog")).toBeHidden();
+  await expect(dialog).toBeHidden();
 });
 
 test("mobile navigation remains operable", async ({ page }) => {
@@ -29,8 +44,9 @@ test("mobile navigation remains operable", async ({ page }) => {
   await page.getByRole("button", { name: "Open navigation" }).click();
   const drawer = page.locator(".mobile-drawer__panel");
   await expect(drawer.getByRole("button", { name: "Port Forward" })).toBeVisible();
-  await drawer.getByRole("button", { name: "Firewall" }).click();
-  await expect(page.getByRole("heading", { name: "Firewall" })).toBeVisible();
+  await expect(drawer.getByRole("button", { name: "Firewall" })).toHaveCount(0);
+  await drawer.getByRole("button", { name: "Port Forward" }).click();
+  await expect(page.getByRole("heading", { name: "Port forwarding" })).toBeVisible();
 });
 
 test("design-system fixtures and reduced motion are available", async ({ page }) => {
@@ -246,7 +262,7 @@ test("Xray console separates panel read-only discovery from reviewed native appl
   await expect(page.getByText("Marzban owns and may regenerate xray_config.json; direct file mutation is disabled.")).toBeVisible();
   await expect(page.getByText("vless_native")).toBeVisible();
   if (process.env.VISUAL_QA) await page.screenshot({ path: "test-results/xray.png", fullPage: true });
-  await page.locator(".topbar").getByRole("button", { name: "New binding" }).click();
+  await page.getByRole("button", { name: "New binding" }).click();
   const editor = page.getByRole("dialog");
   await expect(editor.getByRole("heading", { name: "Create Xray binding" })).toBeVisible();
   await editor.getByLabel("Binding ID").fill("trojan_native");

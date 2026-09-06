@@ -1,6 +1,7 @@
 import { createContext, useContext, useLayoutEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { faEntries } from "./translations-fa";
+import { finalFaEntries } from "./translations-fa-final";
 
 export type Language = "en" | "fa";
 
@@ -11,7 +12,7 @@ type LanguageContextValue = {
 
 const STORAGE_KEY = "egress.language";
 const LanguageContext = createContext<LanguageContextValue | null>(null);
-const fa = new Map<string, string>(faEntries);
+const fa = new Map<string, string>([...faEntries, ...finalFaEntries]);
 
 function initialLanguage(): Language {
   try {
@@ -40,6 +41,18 @@ function translateDynamic(value: string): string {
   if (match) return `${match[1]} مسیر · ${match[2]} خروجی`;
   match = value.match(/^(\d+) enabled bindings · (.+)$/);
   if (match) return `${match[1]} قانون فعال · ${translateText(match[2])}`;
+  match = value.match(/^(\d+) healthy of (\d+) saved$/);
+  if (match) return `${match[1]} سالم از ${match[2]} ذخیره‌شده`;
+  match = value.match(/^(\d+) healthy$/);
+  if (match) return `${match[1]} سالم`;
+  match = value.match(/^(\d+) accepted packets$/);
+  if (match) return `${match[1]} بسته عبورکرده`;
+  match = value.match(/^version (.+)$/);
+  if (match) return `نسخه ${match[1]}`;
+  match = value.match(/^PID (.+)$/);
+  if (match) return `PID ${match[1]}`;
+  match = value.match(/^Some live data could not be loaded: (.+)\.$/);
+  if (match) return `بخشی از اطلاعات زنده دریافت نشد: ${match[1]}.`;
   match = value.match(/^REV (\d+)$/);
   if (match) return `نسخه ${match[1]}`;
   match = value.match(/^Invalid port range: (.+)$/);
