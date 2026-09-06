@@ -76,13 +76,16 @@ if [ -z "${bundle_root}" ]; then
   extracted_root="${temporary_directory}/extracted/${bundle_name}"
   [ -f "${extracted_root}/install.sh" ] || fail "release bundle is incomplete"
 
-  set -- --bundle-root "${extracted_root}" --public-ca
+  child_ca="--public-ca"
+  [ "${ca_mode}" = "self-signed" ] && child_ca="--self-signed"
+  set -- --bundle-root "${extracted_root}" "${child_ca}"
   [ -n "${requested_ip}" ] && set -- "$@" --ip "${requested_ip}"
   [ "${skip_start}" = "1" ] && set -- "$@" --skip-start
   sh "${extracted_root}/install.sh" "$@"
   exit $?
 fi
 
+[ "${ca_mode}" = "auto" ] && ca_mode="self-signed"
 bundle_root="$(CDPATH= cd -- "${bundle_root}" 2>/dev/null && pwd)" || fail "bundle root does not exist"
 core_installer="${bundle_root}/install-core.sh"
 package_directory="${bundle_root}/package"
@@ -98,7 +101,7 @@ sh "${core_installer}" --bundle-root "${bundle_root}" --skip-start --public-http
 for command in python3 openssl curl ss ip; do command -v "${command}" >/dev/null 2>&1 || fail "required command missing after bundle installation: ${command}"; done
 install -o root -g root -m 0755 "${package_directory}/bin/lego" /usr/local/lib/egress-manager/bin/lego
 install -o root -g root -m 0755 "${package_directory}/tls-renew.sh" /usr/local/lib/egress-manager/tls-renew.sh
-/usr/local/lib/egress-manager/bin/lego version >/dev/null
+/usr/local/lib/egress-manager/bin/lego --version >/dev/null
 
 validate_ip() {
   python3 - "$1" <<'PY'
@@ -257,7 +260,7 @@ done
 printf 'Installed Egress Manager %s with HTTPS.\n' "$(sed -n '1p' "${bundle_root}/VERSION")"
 printf 'Panel: https://%s:%s/login\n' "${server_ip}" "${panel_port}"
 if [ "${cert_mode}" = "letsencrypt" ]; then
-  printf 'TLS: trusted Let\047s Encrypt IP certificate; automatic renewal enabled.\n'
+  printf "TLS: trusted Let's Encrypt IP certificate; automatic renewal enabled.\n"
 else
   printf 'TLS: self-signed IP certificate (SAN=%s); browser trust warning is expected until this certificate is trusted.\n' "${server_ip}"
 fi
