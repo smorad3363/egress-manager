@@ -7,6 +7,7 @@ async function mockDashboard(page: Page) {
   await page.route("**/api/v1/routes?limit=100", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ route: { id: "office", name: "Office route", source: { kind: "subnet", subnet: "10.10.0.0/16" }, outbound_id: "primary", failure_policy: "block", dns_policy: "follow_outbound", dns_servers: ["1.1.1.1"], ipv4_policy: "follow_outbound", ipv6_policy: "block", kill_switch: true, enabled: true }, revision: 1 }] }) }));
   await page.route("**/api/v1/outbounds?limit=100", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ outbound: { id: "primary", name: "Primary outbound", enabled: true, health: { status: "healthy" } }, revision: 1 }] }) }));
   await page.route("**/api/v1/outbounds?limit=128", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [{ outbound: { id: "primary", name: "Primary outbound", type: "socks5", enabled: true, health: { status: "healthy" } }, revision: 1 }] }) }));
+  await page.route("**/api/v1/relays?limit=100", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [] }) }));
   await page.route("**/api/v1/port-forwards?limit=100", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [] }) }));
   await page.route("**/api/v1/port-forwards/counters?family=ipv4", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [] }) }));
   await page.route("**/api/v1/port-forwards/counters?family=ipv6", async (route) => route.fulfill({ contentType: "application/json", body: JSON.stringify({ items: [] }) }));
@@ -20,7 +21,7 @@ test("desktop shell exposes live data, finished navigation, real dialog, and key
   if (process.env.VISUAL_QA) {
     await page.screenshot({ path: "test-results/dashboard.png", fullPage: true });
   }
-  await expect(page.getByLabel("Primary navigation").getByRole("button")).toHaveCount(7);
+  await expect(page.getByLabel("Primary navigation").getByRole("button")).toHaveCount(8);
   await expect(page.getByRole("table")).toBeVisible();
 
   await page.keyboard.press("Tab");
