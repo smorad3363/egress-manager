@@ -30,7 +30,6 @@ type Relay = {
 type StoredRelay = { relay: Relay; revision: number };
 type LoadState =
   | { status: "loading" }
-  | { status: "error"; message: string }
   | { status: "ready"; outbounds: StoredOutbound[]; relays: StoredRelay[] };
 
 export function XrayManager({ createRequest: _createRequest }: { createRequest: number }) {
@@ -47,10 +46,6 @@ export function XrayManager({ createRequest: _createRequest }: { createRequest: 
     // so this endpoint cannot inspect foreign Xray or proxy-panel files/services.
     void api("/api/v1/xray/discovery").catch(() => undefined);
 
-    if (outboundResult.status === "rejected" && relayResult.status === "rejected") {
-      setState({ status: "ready", outbounds: [], relays: [] });
-      return;
-    }
     setState({
       status: "ready",
       outbounds: outboundResult.status === "fulfilled" ? outboundResult.value.items : [],
@@ -62,9 +57,6 @@ export function XrayManager({ createRequest: _createRequest }: { createRequest: 
 
   if (state.status === "loading") {
     return <section><Heading /><div className="forward-loading"><Skeleton /><Skeleton /><Skeleton /></div></section>;
-  }
-  if (state.status === "error") {
-    return <section><Heading /><StatePanel tone="error" title="Managed Xray status unavailable" description={state.message} action="Try again" onAction={() => void load()} /></section>;
   }
 
   const xrayOutbounds = state.outbounds.filter((item) => item.outbound.adapter === "xray");
@@ -135,5 +127,3 @@ function healthTone(status: string): "success" | "warning" | "danger" | "neutral
   if (status === "unhealthy") return "danger";
   return "neutral";
 }
-
-function message(error: unknown) { return error instanceof Error ? error.message : "Request failed."; }
