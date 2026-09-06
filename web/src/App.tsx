@@ -160,3 +160,5 @@ function findPage(query: string): PageName | null {
   }
   return null;
 }
+
+export default App;
