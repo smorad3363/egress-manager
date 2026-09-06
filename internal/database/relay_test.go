@@ -1,6 +1,7 @@
 package database
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"net/netip"
@@ -8,11 +9,19 @@ import (
 	"time"
 
 	"github.com/egress-manager/egress-manager/internal/domain"
+	"github.com/egress-manager/egress-manager/internal/secrets"
 )
 
 func TestRelayRepositoryCRUDRevisionAndOutboundProtection(t *testing.T) {
 	database := openTestDatabase(t)
-	store := NewStore(database)
+	protector, err := secrets.NewProtector([32]byte{1, 2, 3, 4}, bytes.NewReader(bytes.Repeat([]byte{0x42}, 4096)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := NewProtectedStore(database, protector)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
