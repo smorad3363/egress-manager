@@ -66,9 +66,9 @@ jobs:
         run: |
           sudo /usr/local/lib/egress-manager/verify.sh
           test "$(systemctl show egress-web.service --property=User --value)" = "egress-web"
-          test "$(stat -c '%a:%U:%G' /var/lib/egress-manager/private)" = "700:root:root"
-          test "$(stat -c '%a:%U:%G' /var/lib/egress-manager/database)" = "770:root:egress-manager"
-          test "$(stat -c '%a:%U:%G' /var/lib/egress-manager/database/egress-manager.db)" = "660:root:egress-manager"
+          test "$(sudo stat -c '%a:%U:%G' /var/lib/egress-manager/private)" = "700:root:root"
+          test "$(sudo stat -c '%a:%U:%G' /var/lib/egress-manager/database)" = "770:root:egress-manager"
+          test "$(sudo stat -c '%a:%U:%G' /var/lib/egress-manager/database/egress-manager.db)" = "660:root:egress-manager"
           sudo systemd-analyze verify /etc/systemd/system/egressd.service /etc/systemd/system/egress-web.service /etc/systemd/system/egress-manager-sing-box.service
 
   network-lab:

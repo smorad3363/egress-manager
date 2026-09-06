@@ -135,6 +135,10 @@ ip -n "$client_ns" -6 route add default via 2001:db8:203:1::1
 ip -n "$server_ns" -6 route add default via 2001:db8:203:2::1
 ip netns exec "$router_ns" sysctl -q -w net.ipv4.ip_forward=1
 ip netns exec "$router_ns" sysctl -q -w net.ipv6.conf.all.forwarding=1
+ip netns exec "$router_ns" sysctl -q -w net.ipv4.conf.all.rp_filter=0
+ip netns exec "$router_ns" sysctl -q -w net.ipv4.conf.default.rp_filter=0
+ip netns exec "$router_ns" sysctl -q -w net.ipv4.conf.r0.rp_filter=0
+ip netns exec "$router_ns" sysctl -q -w net.ipv4.conf.r1.rp_filter=0
 
 "$haproxy_probe" >"$haproxy_candidate_path"
 haproxy -c -f "$haproxy_candidate_path" >/dev/null
