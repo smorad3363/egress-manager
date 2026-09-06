@@ -2,6 +2,25 @@
 
 All notable changes will be documented here.
 
+## [v0.1.0-alpha.10] - 2026-09-07
+
+### Changed
+
+- The production Xray console now shows only Xray outbounds, listener relays, runtime paths, and state owned by Egress Manager.
+- Removed Marzban, 3x-ui/Sanaei, and foreign standalone-Xray language from the production Xray UI and search aliases.
+- Foreign Xray discovery candidates are disabled in production. Normal startup and health checks no longer inspect known proxy-panel configuration paths or service commands through the legacy discovery catalog.
+- Egress Manager continues to use only its bundled Xray binary, private relay configuration, and `egress-manager-xray-relay.service` for managed listener relays.
+
+### Fixed
+
+- Restored `/usr/local/lib/egress-manager/VERSION` on daemon start so subsequent secure installs can reliably identify the installed Egress Manager version.
+
+### Safety
+
+- Egress Manager must not discover, read, rewrite, restart, or stop Xray runtimes owned by other panels. Existing foreign panel files and services remain outside the product boundary.
+- Port/listener collision checks may observe host socket ownership only; they do not mutate the process that owns a conflicting socket.
+- Managed Xray listener relays remain fail-closed and keep credentials/configuration under Egress Manager-owned private paths.
+
 ## [v0.1.0-alpha.9] - 2026-09-06
 
 ### Added

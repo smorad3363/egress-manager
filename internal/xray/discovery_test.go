@@ -59,8 +59,15 @@ func (managedDiscoveryRunner) Run(ctx context.Context, command system.Command) (
 	return (discoveryRunner{}).Run(ctx, command)
 }
 
+func useLegacyCandidates(t *testing.T) {
+	t.Helper()
+	previous := knownCandidates
+	knownCandidates = append([]candidate(nil), legacyCandidateCatalog...)
+	t.Cleanup(func() { knownCandidates = previous })
+}
+
 func TestDiscovererReturnsTypedDeterministicReadOnlyEvidence(t *testing.T) {
-	t.Parallel()
+	useLegacyCandidates(t)
 	marzban := []byte(`{"inbounds":[{"tag":"vpn-in"}],"outbounds":[{"tag":"direct"},{"tag":"proxy-de"}],"routing":{"rules":[]}}`)
 	threeXUI := []byte(`{"inbounds":[{"tag":"panel-in"}],"outbounds":[{"tag":"panel-out"}]}`)
 	discoverer := Discoverer{Runner: discoveryRunner{}, Files: memoryFiles{contents: map[string][]byte{
@@ -84,7 +91,7 @@ func TestDiscovererReturnsTypedDeterministicReadOnlyEvidence(t *testing.T) {
 }
 
 func TestDiscovererEnablesOnlyProvenStandaloneConfdirFragment(t *testing.T) {
-	t.Parallel()
+	useLegacyCandidates(t)
 	content := []byte(`{"inbounds":[{"tag":"vpn-in"}],"outbounds":[{"tag":"proxy"}]}`)
 	report, err := (Discoverer{Runner: managedDiscoveryRunner{}, Files: memoryFiles{contents: map[string][]byte{
 		"/etc/xray/config.json": content,
@@ -102,7 +109,6 @@ func TestDiscovererEnablesOnlyProvenStandaloneConfdirFragment(t *testing.T) {
 }
 
 func TestClassifyLoaderRejectsPanelRelativeAndAmbiguousCommands(t *testing.T) {
-	t.Parallel()
 	for _, test := range []struct {
 		kind InstallationKind
 		args []string
@@ -122,7 +128,7 @@ func TestClassifyLoaderRejectsPanelRelativeAndAmbiguousCommands(t *testing.T) {
 }
 
 func TestDiscovererRejectsAmbiguousConfigurationForOneService(t *testing.T) {
-	t.Parallel()
+	useLegacyCandidates(t)
 	content := []byte(`{"inbounds":[{"tag":"vpn-in"}],"outbounds":[{"tag":"direct"}]}`)
 	report, err := (Discoverer{Runner: discoveryRunner{}, Files: memoryFiles{contents: map[string][]byte{
 		"/etc/xray/config.json":           content,
@@ -137,7 +143,7 @@ func TestDiscovererRejectsAmbiguousConfigurationForOneService(t *testing.T) {
 }
 
 func TestDiscovererRejectsSymlinksMalformedAndDuplicateTags(t *testing.T) {
-	t.Parallel()
+	useLegacyCandidates(t)
 	files := memoryFiles{
 		contents: map[string][]byte{
 			"/var/lib/marzban/xray_config.json": []byte(`{"inbounds":[{"tag":"same"},{"tag":"same"}]}`),
@@ -155,7 +161,6 @@ func TestDiscovererRejectsSymlinksMalformedAndDuplicateTags(t *testing.T) {
 }
 
 func TestParseTagsRejectsTrailingDataAndUnsafeTags(t *testing.T) {
-	t.Parallel()
 	for _, input := range []string{
 		`{"inbounds":[]} {}`,
 		"{\"inbounds\":[{\"tag\":\"bad\\nvalue\"}]}",

@@ -33,7 +33,7 @@ const searchAliases: Record<PageName, string[]> = {
   Outbounds: ["outbounds", "outbound", "proxy", "vpn", "خروجی", "خروجی‌ها", "پروکسی", "وی پی ان"],
   Relays: ["relays", "relay", "listener", "port relay", "رله", "رله‌ها", "شنود", "انتقال خروجی"],
   Routes: ["routes", "route", "routing", "مسیر", "مسیرها", "مسیریابی"],
-  Xray: ["xray", "ایکس ری", "ایکس‌ری", "marzban", "3x-ui"],
+  Xray: ["xray", "managed xray", "project xray", "ایکس ری", "ایکس‌ری"],
   "Port Forward": ["port forward", "nat", "forward", "انتقال پورت", "فوروارد", "پورت"],
   HAProxy: ["haproxy", "load balance", "balancer", "توزیع بار", "لود بالانس"],
   Network: ["network", "interfaces", "dns", "شبکه", "کارت شبکه", "دی ان اس"],

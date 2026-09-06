@@ -15,6 +15,10 @@ if [ -x /usr/local/lib/egress-manager/bin/lego ]; then /usr/local/lib/egress-man
 [ -L /usr/local/bin/egress-manager ] || { echo "verify.sh: egress-manager command link is missing" >&2; exit 1; }
 /usr/local/bin/egress-manager --help >/dev/null
 [ -f /usr/local/lib/egress-manager/web/index.html ] || { echo "verify.sh: browser UI is missing" >&2; exit 1; }
+[ -r /usr/local/lib/egress-manager/VERSION ] || { echo "verify.sh: installed version marker is missing" >&2; exit 1; }
+installed_version="$(sed -n '1p' /usr/local/lib/egress-manager/VERSION)"
+binary_version="$(/usr/local/lib/egress-manager/bin/egressd --version | awk 'NR==1 {print $2}')"
+[ -n "${installed_version}" ] && [ "${installed_version}" = "${binary_version}" ] || { echo "verify.sh: installed version marker does not match egressd" >&2; exit 1; }
 
 panel_port="$(sed -n 's/^[[:space:]]*"listen_port":[[:space:]]*\([0-9][0-9]*\),*$/\1/p' "${config_path}")"
 panel_address="$(sed -n 's/^[[:space:]]*"listen_address":[[:space:]]*"\([^"]*\)",*$/\1/p' "${config_path}")"
