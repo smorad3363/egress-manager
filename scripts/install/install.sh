@@ -2,7 +2,7 @@
 set -eu
 
 repository="smorad3363/egress-manager"
-version="${EGRESS_VERSION:-v0.1.0-alpha.4}"
+version="${EGRESS_VERSION:-v0.1.0-alpha.6}"
 bundle_root="${EGRESS_BUNDLE_ROOT:-}"
 skip_start="${EGRESS_SKIP_START:-0}"
 public_http="${EGRESS_PUBLIC_HTTP:-1}"
@@ -74,11 +74,12 @@ fi
 if [ -z "${bundle_root}" ]; then
   command -v curl >/dev/null 2>&1 || fail "curl is required for online bootstrap"
   command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required for online bootstrap"
-  if ! command -v python3 >/dev/null 2>&1; then
+  if ! python3 -c 'import json, zipfile' >/dev/null 2>&1; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y --no-install-recommends python3-minimal ca-certificates
+    apt-get install -y --no-install-recommends --no-remove python3 ca-certificates
   fi
+  python3 -c 'import json, zipfile' >/dev/null 2>&1 || fail "a complete Python 3 standard library is required for the online bootstrap"
 
   temporary_directory="$(mktemp -d)"
   cleanup_bootstrap() { rm -rf -- "${temporary_directory}"; }
@@ -135,15 +136,19 @@ command -v dpkg >/dev/null 2>&1 || fail "dpkg is required on the base Ubuntu ins
 set -- "${bundle_root}"/debs/*.deb
 [ -f "$1" ] || fail "offline dependency set is empty"
 export DEBIAN_FRONTEND=noninteractive
-apt-get \
-  -o Dir::Etc::sourcelist=/dev/null \
-  -o Dir::Etc::sourceparts=- \
-  -o APT::Get::List-Cleanup=0 \
-  install -y --no-install-recommends "$@"
+apt_common="-o Dir::Etc::sourcelist=/dev/null -o Dir::Etc::sourceparts=- -o APT::Get::List-Cleanup=0"
+# Safety invariant: Egress Manager may add or upgrade its required runtime packages, but it
+# must never remove an existing host package. --no-remove makes apt abort before mutation if
+# the local dependency closure cannot satisfy that invariant.
+# shellcheck disable=SC2086
+apt-get ${apt_common} install -s --no-install-recommends --no-remove "$@" >/dev/null || fail "offline dependency plan would remove or conflict with existing host packages; no package changes were made"
+# shellcheck disable=SC2086
+apt-get ${apt_common} install -y --no-install-recommends --no-remove "$@"
 
-for command in curl tar gzip sha256sum install getent useradd groupadd sed od awk ss shuf tr ps grep readlink sort paste find nft iptables ip haproxy wg openvpn; do
+for command in curl tar gzip sha256sum install getent useradd groupadd sed od awk ss shuf tr ps grep readlink sort paste find nft iptables ip haproxy wg openvpn python3; do
   command -v "${command}" >/dev/null 2>&1 || fail "required command missing after offline dependency install: ${command}"
 done
+python3 -c 'import json, zipfile' >/dev/null 2>&1 || fail "offline dependency install did not provide a complete Python 3 standard library"
 
 if [ -e /usr/local/bin/egressctl ] && { [ ! -L /usr/local/bin/egressctl ] || [ "$(readlink /usr/local/bin/egressctl)" != "/usr/local/lib/egress-manager/bin/egressctl" ]; }; then
   fail "/usr/local/bin/egressctl already exists and is not owned by Egress Manager"
