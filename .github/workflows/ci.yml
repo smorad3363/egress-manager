@@ -125,6 +125,33 @@ jobs:
           grep -qi '^Set-Cookie: egress_session=' /tmp/egress-headers
           ! grep -qi '^Set-Cookie:.*; Secure' /tmp/egress-headers
           curl --fail --silent --show-error -b /tmp/egress-cookies "http://127.0.0.1:${port}/api/v1/session" >/dev/null
+      - name: Verify shell mode switching and repeat-install migration
+        run: |
+          sudo egress-manager local
+          grep -q '"listen_address": "127.0.0.1"' /etc/egress-manager/config.json
+          grep -q '"allow_insecure_http": false' /etc/egress-manager/config.json
+          sudo egress-manager expose
+          grep -q '"listen_address": "0.0.0.0"' /etc/egress-manager/config.json
+          grep -q '"allow_insecure_http": true' /etc/egress-manager/config.json
+
+          sudo sed -i 's/"listen_address": "0.0.0.0"/"listen_address": "127.0.0.1"/' /etc/egress-manager/config.json
+          sudo sed -i '/"allow_insecure_http"/d' /etc/egress-manager/config.json
+          sudo systemctl restart egress-web.service
+
+          target="${{ matrix.os }}"
+          ubuntu="${target#ubuntu-}"
+          bundle="egress-manager-offline-ubuntu${ubuntu}-amd64"
+          sudo sh "/tmp/egress-offline-ci/${bundle}/install.sh" --public-http
+          grep -q '"listen_address": "0.0.0.0"' /etc/egress-manager/config.json
+          grep -q '"allow_insecure_http": true' /etc/egress-manager/config.json
+
+          port="$(sed -n 's/^[[:space:]]*"listen_port":[[:space:]]*\([0-9][0-9]*\),*$/\1/p' /etc/egress-manager/config.json)"
+          curl --fail --silent --show-error \
+            -c /tmp/egress-cookies-after-upgrade \
+            -H 'Content-Type: application/json' \
+            --data '{"username":"ci-admin","password":"ci-password-12345"}' \
+            "http://127.0.0.1:${port}/api/v1/auth/login" >/dev/null
+          curl --fail --silent --show-error -b /tmp/egress-cookies-after-upgrade "http://127.0.0.1:${port}/api/v1/session" >/dev/null
 
   network-lab:
     runs-on: ubuntu-24.04
