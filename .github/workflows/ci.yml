@@ -107,13 +107,13 @@ jobs:
           test -x /usr/local/lib/egress-manager/manager.sh
           test -L /usr/local/bin/egress-manager
           test -f /usr/local/lib/egress-manager/web/index.html
-          grep -q '"listen_address": "0.0.0.0"' /etc/egress-manager/config.json
-          grep -q '"allow_insecure_http": true' /etc/egress-manager/config.json
+          sudo grep -q '"listen_address": "0.0.0.0"' /etc/egress-manager/config.json
+          sudo grep -q '"allow_insecure_http": true' /etc/egress-manager/config.json
           sudo /usr/local/bin/egress-manager --help >/dev/null
           sudo systemd-analyze verify /etc/systemd/system/egressd.service /etc/systemd/system/egress-web.service /etc/systemd/system/egress-manager-sing-box.service
       - name: Verify browser login works over plain HTTP
         run: |
-          port="$(sed -n 's/^[[:space:]]*"listen_port":[[:space:]]*\([0-9][0-9]*\),*$/\1/p' /etc/egress-manager/config.json)"
+          port="$(sudo sed -n 's/^[[:space:]]*"listen_port":[[:space:]]*\([0-9][0-9]*\),*$/\1/p' /etc/egress-manager/config.json)"
           printf '%s\n' 'ci-password-12345' | sudo /usr/local/lib/egress-manager/bin/egress-web provision-admin --username ci-admin --password-stdin
           rm -f /tmp/egress-cookies /tmp/egress-headers
           curl --fail --silent --show-error \
@@ -128,11 +128,11 @@ jobs:
       - name: Verify shell mode switching and repeat-install migration
         run: |
           sudo egress-manager local
-          grep -q '"listen_address": "127.0.0.1"' /etc/egress-manager/config.json
-          grep -q '"allow_insecure_http": false' /etc/egress-manager/config.json
+          sudo grep -q '"listen_address": "127.0.0.1"' /etc/egress-manager/config.json
+          sudo grep -q '"allow_insecure_http": false' /etc/egress-manager/config.json
           sudo egress-manager expose
-          grep -q '"listen_address": "0.0.0.0"' /etc/egress-manager/config.json
-          grep -q '"allow_insecure_http": true' /etc/egress-manager/config.json
+          sudo grep -q '"listen_address": "0.0.0.0"' /etc/egress-manager/config.json
+          sudo grep -q '"allow_insecure_http": true' /etc/egress-manager/config.json
 
           sudo sed -i 's/"listen_address": "0.0.0.0"/"listen_address": "127.0.0.1"/' /etc/egress-manager/config.json
           sudo sed -i '/"allow_insecure_http"/d' /etc/egress-manager/config.json
@@ -142,10 +142,10 @@ jobs:
           ubuntu="${target#ubuntu-}"
           bundle="egress-manager-offline-ubuntu${ubuntu}-amd64"
           sudo sh "/tmp/egress-offline-ci/${bundle}/install.sh" --public-http
-          grep -q '"listen_address": "0.0.0.0"' /etc/egress-manager/config.json
-          grep -q '"allow_insecure_http": true' /etc/egress-manager/config.json
+          sudo grep -q '"listen_address": "0.0.0.0"' /etc/egress-manager/config.json
+          sudo grep -q '"allow_insecure_http": true' /etc/egress-manager/config.json
 
-          port="$(sed -n 's/^[[:space:]]*"listen_port":[[:space:]]*\([0-9][0-9]*\),*$/\1/p' /etc/egress-manager/config.json)"
+          port="$(sudo sed -n 's/^[[:space:]]*"listen_port":[[:space:]]*\([0-9][0-9]*\),*$/\1/p' /etc/egress-manager/config.json)"
           curl --fail --silent --show-error \
             -c /tmp/egress-cookies-after-upgrade \
             -H 'Content-Type: application/json' \
