@@ -3,6 +3,8 @@ Description=Egress Manager unprivileged API service
 Documentation=https://github.com/smorad3363/egress-manager
 Requires=egressd.service
 After=egressd.service
+StartLimitIntervalSec=60
+StartLimitBurst=20
 
 [Service]
 Type=simple

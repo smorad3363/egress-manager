@@ -71,7 +71,8 @@ cp -R web/dist/. "${package_directory}/web/"
 cp packaging/config.json.in "${package_directory}/config.json.in"
 cp packaging/systemd/*.service "${package_directory}/systemd/"
 cp scripts/install/verify.sh "${package_directory}/verify.sh"
-chmod 0755 "${package_directory}/verify.sh"
+cp scripts/install/manager.sh "${package_directory}/manager.sh"
+chmod 0755 "${package_directory}/verify.sh" "${package_directory}/manager.sh"
 printf '%s\n' "${version}" > "${package_directory}/VERSION"
 cat > "${package_directory}/RUNTIME_VERSIONS" <<EOF_VERSIONS
 sing-box=${sing_box_version}

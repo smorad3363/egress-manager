@@ -34,19 +34,42 @@ show_url() {
 }
 
 set_json_string() {
-  key="$1" value="$2"
+  key="$1" new_value="$2"
   tmp="$(mktemp)"
-  sed "s|^[[:space:]]*\"${key}\":[[:space:]]*\"[^\"]*\"|  \"${key}\": \"${value}\"|" "${config}" > "${tmp}"
+  sed "s|^[[:space:]]*\"${key}\":[[:space:]]*\"[^\"]*\"|  \"${key}\": \"${new_value}\"|" "${config}" > "${tmp}"
   install -o root -g egress-manager -m 0640 "${tmp}" "${config}"
   rm -f "${tmp}"
 }
 
 set_json_number() {
-  key="$1" value="$2"
+  key="$1" new_value="$2"
   tmp="$(mktemp)"
-  sed "s|^[[:space:]]*\"${key}\":[[:space:]]*[0-9][0-9]*|  \"${key}\": ${value}|" "${config}" > "${tmp}"
+  sed "s|^[[:space:]]*\"${key}\":[[:space:]]*[0-9][0-9]*|  \"${key}\": ${new_value}|" "${config}" > "${tmp}"
   install -o root -g egress-manager -m 0640 "${tmp}" "${config}"
   rm -f "${tmp}"
+}
+
+set_insecure_http() {
+  enabled="$1"
+  tmp="$(mktemp)"
+  if grep -q '^[[:space:]]*"allow_insecure_http"[[:space:]]*:' "${config}"; then
+    sed "s|^[[:space:]]*\"allow_insecure_http\":[[:space:]]*[^,]*|  \"allow_insecure_http\": ${enabled}|" "${config}" > "${tmp}"
+  else
+    awk -v enabled="${enabled}" '
+      { print }
+      /^[[:space:]]*"listen_port"[[:space:]]*:/ { print "  \"allow_insecure_http\": " enabled "," }
+    ' "${config}" > "${tmp}"
+  fi
+  install -o root -g egress-manager -m 0640 "${tmp}" "${config}"
+  rm -f "${tmp}"
+}
+
+reset_services() {
+  systemctl reset-failed egressd.service egress-web.service >/dev/null 2>&1 || true
+}
+
+reset_web() {
+  systemctl reset-failed egress-web.service >/dev/null 2>&1 || true
 }
 
 case "${1:-menu}" in
@@ -65,6 +88,7 @@ case "${1:-menu}" in
       echo "9) Change panel port"
       echo "10) Provision/reset administrator"
       echo "11) Verify installation"
+      echo "12) Open panel port in UFW"
       echo "0) Exit"
       printf "> "
       read -r choice
@@ -80,6 +104,7 @@ case "${1:-menu}" in
         9) printf "Port: "; read -r p; "$0" port "$p" ;;
         10) printf "Username [operator]: "; read -r u; u="${u:-operator}"; "$0" admin "$u" ;;
         11) "$0" verify ;;
+        12) "$0" firewall-open ;;
         0) exit 0 ;;
         *) echo "Unknown choice" ;;
       esac
@@ -92,10 +117,21 @@ case "${1:-menu}" in
   url)
     show_url
     ;;
-  start|stop|restart)
+  start)
     need_root "$@"
-    systemctl "$1" egressd.service egress-web.service
-    [ "$1" = stop ] || show_url
+    reset_services
+    systemctl start egressd.service egress-web.service
+    show_url
+    ;;
+  stop)
+    need_root "$@"
+    systemctl stop egressd.service egress-web.service
+    ;;
+  restart)
+    need_root "$@"
+    reset_services
+    systemctl restart egressd.service egress-web.service
+    show_url
     ;;
   logs)
     journalctl -u egressd.service -u egress-web.service -n 100 --no-pager
@@ -103,13 +139,17 @@ case "${1:-menu}" in
   expose)
     need_root "$@"
     set_json_string listen_address 0.0.0.0
+    set_insecure_http true
+    reset_web
     systemctl restart egress-web.service
-    echo "Public HTTP mode enabled. Traffic, including login credentials, is not encrypted."
+    echo "Public HTTP mode enabled. Login credentials and session traffic are NOT encrypted."
     show_url
     ;;
   local)
     need_root "$@"
     set_json_string listen_address 127.0.0.1
+    set_insecure_http false
+    reset_web
     systemctl restart egress-web.service
     show_url
     ;;
@@ -119,6 +159,7 @@ case "${1:-menu}" in
     case "$port" in ''|*[!0-9]*) echo "Port must be numeric" >&2; exit 2;; esac
     [ "$port" -ge 1024 ] && [ "$port" -le 65535 ] || { echo "Port must be 1024-65535" >&2; exit 2; }
     set_json_number listen_port "$port"
+    reset_web
     systemctl restart egress-web.service
     show_url
     ;;
@@ -127,8 +168,10 @@ case "${1:-menu}" in
     username="${2:-operator}"
     printf "New password for %s: " "$username" >&2
     stty -echo
+    trap 'stty echo 2>/dev/null || true' EXIT HUP INT TERM
     IFS= read -r password
     stty echo
+    trap - EXIT HUP INT TERM
     echo >&2
     printf '%s\n' "$password" | "$web_bin" provision-admin --username "$username" --password-stdin
     unset password
@@ -137,9 +180,20 @@ case "${1:-menu}" in
     need_root "$@"
     "$verify"
     ;;
+  firewall-open)
+    need_root "$@"
+    command -v ufw >/dev/null 2>&1 || { echo "UFW is not installed. Check your provider/cloud firewall for TCP port $(panel_port)."; exit 0; }
+    if ufw status 2>/dev/null | grep -q '^Status: active'; then
+      ufw allow "$(panel_port)/tcp"
+      echo "Opened TCP $(panel_port) in UFW."
+    else
+      echo "UFW is inactive. Check your provider/cloud firewall if the panel is still unreachable."
+    fi
+    show_url
+    ;;
   help|-h|--help)
     cat <<'EOF'
-Usage: egress-manager [menu|status|url|start|stop|restart|logs|expose|local|port PORT|admin USER|verify]
+Usage: egress-manager [menu|status|url|start|stop|restart|logs|expose|local|port PORT|admin USER|verify|firewall-open]
 EOF
     ;;
   *)

@@ -16,37 +16,70 @@ Supported hosts: Ubuntu 22.04, 24.04, and 26.04 on amd64 or arm64 with systemd.
 The online bootstrap downloads one complete release bundle for the detected Ubuntu release and CPU architecture. The bundle contains the prebuilt browser panel, Egress Manager binaries, pinned sing-box and Xray binaries, and the Ubuntu package dependency closure used by the offline installer.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.3/scripts/install/install.sh | sudo sh -s -- --version v0.1.0-alpha.3
+curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.4/scripts/install/install.sh | sudo sh -s -- --version v0.1.0-alpha.4
 ```
 
 Node.js, npm, and pnpm are release-build dependencies only. They are deliberately not installed on the target gateway because the React application is compiled before the release bundle is produced.
 
-The installer keeps the API/panel on `127.0.0.1` and chooses a random free port. It never changes firewall or routing state during installation. Existing configuration, IPC key, and database are retained on repeat runs.
+By default the installer exposes the panel directly on `0.0.0.0` over plain HTTP and selects a random free high port. Existing configuration, IPC key, administrator database, and runtime state are retained on repeat installs. Existing alpha configurations bound to `127.0.0.1` are migrated to direct HTTP mode by the default install command.
+
+> [!warning]
+> Direct HTTP is intentionally an insecure compatibility mode. Login credentials and session traffic are not encrypted. Use it only on trusted networks or when another network layer protects the connection. The installer does not automatically modify UFW or cloud-provider firewall rules.
+
+To keep the panel localhost-only instead:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.4/scripts/install/install.sh | sudo sh -s -- --version v0.1.0-alpha.4 --local-only
+```
+
+## Shell management
+
+After installation run the interactive management menu:
+
+```sh
+sudo egress-manager
+```
+
+Direct commands are also available:
+
+```sh
+sudo egress-manager status
+sudo egress-manager url
+sudo egress-manager restart
+sudo egress-manager logs
+sudo egress-manager expose
+sudo egress-manager local
+sudo egress-manager port 47733
+sudo egress-manager admin operator
+sudo egress-manager verify
+sudo egress-manager firewall-open
+```
+
+`firewall-open` only opens the selected TCP panel port when UFW is installed and currently active. Cloud-provider security groups/firewalls remain outside the installer and must be configured separately if they block the port.
 
 ## Administrator and browser panel
 
-Provision the first administrator without exposing the password in process arguments:
+Provision or reset an administrator from the shell manager:
 
 ```sh
-sudo -v
-read -rsp "Admin password: " EGRESS_ADMIN_PASSWORD; echo
-printf '%s\n' "$EGRESS_ADMIN_PASSWORD" | sudo /usr/local/lib/egress-manager/bin/egress-web provision-admin --username operator --password-stdin
-unset EGRESS_ADMIN_PASSWORD
+sudo egress-manager admin operator
 ```
 
-Read the selected panel port:
+The manager prompts for the password without putting it in process arguments.
+
+Show the browser URL:
 
 ```sh
-sudo sed -n 's/^[[:space:]]*"listen_port":[[:space:]]*\([0-9][0-9]*\),*$/\1/p' /etc/egress-manager/config.json
+egress-manager url
 ```
 
-Keep the panel private and forward the selected port over SSH, for example when the port is `47733`:
+When direct HTTP mode is enabled, open the printed address directly in a browser, for example:
 
-```sh
-ssh -L 47733:127.0.0.1:47733 root@SERVER_IP
+```text
+http://SERVER_IP:47733/login
 ```
 
-Then open `http://localhost:47733/login` in the local browser.
+No SSH tunnel is required in direct HTTP mode.
 
 ## Fully offline installation
 
@@ -59,13 +92,13 @@ egress-manager-offline-ubuntu22.04-amd64.zip
 If Python 3 is present on the offline server, extract and install the ZIP in one shell line:
 
 ```sh
-rm -rf /tmp/egress-offline && mkdir -p /tmp/egress-offline && python3 -m zipfile -e ./egress-manager-offline-ubuntu22.04-amd64.zip /tmp/egress-offline && sudo sh /tmp/egress-offline/egress-manager-offline-ubuntu22.04-amd64/install.sh
+rm -rf /tmp/egress-offline && mkdir -p /tmp/egress-offline && python3 -m zipfile -e ./egress-manager-offline-ubuntu22.04-amd64.zip /tmp/egress-offline && sudo sh /tmp/egress-offline/egress-manager-offline-ubuntu22.04-amd64/install.sh --public-http
 ```
 
 A machine too minimal to extract ZIP can use the matching tar.gz bundle, which needs only the standard Ubuntu tar/gzip tools:
 
 ```sh
-d="$(mktemp -d)" && tar -xzf ./egress-manager-offline-ubuntu22.04-amd64.tar.gz -C "$d" && sudo sh "$d/egress-manager-offline-ubuntu22.04-amd64/install.sh"
+d="$(mktemp -d)" && tar -xzf ./egress-manager-offline-ubuntu22.04-amd64.tar.gz -C "$d" && sudo sh "$d/egress-manager-offline-ubuntu22.04-amd64/install.sh" --public-http
 ```
 
 Bundle mode verifies `MANIFEST.sha256`, installs only the `.deb` files shipped inside the bundle with APT repository access disabled, and does not download Xray, sing-box, npm packages, or other runtime dependencies from the network.
@@ -75,5 +108,5 @@ Xray is installed under `/usr/local/lib/egress-manager/bin/xray` for Egress Mana
 Verify later with:
 
 ```sh
-sudo /usr/local/lib/egress-manager/verify.sh
+sudo egress-manager verify
 ```

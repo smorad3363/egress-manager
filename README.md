@@ -25,10 +25,21 @@ Project recovery state lives in `.project/STATE.yaml`.
 Alpha releases support Ubuntu 22.04, 24.04, and 26.04 on amd64 and arm64. Release bundles include the prebuilt browser UI, pinned sing-box and Xray runtimes, plus per-Ubuntu offline dependency archives; Node/npm/pnpm are not required on the target host.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.3/scripts/install/install.sh | sudo sh -s -- --version v0.1.0-alpha.3
+curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.4/scripts/install/install.sh | sudo sh -s -- --version v0.1.0-alpha.4
 ```
 
-See [scripts/install/README.md](scripts/install/README.md) for browser access, verification, administrator provisioning, and fully offline ZIP/tar.gz installation. Installation does not change firewall or routing state.
+The default alpha.4 install exposes the browser panel directly over plain HTTP on a selected high port and installs the `egress-manager` shell management command. Use `--local-only` if direct network access is not desired.
+
+> [!warning]
+> Plain HTTP does not encrypt administrator credentials or session traffic. Prefer a trusted/private network or a protected network layer when using direct HTTP mode.
+
+After installation:
+
+```sh
+sudo egress-manager
+```
+
+See [scripts/install/README.md](scripts/install/README.md) for direct browser access, verification, administrator provisioning, firewall notes, and fully offline ZIP/tar.gz installation.
 
 Runtime configuration and secure administrator provisioning are documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 

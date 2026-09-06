@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release tag (for example v0.1.0-alpha.3)
+        description: Release tag (for example v0.1.0-alpha.4)
         required: true
         type: string
 
@@ -21,11 +21,11 @@ jobs:
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       github.event_name == 'workflow_dispatch' ||
-      contains(github.event.head_commit.message, '[release-alpha3]')
+      contains(github.event.head_commit.message, '[release-alpha4]')
     runs-on: ubuntu-22.04
     timeout-minutes: 90
     env:
-      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || (startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.0-alpha.3') }}
+      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || (startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.0-alpha.4') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -97,4 +97,4 @@ jobs:
             --target "${GITHUB_SHA}" \
             --prerelease \
             --title "Egress Manager ${RELEASE_VERSION}" \
-            --notes "Full alpha bundle with the prebuilt browser panel, pinned sing-box and Xray runtimes, and per-Ubuntu offline dependency archives. Target hosts do not require Node/npm/pnpm."
+            --notes "Alpha.4 full bundle with repaired ZIP bootstrap, direct browser HTTP mode, the egress-manager shell management command, the prebuilt browser panel, pinned sing-box and Xray runtimes, and per-Ubuntu offline dependency archives. Target hosts do not require Node/npm/pnpm. Plain HTTP is an explicit insecure compatibility mode and does not encrypt administrator credentials or sessions."
