@@ -48,7 +48,7 @@ jobs:
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04, ubuntu-26.04]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
@@ -85,7 +85,7 @@ jobs:
           target="${{ matrix.os }}"
           ubuntu="${target#ubuntu-}"
           UBUNTU_VERSION="${ubuntu}" ARCHITECTURE=amd64 sh scripts/release/build-offline-bundle.sh
-      - name: Install only from Python-extracted ZIP
+      - name: Install secure panel only from Python-extracted ZIP
         run: |
           target="${{ matrix.os }}"
           ubuntu="${target#ubuntu-}"
@@ -94,8 +94,13 @@ jobs:
           mkdir -p /tmp/egress-offline-ci
           python3 -m zipfile -e "dist/${bundle}.zip" /tmp/egress-offline-ci
           test -f "/tmp/egress-offline-ci/${bundle}/install.sh"
-          sudo sh "/tmp/egress-offline-ci/${bundle}/install.sh" --public-http
-      - name: Verify service boundary, bundled runtimes, UI, manager, and health
+          test -f "/tmp/egress-offline-ci/${bundle}/install-core.sh"
+          ipaddr="$(ip -4 route get 1.1.1.1 | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
+          test -n "${ipaddr}"
+          sudo sh "/tmp/egress-offline-ci/${bundle}/install.sh" \
+            --bundle-root "/tmp/egress-offline-ci/${bundle}" \
+            --self-signed --ip "${ipaddr}"
+      - name: Verify services, runtimes, TLS, UI, and manager
         run: |
           sudo /usr/local/lib/egress-manager/verify.sh
           test "$(systemctl show egress-web.service --property=User --value)" = "egress-web"
@@ -104,54 +109,63 @@ jobs:
           test "$(sudo stat -c '%a:%U:%G' /var/lib/egress-manager/database/egress-manager.db)" = "660:root:egress-manager"
           test -x /usr/local/lib/egress-manager/bin/sing-box
           test -x /usr/local/lib/egress-manager/bin/xray
+          test -x /usr/local/lib/egress-manager/bin/lego
+          test -x /usr/local/lib/egress-manager/tls-renew.sh
           test -x /usr/local/lib/egress-manager/manager.sh
           test -L /usr/local/bin/egress-manager
           test -f /usr/local/lib/egress-manager/web/index.html
           sudo grep -q '"listen_address": "0.0.0.0"' /etc/egress-manager/config.json
-          sudo grep -q '"allow_insecure_http": true' /etc/egress-manager/config.json
+          sudo grep -q '"allow_insecure_http": false' /etc/egress-manager/config.json
+          sudo grep -q '"tls_certificate_path": "/etc/egress-manager/tls/server.crt"' /etc/egress-manager/config.json
+          sudo grep -q '"tls_private_key_path": "/etc/egress-manager/tls/server.key"' /etc/egress-manager/config.json
+          test "$(sudo stat -c '%a:%U:%G' /etc/egress-manager/tls/server.key)" = "640:root:egress-manager"
+          test "$(sudo sed -n '1p' /etc/egress-manager/tls/mode)" = "self-signed"
+          ipaddr="$(sudo sed -n '1p' /etc/egress-manager/tls/ip-address)"
+          sudo openssl x509 -in /etc/egress-manager/tls/server.crt -noout -ext subjectAltName | grep -Fq "IP Address:${ipaddr}"
           sudo /usr/local/bin/egress-manager --help >/dev/null
-          sudo systemd-analyze verify /etc/systemd/system/egressd.service /etc/systemd/system/egress-web.service /etc/systemd/system/egress-manager-sing-box.service
-      - name: Verify browser login works over plain HTTP
+          sudo systemd-analyze verify \
+            /etc/systemd/system/egressd.service \
+            /etc/systemd/system/egress-web.service \
+            /etc/systemd/system/egress-manager-sing-box.service \
+            /etc/systemd/system/egress-manager-cert-renew.service \
+            /etc/systemd/system/egress-manager-cert-renew.timer
+      - name: Verify browser login uses HTTPS and Secure cookie
         run: |
           port="$(sudo sed -n 's/^[[:space:]]*"listen_port":[[:space:]]*\([0-9][0-9]*\),*$/\1/p' /etc/egress-manager/config.json)"
           printf '%s\n' 'ci-password-12345' | sudo /usr/local/lib/egress-manager/bin/egress-web provision-admin --username ci-admin --password-stdin
           rm -f /tmp/egress-cookies /tmp/egress-headers
-          curl --fail --silent --show-error \
+          curl -k --fail --silent --show-error \
             -D /tmp/egress-headers \
             -c /tmp/egress-cookies \
             -H 'Content-Type: application/json' \
             --data '{"username":"ci-admin","password":"ci-password-12345"}' \
-            "http://127.0.0.1:${port}/api/v1/auth/login" >/tmp/egress-login.json
+            "https://127.0.0.1:${port}/api/v1/auth/login" >/tmp/egress-login.json
           grep -qi '^Set-Cookie: egress_session=' /tmp/egress-headers
-          ! grep -qi '^Set-Cookie:.*; Secure' /tmp/egress-headers
-          curl --fail --silent --show-error -b /tmp/egress-cookies "http://127.0.0.1:${port}/api/v1/session" >/dev/null
-      - name: Verify shell mode switching and repeat-install migration
+          grep -qi '^Set-Cookie:.*; Secure' /tmp/egress-headers
+          curl -k --fail --silent --show-error -b /tmp/egress-cookies "https://127.0.0.1:${port}/api/v1/session" >/dev/null
+          curl -k --fail --silent --show-error "https://127.0.0.1:${port}/login" | grep -q 'id="root"'
+      - name: Verify manager keeps public exposure on HTTPS
         run: |
-          sudo egress-manager local
-          sudo grep -q '"listen_address": "127.0.0.1"' /etc/egress-manager/config.json
-          sudo grep -q '"allow_insecure_http": false' /etc/egress-manager/config.json
           sudo egress-manager expose
           sudo grep -q '"listen_address": "0.0.0.0"' /etc/egress-manager/config.json
-          sudo grep -q '"allow_insecure_http": true' /etc/egress-manager/config.json
-
-          sudo sed -i 's/"listen_address": "0.0.0.0"/"listen_address": "127.0.0.1"/' /etc/egress-manager/config.json
-          sudo sed -i '/"allow_insecure_http"/d' /etc/egress-manager/config.json
-          sudo systemctl restart egress-web.service
-
+          sudo grep -q '"allow_insecure_http": false' /etc/egress-manager/config.json
+          sudo egress-manager url | grep -q '^Panel: https://'
+      - name: Verify repeat secure install preserves administrator
+        run: |
           target="${{ matrix.os }}"
           ubuntu="${target#ubuntu-}"
           bundle="egress-manager-offline-ubuntu${ubuntu}-amd64"
-          sudo sh "/tmp/egress-offline-ci/${bundle}/install.sh" --public-http
-          sudo grep -q '"listen_address": "0.0.0.0"' /etc/egress-manager/config.json
-          sudo grep -q '"allow_insecure_http": true' /etc/egress-manager/config.json
-
+          ipaddr="$(sudo sed -n '1p' /etc/egress-manager/tls/ip-address)"
+          sudo sh "/tmp/egress-offline-ci/${bundle}/install.sh" \
+            --bundle-root "/tmp/egress-offline-ci/${bundle}" \
+            --self-signed --ip "${ipaddr}"
           port="$(sudo sed -n 's/^[[:space:]]*"listen_port":[[:space:]]*\([0-9][0-9]*\),*$/\1/p' /etc/egress-manager/config.json)"
-          curl --fail --silent --show-error \
+          curl -k --fail --silent --show-error \
             -c /tmp/egress-cookies-after-upgrade \
             -H 'Content-Type: application/json' \
             --data '{"username":"ci-admin","password":"ci-password-12345"}' \
-            "http://127.0.0.1:${port}/api/v1/auth/login" >/dev/null
-          curl --fail --silent --show-error -b /tmp/egress-cookies-after-upgrade "http://127.0.0.1:${port}/api/v1/session" >/dev/null
+            "https://127.0.0.1:${port}/api/v1/auth/login" >/dev/null
+          curl -k --fail --silent --show-error -b /tmp/egress-cookies-after-upgrade "https://127.0.0.1:${port}/api/v1/session" >/dev/null
 
   network-lab:
     runs-on: ubuntu-24.04
