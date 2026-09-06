@@ -146,6 +146,10 @@ func (executor Executor) Recover(ctx context.Context) error {
 		if operation.Operation != "nat_apply" {
 			continue
 		}
+		if _, _, _, err := executor.openNFTJournal(operation, true); err != nil {
+			recoveryErrors = append(recoveryErrors, err)
+			continue
+		}
 		switch operation.State {
 		case domain.TransactionPrepared, domain.TransactionValidated:
 			if err := executor.Journal.TransitionOperation(ctx, operation.ID, operation.State, domain.TransactionFailed, executor.now(), "interrupted_before_apply"); err != nil {

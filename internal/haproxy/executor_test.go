@@ -232,3 +232,45 @@ func TestExecutorRecoversInterruptedInitialApply(t *testing.T) {
 		t.Fatalf("operation = %#v", loaded)
 	}
 }
+
+func TestExecutorRecoveryLeavesTamperedAuthenticatedSnapshotUnfinished(t *testing.T) {
+	store := haproxyTestStore(t)
+	executor := Executor{Runner: &haproxyRunner{t: t}, Journal: store, Runtime: &switchRuntime{}, Protector: haproxyTestProtector(t), ConfigPath: filepath.Join(t.TempDir(), "haproxy.cfg"), PIDPath: filepath.Join(t.TempDir(), "haproxy.pid")}
+	id := domain.ID("haproxy_tampered_recovery")
+	snapshot, err := json.Marshal(recoverySnapshot{Exists: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	protectedSnapshot, err := executor.protectJournal(id, "snapshot", snapshot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	protectedCandidate, err := executor.protectJournal(id, "candidate", []byte(executorTestPlan(t, nil, false).Candidate))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var envelope secrets.Envelope
+	if err := json.Unmarshal([]byte(protectedSnapshot), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	envelope.Ciphertext[len(envelope.Ciphertext)-1] ^= 1
+	tampered, _ := json.Marshal(envelope)
+	now := time.Now().UTC()
+	operation := domain.Transaction{ID: id, Operation: "haproxy_apply", State: domain.TransactionPrepared, RequestedChange: `{}`, PreviousSnapshot: string(tampered), CandidateConfig: protectedCandidate, CreatedAt: now, UpdatedAt: now}
+	if err := store.CreateOperation(context.Background(), operation); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.TransitionOperation(context.Background(), id, domain.TransactionPrepared, domain.TransactionValidated, now, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.TransitionOperation(context.Background(), id, domain.TransactionValidated, domain.TransactionApplying, now, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := executor.Recover(context.Background()); err == nil {
+		t.Fatal("Recover() accepted a tampered authenticated snapshot")
+	}
+	operation, _ = store.Operation(context.Background(), id)
+	if operation.State != domain.TransactionApplying {
+		t.Fatalf("tampered operation state = %s", operation.State)
+	}
+}

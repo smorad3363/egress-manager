@@ -2,10 +2,14 @@ package nat
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/egress-manager/egress-manager/internal/domain"
+	"github.com/egress-manager/egress-manager/internal/secrets"
 	"github.com/egress-manager/egress-manager/internal/system"
 )
 
@@ -104,4 +108,84 @@ func TestIPTablesCandidateStatePreservesExistingAnchors(t *testing.T) {
 	if !state.PreroutingAnchor || !state.PostroutingAnchor || !state.ForwardAnchor {
 		t.Fatalf("candidate state lost existing anchors: %#v", state)
 	}
+}
+
+func TestRollbackCommittedRejectsMissingNFTStateBeforeTransition(t *testing.T) {
+	store := testExecutorStore(t)
+	plan := executableTestPlan(t)
+	runner := &scriptedRunner{t: t, steps: []runnerStep{
+		{command: "nft list tables", result: system.Result{ExitCode: 0}},
+		{command: "nft --check --file -", result: system.Result{ExitCode: 0}},
+		{command: "nft --file -", result: system.Result{ExitCode: 0}},
+		{command: "nft list tables", result: system.Result{ExitCode: 0}},
+	}}
+	executor := Executor{Runner: runner, Journal: store, Verifier: &fakeVerifier{}, Protector: natTestProtector(t)}
+	if err := executor.Execute(context.Background(), "nft_runtime_lost", `{}`, plan); err != nil {
+		t.Fatal(err)
+	}
+	operation, _ := store.Operation(context.Background(), "nft_runtime_lost")
+	if err := executor.RollbackCommitted(context.Background(), operation); !errors.Is(err, ErrHostStateChanged) {
+		t.Fatalf("RollbackCommitted() error = %v", err)
+	}
+	operation, _ = store.Operation(context.Background(), operation.ID)
+	if operation.State != domain.TransactionCommitted {
+		t.Fatalf("operation state = %s", operation.State)
+	}
+	runner.assertDone()
+}
+
+func TestRecoveryLeavesTamperedAuthenticatedNATJournalUnfinished(t *testing.T) {
+	for _, operationType := range []string{"nat_apply", "nat_apply_iptables"} {
+		t.Run(operationType, func(t *testing.T) {
+			store := testExecutorStore(t)
+			executor := Executor{Runner: &scriptedRunner{t: t}, Journal: store, Protector: natTestProtector(t)}
+			id := domain.ID("tampered_" + operationType)
+			candidate := executableTestPlan(t).Candidate
+			snapshot := []byte("absent")
+			if operationType == "nat_apply_iptables" {
+				candidate = executableIPTablesPlan(t).Candidate
+				snapshot, _ = json.Marshal(iptablesRecoverySnapshot{Family: IPv4, State: IPTablesState{NatRules: []string{}, FilterRules: []string{}}})
+			}
+			protectedSnapshot, err := executor.protectJournal(id, "snapshot", snapshot)
+			if err != nil {
+				t.Fatal(err)
+			}
+			protectedCandidate, err := executor.protectJournal(id, "candidate", []byte(candidate))
+			if err != nil {
+				t.Fatal(err)
+			}
+			now := time.Now().UTC()
+			operation := domain.Transaction{ID: id, Operation: operationType, State: domain.TransactionPrepared, RequestedChange: `{}`, PreviousSnapshot: tamperNATEnvelope(t, protectedSnapshot), CandidateConfig: protectedCandidate, CreatedAt: now, UpdatedAt: now}
+			if err := store.CreateOperation(context.Background(), operation); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.TransitionOperation(context.Background(), id, domain.TransactionPrepared, domain.TransactionValidated, now, ""); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.TransitionOperation(context.Background(), id, domain.TransactionValidated, domain.TransactionApplying, now, ""); err != nil {
+				t.Fatal(err)
+			}
+			if err := executor.Recover(context.Background()); err == nil {
+				t.Fatal("Recover() accepted a tampered authenticated journal")
+			}
+			operation, _ = store.Operation(context.Background(), id)
+			if operation.State != domain.TransactionApplying {
+				t.Fatalf("tampered operation state = %s", operation.State)
+			}
+		})
+	}
+}
+
+func tamperNATEnvelope(t *testing.T, value string) string {
+	t.Helper()
+	var envelope secrets.Envelope
+	if err := json.Unmarshal([]byte(value), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	envelope.Ciphertext[len(envelope.Ciphertext)-1] ^= 1
+	encoded, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(encoded)
 }

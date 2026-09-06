@@ -128,15 +128,25 @@ type iptablesRecoverySnapshot struct {
 }
 
 func (executor Executor) recoverIPTables(ctx context.Context, operation domain.Transaction) error {
-	encoded, _, err := executor.openJournalField(operation.ID, "snapshot", operation.PreviousSnapshot, true)
+	encoded, snapshotProtected, err := executor.openJournalField(operation.ID, "snapshot", operation.PreviousSnapshot, true)
 	if err != nil {
 		return err
+	}
+	candidate, candidateProtected, err := executor.openJournalField(operation.ID, "candidate", operation.CandidateConfig, true)
+	if err != nil {
+		return err
+	}
+	if snapshotProtected != candidateProtected {
+		return fmt.Errorf("NAT journal protection is inconsistent")
 	}
 	var snapshot iptablesRecoverySnapshot
 	if err := json.Unmarshal(encoded, &snapshot); err != nil {
 		return fmt.Errorf("decode interrupted iptables snapshot: %w", err)
 	}
 	if _, _, _, err := iptablesExecutables(snapshot.Family); err != nil {
+		return err
+	}
+	if _, err := iptablesStateFromCandidate(candidate, snapshot.State); err != nil {
 		return err
 	}
 	switch operation.State {
