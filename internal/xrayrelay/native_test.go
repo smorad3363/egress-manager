@@ -101,7 +101,13 @@ func TestNativeTCPListenerRelaysThroughSelectedXrayOutboundAndFailsClosed(t *tes
 			"settings":       map[string]any{"clients": []any{map[string]any{"id": nativeRelayUUID}}, "decryption": "none"},
 			"streamSettings": map[string]any{"network": "tcp"},
 		}},
-		"outbounds": []any{map[string]any{"protocol": "freedom", "tag": "direct"}},
+		"outbounds": []any{map[string]any{
+			"protocol": "freedom",
+			"tag":      "direct",
+			"settings": map[string]any{"finalRules": []any{map[string]any{
+				"action": "allow", "network": "tcp", "port": fmt.Sprintf("%d", backendPort), "ip": []string{"127.0.0.1"},
+			}}},
+		}},
 	}
 	serverPath := writeJSON(t, "xray-server.json", serverConfig)
 	server := startNativeXray(t, binary, serverPath)
