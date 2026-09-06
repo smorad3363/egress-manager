@@ -6,6 +6,7 @@ on:
       - feat/listener-egress-relay-alpha9
     paths:
       - scripts/dev/alpha9_backend_patch.py
+      - scripts/dev/alpha9_backend_fix1.py
       - .github/workflows/alpha9-implementation.yml
   workflow_dispatch:
 
@@ -26,9 +27,11 @@ jobs:
           go-version: '1.27.1'
           cache: true
       - name: Apply deterministic integration patch
-        run: python3 scripts/dev/alpha9_backend_patch.py
+        run: |
+          python3 scripts/dev/alpha9_backend_patch.py
+          python3 scripts/dev/alpha9_backend_fix1.py
       - name: Format
-        run: gofmt -w internal/domain/relay.go internal/domain/relay_test.go internal/database/relay.go internal/xrayrelay internal/api/relays.go internal/api/control.go internal/api/server.go internal/api/outbounds.go internal/app/daemon.go internal/app/web.go internal/config/config.go internal/ipc/protocol.go
+        run: gofmt -w internal/domain/relay.go internal/domain/relay_test.go internal/database/relay.go internal/database/database_test.go internal/xrayrelay internal/api/relays.go internal/api/control.go internal/api/server.go internal/api/outbounds.go internal/api/server_test.go internal/app/daemon.go internal/app/web.go internal/app/app_test.go internal/config/config.go internal/ipc/protocol.go
       - name: Verify Go
         run: |
           git diff --check
