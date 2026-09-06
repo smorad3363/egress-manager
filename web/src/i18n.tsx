@@ -47,7 +47,7 @@ function translateDynamic(value: string): string {
   return value;
 }
 
-export function translateText(value: string): string {
+function translateText(value: string): string {
   return fa.get(value) || translateDynamic(value);
 }
 
@@ -126,7 +126,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
   return <LanguageContext.Provider value={value}>{children}</LanguageContext.Provider>;
 }
 
-export function useLanguage() {
+function useLanguage() {
   const value = useContext(LanguageContext);
   if (!value) throw new Error("useLanguage must be used inside LanguageProvider");
   return value;
