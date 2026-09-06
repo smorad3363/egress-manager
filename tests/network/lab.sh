@@ -251,6 +251,16 @@ ip netns exec "$router_ns" ip -j -4 rule show priority "$route_priority" | grep 
 ip netns exec "$router_ns" ip -j -6 rule show priority "$route_priority" | grep -Fq '"protocol":"242"' || fail "owned IPv6 route rule marker missing"
 
 ip -n "$router_ns" link delete "$route_tun"
+ip netns exec "$router_ns" nft delete table inet egm_egress
+ip netns exec "$router_ns" ip -4 rule delete priority "$route_priority" table "$route_table" protocol 242
+ip netns exec "$router_ns" ip -6 rule delete priority "$route_priority" table "$route_table" protocol 242
+ip netns exec "$router_ns" ip -4 route flush table "$route_table"
+ip netns exec "$router_ns" ip -6 route flush table "$route_table"
+ip netns exec "$router_ns" "$routing_probe" --reconcile "$route_candidate_dir"
+ip netns exec "$router_ns" "$routing_probe" --verify-runtime "$route_candidate_dir"
+printf 'PASS: cold volatile-state loss reconciles once and repeated recovery is idempotent\n'
+
+ip -n "$router_ns" link delete "$route_tun"
 endpoint_result=$(printf 'endpoint-main-ok' | ip netns exec "$router_ns" timeout 3 socat - TCP:10.203.2.3:8080,connect-timeout=2)
 [ "$endpoint_result" = "endpoint-main-ok" ] || fail "outbound endpoint main-table path was captured"
 

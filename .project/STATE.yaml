@@ -11,7 +11,7 @@ status: in_progress
 
 last_green_ref: HEAD
 
-next_action: add a cross-component crash-checkpoint recovery matrix for prepared, applying, and rolling-back states with idempotent second recovery; keep real disposable-host reboot as an explicit external acceptance gap
+next_action: run and record the disposable Linux VM real-reboot gate in docs/recovery/FAILURE_INJECTION.md; all locally automatable Phase 11 failure injections are green
 
 dirty_work_expected: false
 
@@ -131,6 +131,7 @@ recent_decisions:
   - New nftables and iptables NAT transactions authenticate both snapshot and candidate; manual rollback compares only exact owned state, validates rollback natively before transition, and keeps legacy plaintext records crash-recovery-only.
   - The post-rollback gate used freshly compiled probes mounted into the pinned lab image because Docker registry DNS prevented an identical image rebuild; two privileged runs passed and the unavailable rebuild is recorded honestly.
   - Authenticated HAProxy and NAT recovery now authenticates all required journal fields before changing transaction state; corruption remains unfinished and visible, while missing live HAProxy/NAT runtime blocks manual rollback before transition.
+  - The privileged lab simulates cold volatile-state loss by removing the owned TUN, nftables table, and dual-stack policy state, then proves persisted-state reconciliation and an idempotent second run.
 
 touched_areas:
   - authenticated sing-box rollback
@@ -140,3 +141,4 @@ touched_areas:
   - authenticated HAProxy rollback
   - authenticated nftables and iptables NAT rollback
   - authenticated journal corruption and runtime-loss regression coverage
+  - Phase 11 failure-injection runbook and cold-state reconciliation lab
