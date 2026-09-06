@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release tag (for example v0.1.0-alpha.7)
+        description: Release tag (for example v0.1.0-alpha.8)
         required: true
         type: string
 
@@ -21,11 +21,11 @@ jobs:
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       github.event_name == 'workflow_dispatch' ||
-      contains(github.event.head_commit.message, '[release-alpha7]')
+      contains(github.event.head_commit.message, '[release-alpha8]')
     runs-on: ubuntu-22.04
     timeout-minutes: 100
     env:
-      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || (startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.0-alpha.7') }}
+      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || (startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.0-alpha.8') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -100,4 +100,4 @@ jobs:
             --target "${GITHUB_SHA}" \
             --prerelease \
             --title "Egress Manager ${RELEASE_VERSION}" \
-            --notes "Alpha.7 makes the secure installer observable and self-diagnosing. The one-line installer now shows download progress and named stages, keeps a persistent root-only install log under /var/log/egress-manager, reports the failing stage, prints the last 60 log lines on errors, verifies release SHA-256 before extraction, detects and reports the server IP, and prints the final HTTPS panel URL and TLS mode. Release checksum sidecars now contain portable basenames so sha256sum -c works directly from the download directory. Alpha.6 package-preservation protections remain: local APT uses --no-upgrade and --no-remove and CI fails if any pre-existing Ubuntu package disappears."
+            --notes "Alpha.8 focuses on panel usability. It adds Persian/English language switching with RTL Persian layout and a saved preference, replaces operator-facing technical wording with simpler labels and explanations, makes console search and Ctrl/Cmd+K functional, repairs Dashboard shortcuts and Network retry, and stops unfinished Firewall/Logs/Settings pages from showing misleading Dashboard actions. The Xray page now clearly explains that the bundled runtime is installed while native routing manages a compatible existing Xray-family service, and its empty-state scan action works. Browser regression tests cover these repaired actions and Persian accessibility labels. Alpha.7 smart-installer diagnostics and Alpha.6 package-preservation protections remain unchanged."
