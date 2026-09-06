@@ -16,10 +16,10 @@ Supported hosts: Ubuntu 22.04, 24.04, and 26.04 on amd64 or arm64 with systemd.
 The secure bootstrap downloads one complete release bundle for the detected Ubuntu release and CPU architecture. The bundle contains the prebuilt browser panel, Egress Manager binaries, the Bash management utility, pinned sing-box, Xray and lego binaries, the complete Python 3 runtime/standard library used by installer and manager tooling, and the Ubuntu package dependency closure used by the offline installer.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.8/scripts/install/install-secure.sh | sudo sh -s -- --version v0.1.0-alpha.8
+curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.9/scripts/install/install-secure.sh | sudo sh -s -- --version v0.1.0-alpha.9
 ```
 
-Alpha.8 keeps the Alpha.7 observable installer behavior. It prints named stages such as preflight, bundle download, checksum verification, extraction, runtime installation, server-IP detection, TLS issuance, service startup, health verification, administrator provisioning, and completion. Large downloads use curl's visible progress bar. The complete combined install log is stored at `/var/log/egress-manager/install-*.log`. If a command fails, the installer identifies the active stage, prints the log path, and emits the last 60 log lines before exiting nonzero.
+Alpha.9 keeps the Alpha.7 observable installer behavior. It prints named stages such as preflight, bundle download, checksum verification, extraction, runtime installation, server-IP detection, TLS issuance, service startup, health verification, administrator provisioning, and completion. Large downloads use curl's visible progress bar. The complete combined install log is stored at `/var/log/egress-manager/install-*.log`. If a command fails, the installer identifies the active stage, prints the log path, and emits the last 60 log lines before exiting nonzero.
 
 Node.js, npm, and pnpm are release-build dependencies only. They are deliberately not installed on the target gateway because the React application is compiled before the release bundle is produced.
 
@@ -29,11 +29,17 @@ On a fresh interactive installation the installer prompts for an administrator u
 
 Existing configuration, IPC key, administrator database, TLS material, and runtime state are retained on repeat installs.
 
+## Listener relays
+
+Alpha.9 adds the project-owned `egress-manager-xray-relay.service`. It remains inactive until a relay candidate exists. A relay listens on a configured local TCP/UDP port, uses one selected Egress Manager-managed Xray outbound, and reaches only one configured destination. The initial managed Xray relay adapter imports VLESS REALITY/XHTTP links. Relay planning rejects protected management/SSH ports, overlapping desired listeners, and collisions with listeners owned by other software. There is no direct fallback if the selected outbound is unavailable.
+
+The relay service uses `/var/lib/egress-manager/private/xray-relay.json` and is separate from foreign standalone Xray, Marzban, or 3x-ui services. See [../../docs/listener-relays.md](../../docs/listener-relays.md).
+
 ## Browser panel languages
 
-Alpha.8 adds English and Persian to the browser panel. The language selector is available on the login screen and in the main top bar. Persian mode uses RTL layout, keeps technical values such as IP addresses, paths, JSON, and commands left-to-right, and saves the selected language in the browser.
+Alpha.8 and later include English and Persian in the browser panel. The language selector is available on the login screen and in the main top bar. Persian mode uses RTL layout, keeps technical values such as IP addresses, paths, JSON, and commands left-to-right, and saves the selected language in the browser.
 
-Operator-facing Persian text favors plain-language outcomes over implementation terms. Unfinished Firewall, Logs, and Settings browser pages now say clearly that the browser control is not available instead of showing unrelated Dashboard actions.
+Operator-facing Persian text favors plain-language outcomes over implementation terms. Unfinished Firewall, Logs, and Settings browser pages are not exposed as production controls until real browser APIs exist.
 
 ## Package-safety invariant
 
@@ -60,7 +66,7 @@ sudo egress-manager restart
 sudo egress-manager logs
 sudo egress-manager admin operator
 sudo egress-manager update
-sudo egress-manager update v0.1.0-alpha.8
+sudo egress-manager update v0.1.0-alpha.9
 sudo egress-manager config
 sudo egress-manager config-show
 sudo egress-manager config-get listen_port
@@ -136,7 +142,7 @@ Offline bundle mode does not contact an external CA by default. It generates a s
 
 Bundle mode verifies `MANIFEST.sha256`, performs an APT dry-run that is forbidden from upgrading or removing host packages, installs only dependencies that are actually missing from the indexed local repository, and does not download Xray, sing-box, npm packages, or other runtime dependencies from the network.
 
-Xray is installed under `/usr/local/lib/egress-manager/bin/xray` for Egress Manager integration and validation. The installer does not enable a standalone Xray service and does not overwrite a foreign Xray, Marzban, or 3x-ui installation.
+Xray is installed under `/usr/local/lib/egress-manager/bin/xray` for Egress Manager integration and validation. The installer does not enable a standalone foreign Xray service and does not overwrite a foreign Xray, Marzban, or 3x-ui installation. Alpha.9 may enable the separate project-owned `egress-manager-xray-relay.service`; its `ConditionPathExists=` keeps it inactive until Egress Manager has an applied relay candidate.
 
 Verify later with:
 
