@@ -25,10 +25,12 @@ Project recovery state lives in `.project/STATE.yaml`.
 Alpha releases support Ubuntu 22.04, 24.04, and 26.04 on amd64 and arm64. Release bundles include the prebuilt browser UI, pinned sing-box and Xray runtimes, lego for HTTPS certificate management, the complete Python 3 runtime needed by the installer/manager, plus per-Ubuntu offline dependency archives; Node/npm/pnpm are not required on the target host.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.7/scripts/install/install-secure.sh | sudo sh -s -- --version v0.1.0-alpha.7
+curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.8/scripts/install/install-secure.sh | sudo sh -s -- --version v0.1.0-alpha.8
 ```
 
 The secure installer exposes the browser panel directly over HTTPS on the selected high port. It attempts a Let's Encrypt short-lived IP certificate when online and falls back to an IP-matching self-signed certificate when public issuance is unavailable. Fresh interactive installs prompt for an administrator username/password.
+
+Alpha.8 improves the browser panel for day-to-day operators: English/Persian language switching, RTL Persian layout, simpler wording, working console search, repaired navigation/retry actions, honest unavailable states for unfinished pages, and clearer Xray integration messaging. The language preference is saved in the browser.
 
 Alpha.7 makes installation observable: the one-line secure installer shows named stages and download progress, verifies the release checksum before extraction, detects and reports the server IP, stores a persistent install log under `/var/log/egress-manager/`, and on failure prints the failing stage plus the last 60 log lines. Release checksum sidecars use portable basenames so `sha256sum -c` works directly from the download directory.
 
