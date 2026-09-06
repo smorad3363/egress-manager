@@ -1,0 +1,17 @@
+[Unit]
+Description=Egress Manager IP TLS certificate renewal
+Documentation=https://github.com/smorad3363/egress-manager
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/lib/egress-manager/tls-renew.sh
+TimeoutStartSec=10min
+PrivateTmp=true
+ProtectHome=true
+ProtectHostname=true
+ProtectClock=true
+RestrictSUIDSGID=true

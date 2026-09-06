@@ -66,6 +66,10 @@ func runProvision(arguments []string) int {
 		fmt.Fprintf(os.Stderr, "egress-web: read password: %v\n", err)
 		return 1
 	}
+	// Provisioning may run as root while egress-web is already active. SQLite WAL/SHM
+	// sidecar files must remain group-writable for the egress-manager service group.
+	previousUmask := syscall.Umask(0o007)
+	defer syscall.Umask(previousUmask)
 	if err := app.ProvisionAdmin(context.Background(), *configPath, *keyPath, *username, password); err != nil {
 		fmt.Fprintf(os.Stderr, "egress-web: provision administrator: %v\n", err)
 		return 1

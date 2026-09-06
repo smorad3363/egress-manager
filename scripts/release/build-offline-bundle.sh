@@ -27,8 +27,9 @@ tar_archive="${output_directory}/${bundle_name}.tar.gz"
 rm -rf "${bundle_directory}" "${zip_archive}" "${zip_archive}.sha256" "${tar_archive}" "${tar_archive}.sha256"
 mkdir -p "${bundle_directory}/package" "${bundle_directory}/debs"
 cp -R "${package_directory}/." "${bundle_directory}/package/"
-cp scripts/install/install.sh "${bundle_directory}/install.sh"
-chmod 0755 "${bundle_directory}/install.sh"
+cp scripts/install/install.sh "${bundle_directory}/install-core.sh"
+cp scripts/install/install-secure.sh "${bundle_directory}/install.sh"
+chmod 0755 "${bundle_directory}/install.sh" "${bundle_directory}/install-core.sh"
 printf '%s\n' "${ubuntu_version}" > "${bundle_directory}/UBUNTU_VERSION"
 printf '%s\n' "${architecture}" > "${bundle_directory}/ARCHITECTURE"
 printf '%s\n' "${package_version}" > "${bundle_directory}/VERSION"
@@ -49,7 +50,7 @@ docker run --rm --platform "linux/${architecture}" \
       install -y --no-install-recommends \
         ca-certificates curl tar gzip coreutils grep sed mawk findutils \
         iproute2 nftables iptables haproxy wireguard-tools openvpn \
-        procps passwd util-linux
+        procps passwd util-linux openssl python3-minimal
     rm -rf /bundle/partial /bundle/lock
   '
 

@@ -17,17 +17,20 @@ archive="${output_directory}/egress-manager-linux-${architecture}.tar.gz"
 ldflags="-s -w -X github.com/egress-manager/egress-manager/internal/buildinfo.Version=${version} -X github.com/egress-manager/egress-manager/internal/buildinfo.Commit=${commit} -X github.com/egress-manager/egress-manager/internal/buildinfo.Date=${build_date}"
 sing_box_version="1.13.20"
 xray_version="26.7.28"
+lego_version="5.3.1"
 
 case "${architecture}" in
   amd64)
     sing_box_sha256="646bc01bf128c32a12eb50d8690e387bba7504da7b1d65c704bd53916e38595a"
     xray_archive="Xray-linux-64.zip"
     xray_sha256="8195d909f1109b8f3d99eefe401a3c451d7bf4af71f24d3815420f77e5dd2a40"
+    lego_sha256="b3c71b122ee1947eacfe0b809b955647f6377239fe4bfc49f73b1a091ae1252a"
     ;;
   arm64)
     sing_box_sha256="7f8187b1d1d30258cd4fa70892eaa232649f8f28b294078eeac719579e14cf42"
     xray_archive="Xray-linux-arm64-v8a.zip"
     xray_sha256="f5698bb218ada3b4022db26fafc39601c5f53b46b19eb76c9616325985807501"
+    lego_sha256="58db563a2b97c2259516fa9910b4a9e1634a0737723d0381a65af1bf93a4b433"
     ;;
 esac
 
@@ -67,16 +70,28 @@ done
 curl --fail --location --silent --show-error --retry 3 --output "${package_directory}/share/source/xray-core-${xray_version}.tar.gz" "https://github.com/XTLS/Xray-core/archive/refs/tags/v${xray_version}.tar.gz"
 curl --fail --location --silent --show-error --retry 3 --output "${package_directory}/share/licenses/xray-core-LICENSE" "https://raw.githubusercontent.com/XTLS/Xray-core/v${xray_version}/LICENSE"
 
+lego_archive="lego_v${lego_version}_linux_${architecture}.tar.gz"
+curl --fail --location --silent --show-error --retry 3 --output "${runtime_directory}/${lego_archive}" "https://github.com/go-acme/lego/releases/download/v${lego_version}/${lego_archive}"
+printf '%s  %s\n' "${lego_sha256}" "${runtime_directory}/${lego_archive}" | sha256sum --check --status || { echo "build-linux.sh: lego checksum mismatch" >&2; exit 1; }
+mkdir -p "${runtime_directory}/lego"
+tar -xzf "${runtime_directory}/${lego_archive}" -C "${runtime_directory}/lego"
+install -m 0755 "${runtime_directory}/lego/lego" "${package_directory}/bin/lego"
+curl --fail --location --silent --show-error --retry 3 --output "${package_directory}/share/source/lego-${lego_version}.tar.gz" "https://github.com/go-acme/lego/archive/refs/tags/v${lego_version}.tar.gz"
+curl --fail --location --silent --show-error --retry 3 --output "${package_directory}/share/licenses/lego-LICENSE" "https://raw.githubusercontent.com/go-acme/lego/v${lego_version}/LICENSE"
+
 cp -R web/dist/. "${package_directory}/web/"
 cp packaging/config.json.in "${package_directory}/config.json.in"
 cp packaging/systemd/*.service "${package_directory}/systemd/"
+for timer in packaging/systemd/*.timer; do [ -f "${timer}" ] && cp "${timer}" "${package_directory}/systemd/"; done
 cp scripts/install/verify.sh "${package_directory}/verify.sh"
 cp scripts/install/manager.sh "${package_directory}/manager.sh"
-chmod 0755 "${package_directory}/verify.sh" "${package_directory}/manager.sh"
+cp scripts/install/tls-renew.sh "${package_directory}/tls-renew.sh"
+chmod 0755 "${package_directory}/verify.sh" "${package_directory}/manager.sh" "${package_directory}/tls-renew.sh"
 printf '%s\n' "${version}" > "${package_directory}/VERSION"
 cat > "${package_directory}/RUNTIME_VERSIONS" <<EOF_VERSIONS
 sing-box=${sing_box_version}
 xray=${xray_version}
+lego=${lego_version}
 frontend_node_build=24.19.0
 frontend_pnpm_build=11.25.0
 EOF_VERSIONS
