@@ -2,21 +2,30 @@
 set -eu
 
 repository="smorad3363/egress-manager"
-version="${EGRESS_VERSION:-v0.1.0-alpha.6}"
+version="${EGRESS_VERSION:-v0.1.0-alpha.7}"
 bundle_root="${EGRESS_BUNDLE_ROOT:-}"
 skip_start="${EGRESS_SKIP_START:-0}"
 ca_mode="auto"
 requested_ip="${EGRESS_SERVER_IP:-}"
 admin_mode="${EGRESS_ADMIN_MODE:-auto}"
 admin_user="${EGRESS_ADMIN_USER:-operator}"
+log_file="${EGRESS_INSTALL_LOG:-}"
+current_stage="startup"
+bootstrap_directory=""
+stream_fifo=""
+stty_hidden=0
 
 usage() {
   cat <<'EOF_USAGE'
 Usage: install-secure.sh [--version TAG] [--bundle-root DIR] [--ip ADDRESS] [--public-ca|--self-signed] [--skip-start] [--skip-admin|--admin-user USER]
 
-Online mode downloads the complete bundle and attempts a publicly trusted Let's Encrypt
-short-lived IP certificate. If public issuance is unavailable, installation continues with
-a self-signed certificate whose SAN is the server IP.
+Online mode detects Ubuntu/architecture/server IP, downloads the matching release bundle with
+visible progress, verifies SHA-256, installs the runtime, configures HTTPS, starts services,
+and prints the final panel URL. A complete install log is written under /var/log/egress-manager.
+
+Online mode attempts a publicly trusted Let's Encrypt short-lived IP certificate. If public
+issuance is unavailable, installation continues with a self-signed certificate whose SAN is
+the server IP.
 
 On a fresh interactive installation, the installer asks for an administrator username and
 password after HTTPS becomes healthy. Use --skip-admin for non-interactive provisioning or
@@ -42,19 +51,121 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-fail() { echo "install-secure.sh: $*" >&2; exit 1; }
+timestamp() { date -u '+%Y-%m-%dT%H:%M:%SZ'; }
+
+log_line() {
+  message="$*"
+  printf '%s\n' "${message}"
+  if [ -n "${log_file}" ]; then
+    printf '%s %s\n' "$(timestamp)" "${message}" >> "${log_file}" 2>/dev/null || true
+  fi
+}
+
+warn() { log_line "WARNING: $*" >&2; }
+
+fail() {
+  log_line "ERROR [${current_stage}]: $*" >&2
+  exit 1
+}
+
+stage() {
+  current_stage="$1"
+  log_line ""
+  log_line "==> ${current_stage}"
+}
+
 has_controlling_tty() {
   (exec 3</dev/tty 4>/dev/tty) 2>/dev/null
 }
 
-[ "$(id -u)" -eq 0 ] || fail "run as root (use sudo)"
-[ "$(uname -s)" = "Linux" ] || fail "Linux is required"
+init_logging() {
+  if [ -z "${log_file}" ]; then
+    install -d -o root -g root -m 0750 /var/log/egress-manager
+    log_file="/var/log/egress-manager/install-$(date -u '+%Y%m%dT%H%M%SZ')-$$.log"
+  else
+    install -d -o root -g root -m 0750 "$(dirname -- "${log_file}")"
+  fi
+  : >> "${log_file}"
+  chmod 0640 "${log_file}" 2>/dev/null || true
+  export EGRESS_INSTALL_LOG="${log_file}"
+}
+
+cleanup_all() {
+  if [ "${stty_hidden}" = "1" ]; then
+    stty echo </dev/tty 2>/dev/null || true
+    stty_hidden=0
+  fi
+  if [ -n "${stream_fifo}" ]; then
+    rm -f -- "${stream_fifo}" 2>/dev/null || true
+  fi
+  if [ -n "${bootstrap_directory}" ]; then
+    rm -rf -- "${bootstrap_directory}" 2>/dev/null || true
+  fi
+}
+
+on_exit() {
+  rc="$1"
+  trap - EXIT HUP INT TERM
+  cleanup_all
+  if [ "${rc}" -ne 0 ] && [ -n "${log_file}" ] && [ -f "${log_file}" ]; then
+    printf '\nInstallation failed during: %s\n' "${current_stage}" >&2
+    printf 'Install log: %s\n' "${log_file}" >&2
+    printf '%s\n' '----- last 60 log lines -----' >&2
+    tail -n 60 "${log_file}" >&2 2>/dev/null || true
+    printf '%s\n' '-----------------------------' >&2
+  fi
+  exit "${rc}"
+}
+
+run_live() {
+  stream_fifo="/tmp/egress-manager-install.$$.fifo"
+  rm -f -- "${stream_fifo}"
+  mkfifo "${stream_fifo}" || fail "could not create logging pipe"
+  tee -a "${log_file}" < "${stream_fifo}" &
+  tee_pid=$!
+  set +e
+  "$@" > "${stream_fifo}" 2>&1
+  rc=$?
+  set -e
+  wait "${tee_pid}" 2>/dev/null || true
+  rm -f -- "${stream_fifo}"
+  stream_fifo=""
+  return "${rc}"
+}
+
+run_logged() {
+  "$@" >> "${log_file}" 2>&1
+}
+
+[ "$(id -u)" -eq 0 ] || { echo "install-secure.sh: run as root (use sudo)" >&2; exit 1; }
+[ "$(uname -s)" = "Linux" ] || { echo "install-secure.sh: Linux is required" >&2; exit 1; }
+command -v install >/dev/null 2>&1 || { echo "install-secure.sh: coreutils/install is required" >&2; exit 1; }
+init_logging
+trap 'on_exit $?' EXIT
+trap 'exit 130' HUP INT TERM
+
+stage "Preflight"
 [ -r /etc/os-release ] || fail "/etc/os-release is unavailable"
 . /etc/os-release
 [ "${ID:-}" = "ubuntu" ] || fail "supported distributions: Ubuntu 22.04, 24.04, 26.04"
 case "${VERSION_ID:-}" in 22.04|24.04|26.04) ubuntu_version="${VERSION_ID}" ;; *) fail "unsupported Ubuntu release: ${VERSION_ID:-unknown}" ;; esac
 case "$(uname -m)" in x86_64|amd64) architecture="amd64" ;; aarch64|arm64) architecture="arm64" ;; *) fail "supported architectures: amd64, arm64" ;; esac
 case "${admin_mode}" in auto|skip|prompt) ;; *) fail "invalid EGRESS_ADMIN_MODE: ${admin_mode}" ;; esac
+for required in date tail tee mkfifo df awk sed grep wc stty; do
+  command -v "${required}" >/dev/null 2>&1 || fail "required base command missing: ${required}"
+done
+available_tmp_kb="$(df -Pk /tmp 2>/dev/null | awk 'NR==2 {print $4}')"
+if [ -n "${available_tmp_kb}" ] && [ "${available_tmp_kb}" -lt 524288 ] 2>/dev/null; then
+  fail "less than 512 MiB is available under /tmp; free disk space before installation"
+fi
+log_line "Version: ${version}"
+log_line "Host: Ubuntu ${ubuntu_version} ${architecture}"
+log_line "Log: ${log_file}"
+if [ -r /usr/local/lib/egress-manager/VERSION ]; then
+  log_line "Existing install: $(sed -n '1p' /usr/local/lib/egress-manager/VERSION)"
+else
+  log_line "Existing install: none detected"
+fi
 
 script_directory=""
 case "$0" in /*|*/*) script_directory="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd || true)" ;; esac
@@ -66,28 +177,40 @@ fi
 if [ -z "${bundle_root}" ]; then
   command -v curl >/dev/null 2>&1 || fail "curl is required for online bootstrap"
   command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required for online bootstrap"
+
   if ! python3 -c 'import json, zipfile' >/dev/null 2>&1; then
+    stage "Repair Python bootstrap"
     export DEBIAN_FRONTEND=noninteractive
-    apt-get update
-    apt-get install -y --no-install-recommends --no-remove python3 ca-certificates
+    run_live apt-get update || fail "apt-get update failed while repairing Python"
+    run_live apt-get install -y --no-install-recommends --no-remove python3 ca-certificates || fail "could not repair the complete Python 3 runtime"
   fi
   python3 -c 'import json, zipfile' >/dev/null 2>&1 || fail "a complete Python 3 standard library is required for the online bootstrap"
 
-  temporary_directory="$(mktemp -d)"
-  cleanup_bootstrap() { rm -rf -- "${temporary_directory}"; }
-  trap cleanup_bootstrap EXIT HUP INT TERM
+  bootstrap_directory="$(mktemp -d)"
   bundle_name="egress-manager-offline-ubuntu${ubuntu_version}-${architecture}"
   release_base="https://github.com/${repository}/releases/download/${version}"
-  archive="${temporary_directory}/${bundle_name}.zip"
+  archive="${bootstrap_directory}/${bundle_name}.zip"
   checksum="${archive}.sha256"
-  echo "Downloading Egress Manager ${version} secure bundle for Ubuntu ${ubuntu_version} ${architecture}..."
-  curl --fail --location --silent --show-error --retry 3 --output "${archive}" "${release_base}/${bundle_name}.zip"
-  curl --fail --location --silent --show-error --retry 3 --output "${checksum}" "${release_base}/${bundle_name}.zip.sha256"
-  expected="$(awk '{print $1}' "${checksum}")"
+
+  stage "Download release bundle"
+  log_line "Asset: ${bundle_name}.zip"
+  run_live curl --fail --location --show-error --retry 3 --retry-delay 2 --retry-all-errors \
+    --connect-timeout 10 --max-time 1200 --progress-bar \
+    --output "${archive}" "${release_base}/${bundle_name}.zip" || fail "bundle download failed"
+  run_logged curl --fail --location --silent --show-error --retry 3 --retry-delay 2 --retry-all-errors \
+    --connect-timeout 10 --max-time 120 \
+    --output "${checksum}" "${release_base}/${bundle_name}.zip.sha256" || fail "checksum download failed"
+
+  stage "Verify release checksum"
+  expected="$(awk 'NR==1 {print $1}' "${checksum}")"
   actual="$(sha256sum "${archive}" | awk '{print $1}')"
-  [ -n "${expected}" ] && [ "${expected}" = "${actual}" ] || fail "release bundle checksum mismatch"
-  python3 -m zipfile -e "${archive}" "${temporary_directory}/extracted"
-  extracted_root="${temporary_directory}/extracted/${bundle_name}"
+  [ -n "${expected}" ] || fail "release checksum file is empty"
+  [ "${expected}" = "${actual}" ] || fail "release bundle checksum mismatch (expected ${expected}, got ${actual})"
+  log_line "SHA-256: ${actual} OK"
+
+  stage "Extract release bundle"
+  run_logged python3 -m zipfile -e "${archive}" "${bootstrap_directory}/extracted" || fail "could not extract release ZIP"
+  extracted_root="${bootstrap_directory}/extracted/${bundle_name}"
   [ -f "${extracted_root}/install.sh" ] || fail "release bundle is incomplete"
 
   child_ca="--public-ca"
@@ -97,6 +220,8 @@ if [ -z "${bundle_root}" ]; then
   [ "${skip_start}" = "1" ] && set -- "$@" --skip-start
   [ "${admin_mode}" = "skip" ] && set -- "$@" --skip-admin
   [ "${admin_mode}" = "prompt" ] && set -- "$@" --admin-user "${admin_user}"
+
+  stage "Run secure installer"
   sh "${extracted_root}/install.sh" "$@"
   exit $?
 fi
@@ -113,15 +238,15 @@ done
 fresh_database=0
 [ -e /var/lib/egress-manager/database/egress-manager.db ] || fresh_database=1
 
-# The core installer installs all application/runtime files and dependency closure, but it
-# does not start the HTTP service. TLS is configured before the first service start.
-sh "${core_installer}" --bundle-root "${bundle_root}" --skip-start --public-http
+stage "Install runtime and application files"
+run_live sh "${core_installer}" --bundle-root "${bundle_root}" --skip-start --public-http || fail "core installation failed"
 
+stage "Validate installed runtime"
 for command in python3 openssl curl ss ip; do command -v "${command}" >/dev/null 2>&1 || fail "required command missing after bundle installation: ${command}"; done
 python3 -c 'import json, ipaddress, tempfile' >/dev/null 2>&1 || fail "complete Python 3 standard library missing after bundle installation"
 install -o root -g root -m 0755 "${package_directory}/bin/lego" /usr/local/lib/egress-manager/bin/lego
 install -o root -g root -m 0755 "${package_directory}/tls-renew.sh" /usr/local/lib/egress-manager/tls-renew.sh
-/usr/local/lib/egress-manager/bin/lego --version >/dev/null
+/usr/local/lib/egress-manager/bin/lego --version >> "${log_file}" 2>&1 || fail "bundled lego runtime is invalid"
 
 validate_ip() {
   python3 - "$1" <<'PY'
@@ -133,14 +258,20 @@ except ValueError:
 PY
 }
 
+stage "Detect server IP"
+detected_public_ip="$(curl -4fsS --max-time 7 https://api.ipify.org 2>/dev/null || true)"
 server_ip="${requested_ip}"
-if [ -z "${server_ip}" ] && [ "${ca_mode}" != "self-signed" ]; then
-  server_ip="$(curl -4fsS --max-time 7 https://api.ipify.org 2>/dev/null || true)"
+if [ -n "${requested_ip}" ] && [ -n "${detected_public_ip}" ] && [ "${requested_ip}" != "${detected_public_ip}" ]; then
+  warn "requested IP ${requested_ip} differs from detected public IP ${detected_public_ip}; using the explicitly requested IP"
+fi
+if [ -z "${server_ip}" ]; then
+  server_ip="${detected_public_ip}"
 fi
 if [ -z "${server_ip}" ]; then
   server_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}')"
 fi
 [ -n "${server_ip}" ] && validate_ip "${server_ip}" || fail "could not determine a valid server IP; rerun with --ip ADDRESS"
+log_line "Server IP: ${server_ip}"
 
 tls_directory="/etc/egress-manager/tls"
 certificate_path="${tls_directory}/server.crt"
@@ -165,13 +296,14 @@ previous_mode=""
 cert_mode="self-signed"
 if cert_matches_ip && [ "${previous_mode}" = "letsencrypt" ]; then cert_mode="letsencrypt"; fi
 
+stage "Prepare TLS certificate"
 if ! cert_matches_ip; then
   tmp_key="${tls_directory}/server.key.new.$$"
   tmp_cert="${tls_directory}/server.crt.new.$$"
   rm -f "${tmp_key}" "${tmp_cert}"
   openssl req -x509 -newkey rsa:3072 -sha256 -nodes -days 3650 \
     -keyout "${tmp_key}" -out "${tmp_cert}" -subj "/CN=${server_ip}" \
-    -addext "subjectAltName=IP:${server_ip}" >/dev/null 2>&1
+    -addext "subjectAltName=IP:${server_ip}" >> "${log_file}" 2>&1 || fail "could not generate self-signed fallback certificate"
   install -o root -g egress-manager -m 0640 "${tmp_key}" "${private_key_path}"
   install -o root -g root -m 0644 "${tmp_cert}" "${certificate_path}"
   rm -f "${tmp_key}" "${tmp_cert}"
@@ -203,20 +335,24 @@ if [ "${ca_mode}" != "self-signed" ]; then
   challenge=""
   if port_free 80; then challenge="--http"; elif port_free 443; then challenge="--tls"; fi
   if [ -n "${challenge}" ]; then
-    echo "Attempting a trusted Let's Encrypt short-lived certificate for ${server_ip}..."
-    if /usr/local/lib/egress-manager/bin/lego run \
+    stage "Request trusted Let's Encrypt IP certificate"
+    log_line "ACME challenge: ${challenge#--}"
+    if run_live /usr/local/lib/egress-manager/bin/lego run \
       --accept-tos --path "${acme_directory}" --domains "${server_ip}" \
       --profile shortlived --key-type EC256 --no-random-sleep ${challenge}; then
       if find_acme_material; then
         install -o root -g root -m 0644 "${cert_source}" "${certificate_path}"
         install -o root -g egress-manager -m 0640 "${key_source}" "${private_key_path}"
         cert_mode="letsencrypt"
+        log_line "Trusted certificate installed."
+      else
+        warn "ACME completed but matching certificate material was not found; keeping self-signed fallback"
       fi
     else
-      echo "Public certificate issuance was unavailable; keeping the IP self-signed fallback." >&2
+      warn "public certificate issuance failed; keeping the IP self-signed fallback"
     fi
   else
-    echo "Ports 80 and 443 are already occupied; keeping the IP self-signed fallback." >&2
+    warn "ports 80 and 443 are already occupied; keeping the IP self-signed fallback"
   fi
 fi
 
@@ -224,6 +360,7 @@ printf '%s\n' "${cert_mode}" > "${mode_path}"
 chown root:egress-manager "${mode_path}"
 chmod 0640 "${mode_path}"
 
+stage "Configure HTTPS"
 python3 - /etc/egress-manager/config.json "${certificate_path}" "${private_key_path}" <<'PY'
 import json, os, sys, tempfile
 path, cert, key = sys.argv[1:]
@@ -251,19 +388,21 @@ install -o root -g root -m 0644 "${package_directory}/systemd/egress-manager-cer
 install -o root -g root -m 0644 "${package_directory}/systemd/egress-manager-cert-renew.timer" /etc/systemd/system/egress-manager-cert-renew.timer
 
 if [ "${skip_start}" = "1" ]; then
-  printf 'Egress Manager secure files installed; service start skipped.\n'
+  log_line "Egress Manager secure files installed; service start skipped."
+  log_line "Install log: ${log_file}"
   exit 0
 fi
 
-systemctl daemon-reload
-systemctl enable egressd.service egress-web.service
+stage "Start and verify services"
+run_logged systemctl daemon-reload || fail "systemd daemon-reload failed"
+run_logged systemctl enable egressd.service egress-web.service || fail "could not enable Egress Manager services"
 if [ "${cert_mode}" = "letsencrypt" ]; then
-  systemctl enable --now egress-manager-cert-renew.timer
+  run_logged systemctl enable --now egress-manager-cert-renew.timer || fail "could not enable certificate renewal timer"
 else
-  systemctl disable --now egress-manager-cert-renew.timer >/dev/null 2>&1 || true
+  systemctl disable --now egress-manager-cert-renew.timer >> "${log_file}" 2>&1 || true
 fi
-systemctl restart egressd.service
-systemctl restart egress-web.service
+run_logged systemctl restart egressd.service || fail "egressd failed to restart"
+run_logged systemctl restart egress-web.service || fail "egress-web failed to restart"
 
 panel_port="$(sed -n 's/^[[:space:]]*"listen_port":[[:space:]]*\([0-9][0-9]*\),*$/\1/p' /etc/egress-manager/config.json)"
 [ -n "${panel_port}" ] || fail "cannot read panel port"
@@ -275,7 +414,11 @@ for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
   fi
   sleep 1
 done
-[ "${ready}" = "1" ] || { systemctl --no-pager --full status egressd.service egress-web.service >&2 || true; fail "HTTPS services did not become healthy"; }
+if [ "${ready}" != "1" ]; then
+  run_live systemctl --no-pager --full status egressd.service egress-web.service || true
+  fail "HTTPS services did not become healthy"
+fi
+log_line "Health check: OK"
 
 prompt_admin=0
 if [ "${admin_mode}" = "prompt" ]; then
@@ -285,6 +428,7 @@ elif [ "${admin_mode}" = "auto" ] && [ "${fresh_database}" = "1" ] && has_contro
 fi
 
 if [ "${prompt_admin}" = "1" ]; then
+  stage "Create administrator"
   has_controlling_tty || fail "an interactive terminal is required to provision the administrator"
   if [ "${admin_mode}" = "auto" ]; then
     printf 'Administrator username [%s]: ' "${admin_user}" >/dev/tty
@@ -293,30 +437,34 @@ if [ "${prompt_admin}" = "1" ]; then
   fi
   printf 'Administrator password (minimum 12 characters): ' >/dev/tty
   stty -echo </dev/tty
-  trap 'stty echo </dev/tty 2>/dev/null || true' EXIT HUP INT TERM
+  stty_hidden=1
   IFS= read -r admin_password </dev/tty
   stty echo </dev/tty
-  trap - EXIT HUP INT TERM
+  stty_hidden=0
   printf '\nConfirm administrator password: ' >/dev/tty
   stty -echo </dev/tty
-  trap 'stty echo </dev/tty 2>/dev/null || true' EXIT HUP INT TERM
+  stty_hidden=1
   IFS= read -r admin_password_confirm </dev/tty
   stty echo </dev/tty
-  trap - EXIT HUP INT TERM
+  stty_hidden=0
   printf '\n' >/dev/tty
   [ "${admin_password}" = "${admin_password_confirm}" ] || fail "administrator passwords do not match"
   [ "$(LC_ALL=C printf '%s' "${admin_password}" | wc -c)" -ge 12 ] || fail "administrator password must be at least 12 bytes"
-  printf '%s\n' "${admin_password}" | /usr/local/lib/egress-manager/bin/egress-web provision-admin --username "${admin_user}" --password-stdin
+  printf '%s\n' "${admin_password}" | /usr/local/lib/egress-manager/bin/egress-web provision-admin --username "${admin_user}" --password-stdin >> "${log_file}" 2>&1 || fail "administrator provisioning failed"
   unset admin_password admin_password_confirm
+  log_line "Administrator provisioned: ${admin_user}"
 elif [ "${admin_mode}" = "auto" ] && [ "${fresh_database}" = "1" ]; then
-  printf 'Administrator was not provisioned because no interactive terminal is available. Run: sudo egress-manager admin operator\n'
+  warn "administrator was not provisioned because no interactive terminal is available; run: sudo egress-manager admin operator"
 fi
 
-printf 'Installed Egress Manager %s with HTTPS.\n' "$(sed -n '1p' "${bundle_root}/VERSION")"
-printf 'Panel: https://%s:%s/login\n' "${server_ip}" "${panel_port}"
+stage "Installation complete"
+installed_version="$(sed -n '1p' "${bundle_root}/VERSION")"
+log_line "Installed Egress Manager ${installed_version} with HTTPS."
+log_line "Panel: https://${server_ip}:${panel_port}/login"
 if [ "${cert_mode}" = "letsencrypt" ]; then
-  printf "TLS: trusted Let's Encrypt IP certificate; automatic renewal enabled.\n"
+  log_line "TLS: trusted Let's Encrypt IP certificate; automatic renewal enabled."
 else
-  printf 'TLS: self-signed IP certificate (SAN=%s); browser trust warning is expected until this certificate is trusted.\n' "${server_ip}"
+  log_line "TLS: self-signed IP certificate (SAN=${server_ip}); browser trust warning is expected until this certificate is trusted."
 fi
-printf 'Management: sudo egress-manager\n'
+log_line "Management: sudo egress-manager"
+log_line "Install log: ${log_file}"

@@ -19,6 +19,8 @@ jobs:
           cache: true
       - run: go test ./...
       - run: go vet ./...
+      - name: Verify installer shell syntax
+        run: sh -n scripts/install/install.sh scripts/install/install-secure.sh scripts/release/build-offline-bundle.sh
 
   frontend:
     runs-on: ubuntu-24.04
@@ -85,6 +87,13 @@ jobs:
           target="${{ matrix.os }}"
           ubuntu="${target#ubuntu-}"
           UBUNTU_VERSION="${ubuntu}" ARCHITECTURE=amd64 sh scripts/release/build-offline-bundle.sh
+      - name: Verify portable release checksum
+        run: |
+          target="${{ matrix.os }}"
+          ubuntu="${target#ubuntu-}"
+          bundle="egress-manager-offline-ubuntu${ubuntu}-amd64"
+          test "$(awk 'NR==1 {print $2}' "dist/${bundle}.zip.sha256")" = "${bundle}.zip"
+          (cd dist && sha256sum -c "${bundle}.zip.sha256")
       - name: Snapshot installed host packages
         run: |
           dpkg-query -W -f='${binary:Package}\t${db:Status-Status}\n' \
@@ -117,7 +126,7 @@ jobs:
             printf 'Installer removed pre-existing host packages:\n%s\n' "${removed}" >&2
             exit 1
           fi
-      - name: Verify services, runtimes, TLS, UI, and manager
+      - name: Verify services, runtimes, TLS, UI, manager, and install log
         run: |
           sudo /usr/local/lib/egress-manager/verify.sh
           test "$(systemctl show egress-web.service --property=User --value)" = "egress-web"
@@ -146,6 +155,11 @@ jobs:
             /etc/systemd/system/egress-manager-sing-box.service \
             /etc/systemd/system/egress-manager-cert-renew.service \
             /etc/systemd/system/egress-manager-cert-renew.timer
+          latest_log="$(sudo sh -c 'ls -1t /var/log/egress-manager/install-*.log | head -n 1')"
+          test -n "${latest_log}"
+          sudo grep -q '==> Install runtime and application files' "${latest_log}"
+          sudo grep -q '==> Start and verify services' "${latest_log}"
+          sudo grep -q 'Health check: OK' "${latest_log}"
       - name: Verify browser login uses HTTPS and Secure cookie
         run: |
           port="$(sudo sed -n 's/^[[:space:]]*"listen_port":[[:space:]]*\([0-9][0-9]*\),*$/\1/p' /etc/egress-manager/config.json)"

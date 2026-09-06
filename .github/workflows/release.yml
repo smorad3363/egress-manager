@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release tag (for example v0.1.0-alpha.6)
+        description: Release tag (for example v0.1.0-alpha.7)
         required: true
         type: string
 
@@ -21,11 +21,11 @@ jobs:
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       github.event_name == 'workflow_dispatch' ||
-      contains(github.event.head_commit.message, '[release-alpha6]')
+      contains(github.event.head_commit.message, '[release-alpha7]')
     runs-on: ubuntu-22.04
     timeout-minutes: 100
     env:
-      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || (startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.0-alpha.6') }}
+      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || (startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.0-alpha.7') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -81,6 +81,9 @@ jobs:
               VERSION="${RELEASE_VERSION}" UBUNTU_VERSION="${ubuntu}" ARCHITECTURE="${arch}" sh scripts/release/build-offline-bundle.sh
             done
           done
+          for checksum in dist/egress-manager-offline-ubuntu*.sha256; do
+            (cd dist && sha256sum -c "$(basename "${checksum}")")
+          done
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -97,4 +100,4 @@ jobs:
             --target "${GITHUB_SHA}" \
             --prerelease \
             --title "Egress Manager ${RELEASE_VERSION}" \
-            --notes "Alpha.6 is a safety hotfix for offline dependency installation. The bundle now includes the complete Python 3 runtime/standard library instead of only python3-minimal, and the installer uses apt --no-remove for both its dry-run and actual local dependency transaction. If any bundled dependency would require removing a pre-existing host package, installation aborts before package mutation. CI snapshots the host package set and fails if an install removes anything. The secure bootstrap also repairs an incomplete Python standard library before ZIP extraction, then continues the Alpha.5 HTTPS, administrator, manager, Xray, sing-box and offline-bundle functionality."
+            --notes "Alpha.7 makes the secure installer observable and self-diagnosing. The one-line installer now shows download progress and named stages, keeps a persistent root-only install log under /var/log/egress-manager, reports the failing stage, prints the last 60 log lines on errors, verifies release SHA-256 before extraction, detects and reports the server IP, and prints the final HTTPS panel URL and TLS mode. Release checksum sidecars now contain portable basenames so sha256sum -c works directly from the download directory. Alpha.6 package-preservation protections remain: local APT uses --no-upgrade and --no-remove and CI fails if any pre-existing Ubuntu package disappears."
