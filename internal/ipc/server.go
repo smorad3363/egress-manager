@@ -152,6 +152,10 @@ func (server *Server) serveConnection(ctx context.Context, connection net.Conn) 
 			code = "bypass_active"
 			message = "Emergency bypass is active; run recovery before applying routes."
 		}
+		if errors.As(err, &coded) && coded.IPCErrorCode() == "no_rollback_available" {
+			code = "no_rollback_available"
+			message = "No eligible rollback snapshot is available."
+		}
 		server.writeFailure(connection, request.OperationID, code, message)
 		return
 	}

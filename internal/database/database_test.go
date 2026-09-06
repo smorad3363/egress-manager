@@ -549,6 +549,19 @@ func TestOperationJournalTransitionsAndUnfinishedIndex(t *testing.T) {
 	if err != nil || len(unfinished) != 1 {
 		t.Fatalf("unfinished = %#v, error = %v", unfinished, err)
 	}
+	if err := store.TransitionOperation(ctx, operation.ID, domain.TransactionValidated, domain.TransactionApplying, now.Add(2*time.Second), ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.TransitionOperation(ctx, operation.ID, domain.TransactionApplying, domain.TransactionVerifying, now.Add(3*time.Second), ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.TransitionOperation(ctx, operation.ID, domain.TransactionVerifying, domain.TransactionCommitted, now.Add(4*time.Second), ""); err != nil {
+		t.Fatal(err)
+	}
+	committed, err := store.CommittedOperations(ctx, 10)
+	if err != nil || len(committed) != 1 || committed[0].ID != operation.ID {
+		t.Fatalf("committed = %#v, error = %v", committed, err)
+	}
 
 	var detail string
 	row := database.QueryRow(`

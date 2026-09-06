@@ -34,35 +34,36 @@ var (
 type Operation string
 
 const (
-	OperationHealth          Operation = "health"
-	OperationRecoveryStatus  Operation = "recovery.status"
-	OperationRecoveryRun     Operation = "recovery.run"
-	OperationRecoveryBypass  Operation = "recovery.bypass"
-	OperationInventory       Operation = "network.inventory"
-	OperationNATPlan         Operation = "nat.plan"
-	OperationNATApply        Operation = "nat.apply"
-	OperationNATCount        Operation = "nat.counters"
-	OperationHAProxyPlan     Operation = "haproxy.plan"
-	OperationHAProxyApply    Operation = "haproxy.apply"
-	OperationHAProxyStats    Operation = "haproxy.stats"
-	OperationSingBoxImport   Operation = "singbox.import"
-	OperationSingBoxTest     Operation = "singbox.test"
-	OperationSingBoxPlan     Operation = "singbox.plan"
-	OperationSingBoxApply    Operation = "singbox.apply"
-	OperationRoutesPlan      Operation = "routes.plan"
-	OperationRoutesApply     Operation = "routes.apply"
-	OperationXrayDiscover    Operation = "xray.discover"
-	OperationXrayPlan        Operation = "xray.plan"
-	OperationXrayApply       Operation = "xray.apply"
-	OperationInterfaceImport Operation = "interface.import"
-	OperationInterfaceTest   Operation = "interface.test"
-	OperationInterfacePlan   Operation = "interface.plan"
-	OperationInterfaceApply  Operation = "interface.apply"
+	OperationHealth           Operation = "health"
+	OperationRecoveryStatus   Operation = "recovery.status"
+	OperationRecoveryRun      Operation = "recovery.run"
+	OperationRecoveryBypass   Operation = "recovery.bypass"
+	OperationRecoveryRollback Operation = "recovery.rollback"
+	OperationInventory        Operation = "network.inventory"
+	OperationNATPlan          Operation = "nat.plan"
+	OperationNATApply         Operation = "nat.apply"
+	OperationNATCount         Operation = "nat.counters"
+	OperationHAProxyPlan      Operation = "haproxy.plan"
+	OperationHAProxyApply     Operation = "haproxy.apply"
+	OperationHAProxyStats     Operation = "haproxy.stats"
+	OperationSingBoxImport    Operation = "singbox.import"
+	OperationSingBoxTest      Operation = "singbox.test"
+	OperationSingBoxPlan      Operation = "singbox.plan"
+	OperationSingBoxApply     Operation = "singbox.apply"
+	OperationRoutesPlan       Operation = "routes.plan"
+	OperationRoutesApply      Operation = "routes.apply"
+	OperationXrayDiscover     Operation = "xray.discover"
+	OperationXrayPlan         Operation = "xray.plan"
+	OperationXrayApply        Operation = "xray.apply"
+	OperationInterfaceImport  Operation = "interface.import"
+	OperationInterfaceTest    Operation = "interface.test"
+	OperationInterfacePlan    Operation = "interface.plan"
+	OperationInterfaceApply   Operation = "interface.apply"
 )
 
 func (operation Operation) Validate() error {
 	switch operation {
-	case OperationHealth, OperationRecoveryStatus, OperationRecoveryRun, OperationRecoveryBypass, OperationInventory, OperationNATPlan, OperationNATApply, OperationNATCount, OperationHAProxyPlan, OperationHAProxyApply, OperationHAProxyStats, OperationSingBoxImport, OperationSingBoxTest, OperationSingBoxPlan, OperationSingBoxApply, OperationRoutesPlan, OperationRoutesApply, OperationXrayDiscover, OperationXrayPlan, OperationXrayApply, OperationInterfaceImport, OperationInterfaceTest, OperationInterfacePlan, OperationInterfaceApply:
+	case OperationHealth, OperationRecoveryStatus, OperationRecoveryRun, OperationRecoveryBypass, OperationRecoveryRollback, OperationInventory, OperationNATPlan, OperationNATApply, OperationNATCount, OperationHAProxyPlan, OperationHAProxyApply, OperationHAProxyStats, OperationSingBoxImport, OperationSingBoxTest, OperationSingBoxPlan, OperationSingBoxApply, OperationRoutesPlan, OperationRoutesApply, OperationXrayDiscover, OperationXrayPlan, OperationXrayApply, OperationInterfaceImport, OperationInterfaceTest, OperationInterfacePlan, OperationInterfaceApply:
 		return nil
 	default:
 		return ErrUnknownAction

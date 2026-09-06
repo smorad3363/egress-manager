@@ -21,7 +21,10 @@ func TestTransactionTransitions(t *testing.T) {
 		}
 	}
 	if TransactionCommitted.CanTransitionTo(TransactionApplying) {
-		t.Fatal("committed transaction must be terminal")
+		t.Fatal("committed transaction must not be reapplied")
+	}
+	if !TransactionCommitted.CanTransitionTo(TransactionRollingBack) {
+		t.Fatal("committed transaction must permit explicit rollback")
 	}
 	if !TransactionApplying.CanTransitionTo(TransactionRollingBack) {
 		t.Fatal("applying transaction must permit rollback")

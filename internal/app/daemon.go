@@ -334,6 +334,42 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	}); err != nil {
 		return err
 	}
+	if err := server.Handle(ipc.OperationRecoveryRollback, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		if err := decodeEmptyPayload(payload); err != nil {
+			return nil, err
+		}
+		return withMutationLock(mutationLock, domain.ID(logging.OperationID(ctx)), "rollback", func() (any, error) {
+			if !recoveryTracker.Ready() {
+				return nil, reliability.RecoveryRequiredError{}
+			}
+			unfinished, err := store.UnfinishedOperations(ctx, 1)
+			if err != nil {
+				return nil, err
+			}
+			if len(unfinished) != 0 {
+				return nil, reliability.RecoveryRequiredError{}
+			}
+			committed, err := store.CommittedOperations(ctx, 1)
+			if err != nil {
+				return nil, err
+			}
+			if len(committed) == 0 || (committed[0].Operation != "route_engine_apply" && committed[0].Operation != "route_engine_bypass") {
+				return nil, reliability.NoRollbackAvailableError{}
+			}
+			host, err := collector.Collect(ctx)
+			if err != nil {
+				return nil, err
+			}
+			started := time.Now().UTC()
+			operation := committed[0]
+			if err := routeExecutor.RollbackCommitted(ctx, operation, host, configuration.ProtectedManagementCIDRs); err != nil {
+				return nil, err
+			}
+			return reliability.RollbackReport{Succeeded: true, Component: "routing", OperationID: operation.ID, StartedAt: started, EndedAt: time.Now().UTC()}, nil
+		})
+	}); err != nil {
+		return err
+	}
 	if err := server.Handle(ipc.OperationInventory, func(ctx context.Context, payload json.RawMessage) (any, error) {
 		if err := decodeEmptyPayload(payload); err != nil {
 			return nil, err

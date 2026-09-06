@@ -14,6 +14,10 @@ import (
 	"github.com/egress-manager/egress-manager/internal/routeengine"
 )
 
+func unusedRollback(context.Context, string, string) (reliability.RollbackReport, error) {
+	return reliability.RollbackReport{}, nil
+}
+
 func TestStatusHumanAndJSONOutput(t *testing.T) {
 	t.Parallel()
 
@@ -28,7 +32,7 @@ func TestStatusHumanAndJSONOutput(t *testing.T) {
 	}
 	privileged := func() bool { return true }
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"status", "--config", "/test/config.json", "--ipc-key", "/test/ipc.key"}, &stdout, &stderr, fetch, recover, bypass, privileged); code != exitRecoveryRequired {
+	if code := run([]string{"status", "--config", "/test/config.json", "--ipc-key", "/test/ipc.key"}, &stdout, &stderr, fetch, recover, bypass, unusedRollback, privileged); code != exitRecoveryRequired {
 		t.Fatalf("human status exit = %d, stderr = %s", code, stderr.String())
 	}
 	for _, expected := range []string{"ready: no", "mutation lock: active", "lock owner: routing operation route_apply pid 42", "interrupted route_engine_apply APPLYING", "singbox: degraded failures 1"} {
@@ -38,7 +42,7 @@ func TestStatusHumanAndJSONOutput(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := run([]string{"status", "--json"}, &stdout, &stderr, fetch, recover, bypass, privileged); code != exitRecoveryRequired {
+	if code := run([]string{"status", "--json"}, &stdout, &stderr, fetch, recover, bypass, unusedRollback, privileged); code != exitRecoveryRequired {
 		t.Fatalf("JSON status exit = %d, stderr = %s", code, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), `"recovery_required": true`) || strings.Contains(stdout.String(), `"previous_snapshot"`) {
@@ -60,7 +64,7 @@ func TestRecoverHumanAndJSONOutput(t *testing.T) {
 	}
 	privileged := func() bool { return true }
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"recover"}, &stdout, &stderr, fetch, recover, bypass, privileged); code != exitOK {
+	if code := run([]string{"recover"}, &stdout, &stderr, fetch, recover, bypass, unusedRollback, privileged); code != exitOK {
 		t.Fatalf("recover exit = %d, stderr = %s", code, stderr.String())
 	}
 	if !strings.Contains(stdout.String(), "recovery: succeeded") || !strings.Contains(stdout.String(), "- interface: succeeded") {
@@ -68,18 +72,18 @@ func TestRecoverHumanAndJSONOutput(t *testing.T) {
 	}
 	stdout.Reset()
 	stderr.Reset()
-	if code := run([]string{"recover", "--json"}, &stdout, &stderr, fetch, recover, bypass, privileged); code != exitOK || !strings.Contains(stdout.String(), `"succeeded": true`) {
+	if code := run([]string{"recover", "--json"}, &stdout, &stderr, fetch, recover, bypass, unusedRollback, privileged); code != exitOK || !strings.Contains(stdout.String(), `"succeeded": true`) {
 		t.Fatalf("JSON recovery exit = %d, stdout = %s, stderr = %s", code, stdout.String(), stderr.String())
 	}
 	report.Succeeded = false
 	report.FailedComponent = "interface"
-	if code := run([]string{"recover"}, &stdout, &stderr, fetch, recover, bypass, privileged); code != exitFailure {
+	if code := run([]string{"recover"}, &stdout, &stderr, fetch, recover, bypass, unusedRollback, privileged); code != exitFailure {
 		t.Fatalf("failed recovery exit = %d", code)
 	}
 	recover = func(context.Context, string, string) (reliability.RecoveryReport, error) {
 		return reliability.RecoveryReport{}, &ipc.RemoteError{Code: "busy"}
 	}
-	if code := run([]string{"recover"}, &stdout, &stderr, fetch, recover, bypass, privileged); code != exitBusy {
+	if code := run([]string{"recover"}, &stdout, &stderr, fetch, recover, bypass, unusedRollback, privileged); code != exitBusy {
 		t.Fatalf("busy recovery exit = %d", code)
 	}
 }
@@ -96,6 +100,9 @@ func TestStatusFailuresAndUsageHaveStableExitCodes(t *testing.T) {
 	bypass := func(context.Context, string, string) (routeengine.BypassResponse, error) {
 		return routeengine.BypassResponse{}, errors.New("unavailable")
 	}
+	rollback := func(context.Context, string, string) (reliability.RollbackReport, error) {
+		return reliability.RollbackReport{}, errors.New("unavailable")
+	}
 	privileged := func() bool { return true }
 	for _, test := range []struct {
 		arguments []string
@@ -107,9 +114,10 @@ func TestStatusFailuresAndUsageHaveStableExitCodes(t *testing.T) {
 		{arguments: []string{"status"}, want: exitFailure},
 		{arguments: []string{"recover"}, want: exitFailure},
 		{arguments: []string{"bypass"}, want: exitFailure},
+		{arguments: []string{"rollback"}, want: exitFailure},
 	} {
 		var stdout, stderr bytes.Buffer
-		if got := run(test.arguments, &stdout, &stderr, fetch, recover, bypass, privileged); got != test.want {
+		if got := run(test.arguments, &stdout, &stderr, fetch, recover, bypass, rollback, privileged); got != test.want {
 			t.Fatalf("run(%q) = %d, want %d", test.arguments, got, test.want)
 		}
 	}
@@ -126,25 +134,65 @@ func TestBypassOutputBusyAndPrivilegeExitCodes(t *testing.T) {
 	response := routeengine.BypassResponse{TransactionID: "bypass_transaction", State: domain.TransactionCommitted}
 	bypass := func(context.Context, string, string) (routeengine.BypassResponse, error) { return response, nil }
 	var stdout, stderr bytes.Buffer
-	if code := run([]string{"bypass"}, &stdout, &stderr, fetch, recover, bypass, func() bool { return true }); code != exitOK || !strings.Contains(stdout.String(), "bypass: activated") {
+	if code := run([]string{"bypass"}, &stdout, &stderr, fetch, recover, bypass, unusedRollback, func() bool { return true }); code != exitOK || !strings.Contains(stdout.String(), "bypass: activated") {
 		t.Fatalf("bypass exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	stdout.Reset()
 	stderr.Reset()
 	response.AlreadyActive = true
-	if code := run([]string{"bypass", "--json"}, &stdout, &stderr, fetch, recover, bypass, func() bool { return true }); code != exitOK || !strings.Contains(stdout.String(), `"already_active": true`) {
+	if code := run([]string{"bypass", "--json"}, &stdout, &stderr, fetch, recover, bypass, unusedRollback, func() bool { return true }); code != exitOK || !strings.Contains(stdout.String(), `"already_active": true`) {
 		t.Fatalf("JSON bypass exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
 	}
 	bypass = func(context.Context, string, string) (routeengine.BypassResponse, error) {
 		return routeengine.BypassResponse{}, &ipc.RemoteError{Code: "busy"}
 	}
-	if code := run([]string{"bypass"}, &stdout, &stderr, fetch, recover, bypass, func() bool { return true }); code != exitBusy {
+	if code := run([]string{"bypass"}, &stdout, &stderr, fetch, recover, bypass, unusedRollback, func() bool { return true }); code != exitBusy {
 		t.Fatalf("busy bypass exit=%d", code)
 	}
-	if code := run([]string{"bypass"}, &stdout, &stderr, fetch, recover, bypass, func() bool { return false }); code != exitPrivilege {
+	if code := run([]string{"bypass"}, &stdout, &stderr, fetch, recover, bypass, unusedRollback, func() bool { return false }); code != exitPrivilege {
 		t.Fatalf("unprivileged bypass exit=%d", code)
 	}
-	if code := run([]string{"recover"}, &stdout, &stderr, fetch, recover, bypass, func() bool { return false }); code != exitPrivilege {
+	if code := run([]string{"recover"}, &stdout, &stderr, fetch, recover, bypass, unusedRollback, func() bool { return false }); code != exitPrivilege {
 		t.Fatalf("unprivileged recovery exit=%d", code)
+	}
+}
+
+func TestRollbackOutputAndStableExitCodes(t *testing.T) {
+	t.Parallel()
+	fetch := func(context.Context, string, string) (reliability.RecoveryStatus, error) {
+		return reliability.RecoveryStatus{}, nil
+	}
+	recover := func(context.Context, string, string) (reliability.RecoveryReport, error) {
+		return reliability.RecoveryReport{}, nil
+	}
+	bypass := func(context.Context, string, string) (routeengine.BypassResponse, error) {
+		return routeengine.BypassResponse{}, nil
+	}
+	now := time.Date(2026, 9, 6, 12, 0, 0, 0, time.UTC)
+	report := reliability.RollbackReport{Succeeded: true, Component: "routing", OperationID: "route_apply", StartedAt: now, EndedAt: now}
+	rollback := func(context.Context, string, string) (reliability.RollbackReport, error) { return report, nil }
+	var stdout, stderr bytes.Buffer
+	if code := run([]string{"rollback"}, &stdout, &stderr, fetch, recover, bypass, rollback, func() bool { return true }); code != exitOK || !strings.Contains(stdout.String(), "rollback: succeeded") || !strings.Contains(stdout.String(), "operation: route_apply") {
+		t.Fatalf("rollback exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := run([]string{"rollback", "--json"}, &stdout, &stderr, fetch, recover, bypass, rollback, func() bool { return true }); code != exitOK || !strings.Contains(stdout.String(), `"component": "routing"`) {
+		t.Fatalf("JSON rollback exit=%d stdout=%s stderr=%s", code, stdout.String(), stderr.String())
+	}
+	rollback = func(context.Context, string, string) (reliability.RollbackReport, error) {
+		return reliability.RollbackReport{}, &ipc.RemoteError{Code: "no_rollback_available"}
+	}
+	if code := run([]string{"rollback"}, &stdout, &stderr, fetch, recover, bypass, rollback, func() bool { return true }); code != exitNoRollback {
+		t.Fatalf("unavailable rollback exit=%d", code)
+	}
+	rollback = func(context.Context, string, string) (reliability.RollbackReport, error) {
+		return reliability.RollbackReport{}, &ipc.RemoteError{Code: "busy"}
+	}
+	if code := run([]string{"rollback"}, &stdout, &stderr, fetch, recover, bypass, rollback, func() bool { return true }); code != exitBusy {
+		t.Fatalf("busy rollback exit=%d", code)
+	}
+	if code := run([]string{"rollback"}, &stdout, &stderr, fetch, recover, bypass, rollback, func() bool { return false }); code != exitPrivilege {
+		t.Fatalf("unprivileged rollback exit=%d", code)
 	}
 }

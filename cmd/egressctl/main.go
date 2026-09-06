@@ -23,18 +23,20 @@ const (
 	exitRecoveryRequired = 3
 	exitBusy             = 4
 	exitPrivilege        = 5
+	exitNoRollback       = 6
 )
 
 type statusFetcher func(context.Context, string, string) (reliability.RecoveryStatus, error)
 type recoveryRunner func(context.Context, string, string) (reliability.RecoveryReport, error)
 type bypassRunner func(context.Context, string, string) (routeengine.BypassResponse, error)
+type rollbackRunner func(context.Context, string, string) (reliability.RollbackReport, error)
 type privilegeChecker func() bool
 
 func main() {
-	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, fetchStatus, runRecovery, runBypass, isPrivileged))
+	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, fetchStatus, runRecovery, runBypass, runRollback, isPrivileged))
 }
 
-func run(arguments []string, stdout, stderr io.Writer, fetch statusFetcher, recover recoveryRunner, bypass bypassRunner, privileged privilegeChecker) int {
+func run(arguments []string, stdout, stderr io.Writer, fetch statusFetcher, recover recoveryRunner, bypass bypassRunner, rollback rollbackRunner, privileged privilegeChecker) int {
 	if len(arguments) == 1 && arguments[0] == "--version" {
 		fmt.Fprintf(stdout, "egressctl %s (%s, %s)\n", buildinfo.Version, buildinfo.Commit, buildinfo.Date)
 		return exitOK
@@ -50,10 +52,58 @@ func run(arguments []string, stdout, stderr io.Writer, fetch statusFetcher, reco
 		return runRecover(arguments[1:], stdout, stderr, recover, privileged)
 	case "bypass":
 		return runBypassCommand(arguments[1:], stdout, stderr, bypass, privileged)
+	case "rollback":
+		return runRollbackCommand(arguments[1:], stdout, stderr, rollback, privileged)
 	default:
 		printUsage(stderr)
 		return exitUsage
 	}
+}
+
+func runRollbackCommand(arguments []string, stdout, stderr io.Writer, rollback rollbackRunner, privileged privilegeChecker) int {
+	flags := flag.NewFlagSet("egressctl rollback", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	configPath := flags.String("config", "/etc/egress-manager/config.json", "absolute configuration path")
+	keyPath := flags.String("ipc-key", "/etc/egress-manager/ipc.key", "absolute IPC shared-key path")
+	jsonOutput := flags.Bool("json", false, "emit machine-readable JSON")
+	if err := flags.Parse(arguments); err != nil {
+		return exitUsage
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "egressctl rollback: unexpected positional arguments")
+		return exitUsage
+	}
+	if !privileged() {
+		fmt.Fprintln(stderr, "egressctl rollback: local administrator privilege is required")
+		return exitPrivilege
+	}
+	report, err := rollback(context.Background(), *configPath, *keyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "egressctl rollback: %v\n", err)
+		if ipc.IsRemoteError(err, "busy") {
+			return exitBusy
+		}
+		if ipc.IsRemoteError(err, "no_rollback_available") {
+			return exitNoRollback
+		}
+		return exitFailure
+	}
+	if *jsonOutput {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(report); err != nil {
+			fmt.Fprintf(stderr, "egressctl rollback: encode output: %v\n", err)
+			return exitFailure
+		}
+	} else {
+		fmt.Fprintln(stdout, "rollback: succeeded")
+		fmt.Fprintf(stdout, "component: %s\n", report.Component)
+		fmt.Fprintf(stdout, "operation: %s\n", report.OperationID)
+	}
+	if !report.Succeeded {
+		return exitFailure
+	}
+	return exitOK
 }
 
 func runStatus(arguments []string, stdout, stderr io.Writer, fetch statusFetcher) int {
@@ -201,6 +251,14 @@ func runBypass(ctx context.Context, configPath, keyPath string) (routeengine.Byp
 	return response, nil
 }
 
+func runRollback(ctx context.Context, configPath, keyPath string) (reliability.RollbackReport, error) {
+	var report reliability.RollbackReport
+	if err := callDaemon(ctx, configPath, keyPath, ipc.OperationRecoveryRollback, &report); err != nil {
+		return reliability.RollbackReport{}, err
+	}
+	return report, nil
+}
+
 func callDaemon(ctx context.Context, configPath, keyPath string, operation ipc.Operation, output any) error {
 	configuration, err := config.Load(configPath)
 	if err != nil {
@@ -274,5 +332,5 @@ func printRecovery(writer io.Writer, report reliability.RecoveryReport) {
 }
 
 func printUsage(writer io.Writer) {
-	fmt.Fprintln(writer, "usage: egressctl <status|recover|bypass> [--config PATH] [--ipc-key PATH] [--json]")
+	fmt.Fprintln(writer, "usage: egressctl <status|recover|bypass|rollback> [--config PATH] [--ipc-key PATH] [--json]")
 }

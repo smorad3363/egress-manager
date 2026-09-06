@@ -103,6 +103,36 @@ func (store *Store) UnfinishedOperations(ctx context.Context, limit int) ([]doma
 	return operations, nil
 }
 
+func (store *Store) CommittedOperations(ctx context.Context, limit int) ([]domain.Transaction, error) {
+	if limit < 1 || limit > 1_000 {
+		return nil, fmt.Errorf("committed operation journal limit must be between 1 and 1000")
+	}
+	rows, err := store.database.QueryContext(ctx, `
+        SELECT id, operation, requested_change, previous_snapshot, candidate_config,
+               state, created_at, updated_at, failure_detail
+        FROM operation_journal
+        WHERE state = 'COMMITTED'
+        ORDER BY updated_at DESC, created_at DESC, rowid DESC
+        LIMIT ?
+    `, limit)
+	if err != nil {
+		return nil, fmt.Errorf("read committed operation journal: %w", err)
+	}
+	defer rows.Close()
+	operations := make([]domain.Transaction, 0)
+	for rows.Next() {
+		operation, err := scanOperation(rows)
+		if err != nil {
+			return nil, err
+		}
+		operations = append(operations, operation)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate committed operation journal: %w", err)
+	}
+	return operations, nil
+}
+
 func (store *Store) DeleteFinishedOperationsBefore(ctx context.Context, before time.Time, limit int) (int64, error) {
 	if limit < 1 || limit > 10_000 {
 		return 0, fmt.Errorf("operation journal cleanup limit must be between 1 and 10000")

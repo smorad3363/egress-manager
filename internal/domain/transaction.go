@@ -39,6 +39,9 @@ var transactionTransitions = map[TransactionState]map[TransactionState]struct{}{
 		TransactionRollingBack: {},
 		TransactionFailed:      {},
 	},
+	TransactionCommitted: {
+		TransactionRollingBack: {},
+	},
 	TransactionRollingBack: {
 		TransactionRolledBack: {},
 		TransactionFailed:     {},

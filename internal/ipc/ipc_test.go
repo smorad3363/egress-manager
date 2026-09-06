@@ -38,6 +38,11 @@ type codedBypassError struct{}
 func (codedBypassError) Error() string        { return "internal bypass detail" }
 func (codedBypassError) IPCErrorCode() string { return "bypass_active" }
 
+type codedNoRollbackError struct{}
+
+func (codedNoRollbackError) Error() string        { return "internal rollback detail" }
+func (codedNoRollbackError) IPCErrorCode() string { return "no_rollback_available" }
+
 func TestRequestAuthenticationRejectsTamperAndStaleTimestamp(t *testing.T) {
 	t.Parallel()
 
@@ -91,6 +96,11 @@ func TestAuthenticatedUnixRoundTripAndReplayRejection(t *testing.T) {
 	}
 	if err := server.Handle(OperationRoutesApply, func(context.Context, json.RawMessage) (any, error) {
 		return nil, codedBypassError{}
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := server.Handle(OperationRecoveryRollback, func(context.Context, json.RawMessage) (any, error) {
+		return nil, codedNoRollbackError{}
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -149,6 +159,9 @@ func TestAuthenticatedUnixRoundTripAndReplayRejection(t *testing.T) {
 	}
 	if err := client.Call(context.Background(), OperationRoutesApply, struct{}{}, nil); !IsRemoteError(err, "bypass_active") {
 		t.Fatalf("coded bypass error = %v", err)
+	}
+	if err := client.Call(context.Background(), OperationRecoveryRollback, struct{}{}, nil); !IsRemoteError(err, "no_rollback_available") {
+		t.Fatalf("coded rollback error = %v", err)
 	}
 
 	request := Request{

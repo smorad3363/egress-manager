@@ -109,6 +109,10 @@ func TestDaemonAndWebLifecycle(t *testing.T) {
 	if !recoveryReport.Succeeded || len(recoveryReport.Steps) != 10 {
 		t.Fatalf("unexpected recovery report = %#v", recoveryReport)
 	}
+	var rollbackReport reliability.RollbackReport
+	if err := malformedClient.Call(context.Background(), ipc.OperationRecoveryRollback, struct{}{}, &rollbackReport); !ipc.IsRemoteError(err, "no_rollback_available") {
+		t.Fatalf("unexpected empty rollback result = %v", err)
+	}
 
 	if err := ProvisionAdmin(context.Background(), configPath, keyPath, "operator", "correct horse battery staple"); err != nil {
 		t.Fatal(err)
