@@ -4,6 +4,7 @@ package database
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -21,6 +22,13 @@ const (
 func Open(ctx context.Context, path string) (*sql.DB, error) {
 	if !filepath.IsAbs(path) {
 		return nil, fmt.Errorf("database path must be absolute")
+	}
+	if info, err := os.Lstat(path); err == nil {
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("database must be a regular file")
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, fmt.Errorf("inspect SQLite: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("create database directory: %w", err)
@@ -53,7 +61,12 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 	// a dedicated operating-system group. The containing directory remains the
 	// access boundary; no permissions are granted to other users.
 	if err := os.Chmod(path, 0o660); err != nil {
-		return closeOnError(fmt.Errorf("set database permissions: %w", err))
+		// An unprivileged service-group member cannot chmod the root-owned file.
+		// Accept only the exact already-secure mode established by egressd.
+		info, statErr := os.Stat(path)
+		if statErr != nil || info.Mode().Perm() != 0o660 {
+			return closeOnError(fmt.Errorf("set database permissions: %w", err))
+		}
 	}
 	if err := Migrate(ctx, database); err != nil {
 		return closeOnError(err)
