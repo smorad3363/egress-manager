@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release tag (for example v0.1.0-alpha.5)
+        description: Release tag (for example v0.1.0-alpha.6)
         required: true
         type: string
 
@@ -21,11 +21,11 @@ jobs:
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       github.event_name == 'workflow_dispatch' ||
-      contains(github.event.head_commit.message, '[release-alpha5]')
+      contains(github.event.head_commit.message, '[release-alpha6]')
     runs-on: ubuntu-22.04
     timeout-minutes: 100
     env:
-      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || (startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.0-alpha.5') }}
+      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || (startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.0-alpha.6') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -97,4 +97,4 @@ jobs:
             --target "${GITHUB_SHA}" \
             --prerelease \
             --title "Egress Manager ${RELEASE_VERSION}" \
-            --notes "Alpha.5 adds direct HTTPS browser access by server IP, fresh-install administrator prompting, and an expanded Bash management utility. Online installation attempts a Let's Encrypt short-lived IP certificate and automatically falls back to a self-signed certificate with the server IP in SAN. The manager supports administrator creation, online release updates, TLS status/renewal, service control, firewall assistance, runtime versions, verification, and validated atomic editing of every current config.json key with rollback on service-start failure. lego v5.3.1, Xray, sing-box, the browser UI, and Ubuntu dependency closures are bundled; target hosts do not require Node/npm/pnpm. Offline installation performs no CA access by default and creates an IP-matching self-signed certificate."
+            --notes "Alpha.6 is a safety hotfix for offline dependency installation. The bundle now includes the complete Python 3 runtime/standard library instead of only python3-minimal, and the installer uses apt --no-remove for both its dry-run and actual local dependency transaction. If any bundled dependency would require removing a pre-existing host package, installation aborts before package mutation. CI snapshots the host package set and fails if an install removes anything. The secure bootstrap also repairs an incomplete Python standard library before ZIP extraction, then continues the Alpha.5 HTTPS, administrator, manager, Xray, sing-box and offline-bundle functionality."

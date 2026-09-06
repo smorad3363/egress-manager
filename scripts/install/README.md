@@ -13,10 +13,10 @@ Supported hosts: Ubuntu 22.04, 24.04, and 26.04 on amd64 or arm64 with systemd.
 
 ## Online installation
 
-The secure bootstrap downloads one complete release bundle for the detected Ubuntu release and CPU architecture. The bundle contains the prebuilt browser panel, Egress Manager binaries, the Bash management utility, pinned sing-box, Xray and lego binaries, and the Ubuntu package dependency closure used by the offline installer.
+The secure bootstrap downloads one complete release bundle for the detected Ubuntu release and CPU architecture. The bundle contains the prebuilt browser panel, Egress Manager binaries, the Bash management utility, pinned sing-box, Xray and lego binaries, the complete Python 3 runtime/standard library used by installer and manager tooling, and the Ubuntu package dependency closure used by the offline installer.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.5/scripts/install/install-secure.sh | sudo sh -s -- --version v0.1.0-alpha.5
+curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.6/scripts/install/install-secure.sh | sudo sh -s -- --version v0.1.0-alpha.6
 ```
 
 Node.js, npm, and pnpm are release-build dependencies only. They are deliberately not installed on the target gateway because the React application is compiled before the release bundle is produced.
@@ -26,6 +26,12 @@ The secure installer exposes the panel directly on `0.0.0.0` using HTTPS and the
 On a fresh interactive installation the installer prompts for an administrator username, password, and password confirmation after HTTPS becomes healthy. Password input is read from `/dev/tty`, so the prompt works when the bootstrap itself is executed through `curl | sh`. Use `--skip-admin` for unattended installation or `--admin-user USER` to force an administrator prompt with a preset username.
 
 Existing configuration, IPC key, administrator database, TLS material, and runtime state are retained on repeat installs.
+
+## Package-safety invariant
+
+Alpha.6 and later must not remove any pre-existing host package during offline dependency installation. Before the real local APT transaction, the installer runs the same plan with `--no-remove`; the actual install also uses `--no-remove`. If the bundled dependency closure cannot be satisfied without removing a host package, installation fails before package mutation.
+
+The offline bundle includes the complete `python3` dependency closure instead of only `python3-minimal`. The online bootstrap also validates `json` and `zipfile`; if the Python executable exists but its standard library is incomplete, it repairs the full `python3` package from the normal Ubuntu repositories before extracting the release ZIP.
 
 ## Shell management
 
@@ -46,7 +52,7 @@ sudo egress-manager restart
 sudo egress-manager logs
 sudo egress-manager admin operator
 sudo egress-manager update
-sudo egress-manager update v0.1.0-alpha.5
+sudo egress-manager update v0.1.0-alpha.6
 sudo egress-manager config
 sudo egress-manager config-show
 sudo egress-manager config-get listen_port
@@ -113,7 +119,7 @@ d="$(mktemp -d)" && tar -xzf ./egress-manager-offline-ubuntu22.04-amd64.tar.gz -
 
 Offline bundle mode does not contact an external CA by default. It generates a self-signed certificate locally with the detected/provided server IP in SAN. Use `--public-ca` only when the supposedly offline target actually has the network reachability required for ACME.
 
-Bundle mode verifies `MANIFEST.sha256`, installs only the `.deb` files shipped inside the bundle with APT repository access disabled, and does not download Xray, sing-box, npm packages, or other runtime dependencies from the network.
+Bundle mode verifies `MANIFEST.sha256`, performs an APT dry-run that is forbidden from removing host packages, installs only the `.deb` files shipped inside the bundle with APT repository access disabled, and does not download Xray, sing-box, npm packages, or other runtime dependencies from the network.
 
 Xray is installed under `/usr/local/lib/egress-manager/bin/xray` for Egress Manager integration and validation. The installer does not enable a standalone Xray service and does not overwrite a foreign Xray, Marzban, or 3x-ui installation.
 

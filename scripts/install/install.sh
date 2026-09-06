@@ -2,7 +2,7 @@
 set -eu
 
 repository="smorad3363/egress-manager"
-version="${EGRESS_VERSION:-v0.1.0-alpha.4}"
+version="${EGRESS_VERSION:-v0.1.0-alpha.6}"
 bundle_root="${EGRESS_BUNDLE_ROOT:-}"
 skip_start="${EGRESS_SKIP_START:-0}"
 public_http="${EGRESS_PUBLIC_HTTP:-1}"
@@ -74,11 +74,12 @@ fi
 if [ -z "${bundle_root}" ]; then
   command -v curl >/dev/null 2>&1 || fail "curl is required for online bootstrap"
   command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required for online bootstrap"
-  if ! command -v python3 >/dev/null 2>&1; then
+  if ! python3 -c 'import json, zipfile' >/dev/null 2>&1; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y --no-install-recommends python3-minimal ca-certificates
+    apt-get install -y --no-install-recommends --no-remove python3 ca-certificates
   fi
+  python3 -c 'import json, zipfile' >/dev/null 2>&1 || fail "a complete Python 3 standard library is required for the online bootstrap"
 
   temporary_directory="$(mktemp -d)"
   cleanup_bootstrap() { rm -rf -- "${temporary_directory}"; }
@@ -110,6 +111,8 @@ bundle_root="$(CDPATH= cd -- "${bundle_root}" 2>/dev/null && pwd)" || fail "bund
 [ -f "${bundle_root}/UBUNTU_VERSION" ] || fail "offline bundle has no UBUNTU_VERSION"
 [ -f "${bundle_root}/ARCHITECTURE" ] || fail "offline bundle has no ARCHITECTURE"
 [ -f "${bundle_root}/VERSION" ] || fail "offline bundle has no VERSION"
+[ -f "${bundle_root}/DEPENDENCY_ROOTS" ] || fail "offline bundle has no DEPENDENCY_ROOTS"
+[ -s "${bundle_root}/debs/Packages" ] || fail "offline bundle has no local APT package index"
 [ -f "${bundle_root}/MANIFEST.sha256" ] || fail "offline bundle has no MANIFEST.sha256"
 [ "$(sed -n '1p' "${bundle_root}/UBUNTU_VERSION")" = "${ubuntu_version}" ] || fail "offline bundle is for a different Ubuntu release"
 [ "$(sed -n '1p' "${bundle_root}/ARCHITECTURE")" = "${architecture}" ] || fail "offline bundle is for a different architecture"
@@ -132,18 +135,48 @@ done
 
 command -v apt-get >/dev/null 2>&1 || fail "apt-get is required on the base Ubuntu installation"
 command -v dpkg >/dev/null 2>&1 || fail "dpkg is required on the base Ubuntu installation"
-set -- "${bundle_root}"/debs/*.deb
-[ -f "$1" ] || fail "offline dependency set is empty"
 export DEBIAN_FRONTEND=noninteractive
-apt-get \
-  -o Dir::Etc::sourcelist=/dev/null \
-  -o Dir::Etc::sourceparts=- \
-  -o APT::Get::List-Cleanup=0 \
-  install -y --no-install-recommends "$@"
 
-for command in curl tar gzip sha256sum install getent useradd groupadd sed od awk ss shuf tr ps grep readlink sort paste find nft iptables ip haproxy wg openvpn; do
+# The bundle is an indexed local APT repository. Request only the runtime roots instead of
+# forcing every bundled .deb as a top-level package. Already-installed Ubuntu packages can
+# therefore satisfy dependencies at their current versions. Repository access is disabled.
+# --no-upgrade keeps existing root packages at their installed versions; --no-remove makes
+# package preservation a hard invariant.
+set --
+while IFS= read -r dependency; do
+  case "${dependency}" in ''|'#'*) continue ;; esac
+  set -- "$@" "${dependency}"
+done < "${bundle_root}/DEPENDENCY_ROOTS"
+[ "$#" -gt 0 ] || fail "offline dependency root set is empty"
+
+apt_directory="$(mktemp -d)"
+cleanup_apt() { rm -rf -- "${apt_directory}"; }
+trap cleanup_apt EXIT HUP INT TERM
+mkdir -p "${apt_directory}/lists/partial" "${apt_directory}/cache/archives/partial"
+sources_file="${apt_directory}/sources.list"
+printf 'deb [trusted=yes] file:%s/debs ./\n' "${bundle_root}" > "${sources_file}"
+
+apt_local() {
+  apt-get \
+    -o "Dir::Etc::sourcelist=${sources_file}" \
+    -o Dir::Etc::sourceparts=- \
+    -o "Dir::State::lists=${apt_directory}/lists" \
+    -o "Dir::Cache::archives=${apt_directory}/cache/archives" \
+    -o APT::Get::List-Cleanup=0 \
+    -o APT::Sandbox::User=root \
+    "$@"
+}
+
+apt_local update >/dev/null
+apt_local install -s --no-install-recommends --no-upgrade --no-remove "$@" >/dev/null || fail "offline dependency plan would upgrade, downgrade, remove, or conflict with existing host packages; no package changes were made"
+apt_local install -y --no-install-recommends --no-upgrade --no-remove "$@"
+cleanup_apt
+trap - EXIT HUP INT TERM
+
+for command in curl tar gzip sha256sum install getent useradd groupadd sed od awk ss shuf tr ps grep readlink sort paste find nft iptables ip haproxy wg openvpn python3; do
   command -v "${command}" >/dev/null 2>&1 || fail "required command missing after offline dependency install: ${command}"
 done
+python3 -c 'import json, zipfile' >/dev/null 2>&1 || fail "offline dependency install did not provide a complete Python 3 standard library"
 
 if [ -e /usr/local/bin/egressctl ] && { [ ! -L /usr/local/bin/egressctl ] || [ "$(readlink /usr/local/bin/egressctl)" != "/usr/local/lib/egress-manager/bin/egressctl" ]; }; then
   fail "/usr/local/bin/egressctl already exists and is not owned by Egress Manager"

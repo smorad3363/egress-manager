@@ -33,16 +33,39 @@ chmod 0755 "${bundle_directory}/install.sh" "${bundle_directory}/install-core.sh
 printf '%s\n' "${ubuntu_version}" > "${bundle_directory}/UBUNTU_VERSION"
 printf '%s\n' "${architecture}" > "${bundle_directory}/ARCHITECTURE"
 printf '%s\n' "${package_version}" > "${bundle_directory}/VERSION"
+cat > "${bundle_directory}/DEPENDENCY_ROOTS" <<'EOF_ROOTS'
+ca-certificates
+curl
+tar
+gzip
+coreutils
+grep
+sed
+mawk
+findutils
+iproute2
+nftables
+iptables
+haproxy
+wireguard-tools
+openvpn
+procps
+passwd
+util-linux
+openssl
+python3
+EOF_ROOTS
 
 bundle_absolute="$(cd "${bundle_directory}" && pwd)"
 docker run --rm --platform "linux/${architecture}" \
   --volume "${bundle_absolute}/debs:/bundle" \
   "ubuntu:${ubuntu_version}" sh -eu -c '
     export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends dpkg-dev
     mkdir -p /bundle/partial
     chmod 1777 /bundle /bundle/partial
     touch /tmp/empty-status
-    apt-get update
     apt-get \
       -o Dir::State::status=/tmp/empty-status \
       -o Dir::Cache::archives=/bundle \
@@ -50,11 +73,14 @@ docker run --rm --platform "linux/${architecture}" \
       install -y --no-install-recommends \
         ca-certificates curl tar gzip coreutils grep sed mawk findutils \
         iproute2 nftables iptables haproxy wireguard-tools openvpn \
-        procps passwd util-linux openssl python3-minimal
+        procps passwd util-linux openssl python3
     rm -rf /bundle/partial /bundle/lock
+    cd /bundle
+    dpkg-scanpackages . /dev/null > Packages
   '
 
 find "${bundle_directory}/debs" -type f -name '*.deb' | grep -q . || { echo "build-offline-bundle.sh: dependency bundle is empty" >&2; exit 1; }
+[ -s "${bundle_directory}/debs/Packages" ] || { echo "build-offline-bundle.sh: local APT index is empty" >&2; exit 1; }
 (
   cd "${bundle_directory}"
   find . -type f ! -name MANIFEST.sha256 -print | LC_ALL=C sort | sed 's#^./##' | while IFS= read -r file; do
