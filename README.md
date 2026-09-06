@@ -22,13 +22,13 @@ Project recovery state lives in `.project/STATE.yaml`.
 
 ## Ubuntu installation
 
-Alpha releases support Ubuntu 22.04, 24.04, and 26.04 on amd64 and arm64:
+Alpha releases support Ubuntu 22.04, 24.04, and 26.04 on amd64 and arm64. Release bundles include the prebuilt browser UI, pinned sing-box and Xray runtimes, plus per-Ubuntu offline dependency archives; Node/npm/pnpm are not required on the target host.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.2/scripts/install/install.sh | sudo sh -s -- --version v0.1.0-alpha.2
+curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.3/scripts/install/install.sh | sudo sh -s -- --version v0.1.0-alpha.3
 ```
 
-See [scripts/install/README.md](scripts/install/README.md) for verification and administrator provisioning. Installation does not change firewall or routing state.
+See [scripts/install/README.md](scripts/install/README.md) for browser access, verification, administrator provisioning, and fully offline ZIP/tar.gz installation. Installation does not change firewall or routing state.
 
 Runtime configuration and secure administrator provisioning are documented in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
