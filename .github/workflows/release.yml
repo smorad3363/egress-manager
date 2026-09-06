@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Release tag (for example v0.1.0-alpha.8)
+        description: Release tag (for example v0.1.0-alpha.9)
         required: true
         type: string
 
@@ -21,11 +21,11 @@ jobs:
     if: >-
       startsWith(github.ref, 'refs/tags/v') ||
       github.event_name == 'workflow_dispatch' ||
-      contains(github.event.head_commit.message, '[release-alpha8]')
+      contains(github.event.head_commit.message, '[release-alpha9]')
     runs-on: ubuntu-22.04
     timeout-minutes: 100
     env:
-      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || (startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.0-alpha.8') }}
+      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || (startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v0.1.0-alpha.9') }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -53,6 +53,19 @@ jobs:
         run: |
           go test ./...
           go vet ./...
+      - name: Verify listener relay against pinned Xray 26.7.28
+        run: |
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "${tmp}"' EXIT
+          curl --fail --location --silent --show-error \
+            https://github.com/XTLS/Xray-core/releases/download/v26.7.28/Xray-linux-64.zip \
+            --output "${tmp}/xray.zip"
+          printf '%s  %s\n' \
+            '8195d909f1109b8f3d99eefe401a3c451d7bf4af71f24d3815420f77e5dd2a40' \
+            "${tmp}/xray.zip" | sha256sum -c -
+          unzip -q "${tmp}/xray.zip" -d "${tmp}/xray"
+          chmod 0755 "${tmp}/xray/xray"
+          XRAY_NATIVE_BINARY="${tmp}/xray/xray" go test ./internal/xrayrelay -run '^TestNative' -count=1
       - name: Build and verify frontend
         working-directory: web
         run: |
@@ -100,4 +113,4 @@ jobs:
             --target "${GITHUB_SHA}" \
             --prerelease \
             --title "Egress Manager ${RELEASE_VERSION}" \
-            --notes "Alpha.8 turns the browser panel from a demonstration dashboard into a production data-driven console. Hard-coded sample routes, locations, traffic totals, uptime, latency, service-health values, availability percentages, and the fake 24-hour chart are removed. Dashboard summaries now come from the authenticated health, SQLite-backed routes/outbounds/port-forward APIs, HAProxy runtime stats, and live NAT counters, with honest loading, partial-data, empty, and error states. Unfinished Firewall, Logs, and Settings pages are removed from production navigation until they have real browser APIs, and the design-system fixture is development-only. Login no longer pre-fills a demo administrator. Dashboard shortcuts, Network refresh/retry, Xray rescans, search, and real create actions are covered by browser regressions. Persian/English switching, RTL Persian layout, and simpler operator wording are included. Alpha.7 installer diagnostics and Alpha.6 package-preservation protections remain unchanged."
+            --notes "Alpha.9 adds project-owned listener relays: traffic accepted on a selected local TCP/UDP listener is sent through an explicitly selected managed Xray outbound to one fixed destination, with no direct fallback. The first managed Xray relay adapter imports VLESS REALITY/XHTTP links, encrypts credentials at rest, generates a private project-owned Xray configuration, validates it with the bundled/pinned Xray runtime, and applies it through the isolated egress-manager-xray-relay.service without rewriting or restarting standalone Xray, Marzban, or 3x-ui. Planning rejects protected management/SSH ports, overlapping desired listeners, and collisions with foreign listeners. Relay mutations use revisioned SQLite state, authenticated plan hashes, transactional apply, rollback, startup recovery, and manual rollback. The production browser console adds English/Persian Relays CRUD and live Dashboard relay counts. CI exercises browser CRUD/plan/apply, native Xray 26.7.28 relay behavior including fail-closed operation, network-lab checks, and secure installation/preservation gates on Ubuntu 22.04, 24.04, and 26.04. Existing configuration, administrator database, TLS material, and Alpha.6+ package-preservation protections are retained."
