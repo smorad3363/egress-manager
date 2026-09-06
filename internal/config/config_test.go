@@ -117,19 +117,39 @@ func TestPortSelectorExcludesProtectedAndBusyPorts(t *testing.T) {
 	}
 }
 
-func TestNonLoopbackConfigurationRequiresTLS(t *testing.T) {
+func TestNonLoopbackConfigurationRequiresTLSOrExplicitHTTPOptIn(t *testing.T) {
 	t.Parallel()
 
 	configuration := Default(t.TempDir())
 	configuration.ListenAddress = "0.0.0.0"
 	configuration.ListenPort = 443
 	if err := configuration.Validate(); err == nil {
-		t.Fatal("Validate() accepted a non-loopback HTTP listener")
+		t.Fatal("Validate() accepted a non-loopback HTTP listener without opt-in")
 	}
+
+	configuration.AllowInsecureHTTP = true
+	if err := configuration.Validate(); err != nil {
+		t.Fatalf("Validate() rejected explicit insecure HTTP opt-in: %v", err)
+	}
+
+	configuration.AllowInsecureHTTP = false
 	configuration.TLSCertificatePath = filepath.Join(configuration.DataDirectory, "tls.crt")
 	configuration.TLSPrivateKeyPath = filepath.Join(configuration.DataDirectory, "tls.key")
 	if err := configuration.Validate(); err != nil {
 		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func TestInsecureHTTPCannotBeCombinedWithTLS(t *testing.T) {
+	t.Parallel()
+
+	configuration := Default(t.TempDir())
+	configuration.ListenPort = 443
+	configuration.AllowInsecureHTTP = true
+	configuration.TLSCertificatePath = filepath.Join(configuration.DataDirectory, "tls.crt")
+	configuration.TLSPrivateKeyPath = filepath.Join(configuration.DataDirectory, "tls.key")
+	if err := configuration.Validate(); err == nil {
+		t.Fatal("Validate() accepted allow_insecure_http together with TLS")
 	}
 }
 
