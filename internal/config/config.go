@@ -21,6 +21,7 @@ const (
 type Config struct {
 	ListenAddress             string         `json:"listen_address"`
 	ListenPort                uint16         `json:"listen_port"`
+	AllowInsecureHTTP         bool           `json:"allow_insecure_http,omitempty"`
 	DataDirectory             string         `json:"data_directory"`
 	DatabasePath              string         `json:"database_path"`
 	ControlSocketPath         string         `json:"control_socket_path"`
@@ -131,8 +132,11 @@ func (configuration Config) Validate() error {
 	if configuration.TLSCertificatePath != "" && (!filepath.IsAbs(configuration.TLSCertificatePath) || !filepath.IsAbs(configuration.TLSPrivateKeyPath)) {
 		errs = append(errs, fmt.Errorf("TLS certificate and private key paths must be absolute"))
 	}
-	if address.IsValid() && !address.IsLoopback() && configuration.TLSCertificatePath == "" {
-		errs = append(errs, fmt.Errorf("non-loopback listen_address requires TLS"))
+	if address.IsValid() && !address.IsLoopback() && configuration.TLSCertificatePath == "" && !configuration.AllowInsecureHTTP {
+		errs = append(errs, fmt.Errorf("non-loopback listen_address requires TLS unless allow_insecure_http is true"))
+	}
+	if configuration.AllowInsecureHTTP && configuration.TLSCertificatePath != "" {
+		errs = append(errs, fmt.Errorf("allow_insecure_http cannot be combined with TLS"))
 	}
 	if configuration.SessionCookieName == "" || len(configuration.SessionCookieName) > 64 {
 		errs = append(errs, fmt.Errorf("session_cookie_name must be 1 to 64 bytes"))
