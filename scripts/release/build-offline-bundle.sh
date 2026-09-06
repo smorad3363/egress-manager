@@ -50,7 +50,7 @@ docker run --rm --platform "linux/${architecture}" \
       install -y --no-install-recommends \
         ca-certificates curl tar gzip coreutils grep sed mawk findutils \
         iproute2 nftables iptables haproxy wireguard-tools openvpn \
-        procps passwd util-linux openssl python3-minimal
+        procps passwd util-linux openssl python3
     rm -rf /bundle/partial /bundle/lock
   '
 
