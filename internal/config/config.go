@@ -30,6 +30,7 @@ type Config struct {
 	HAProxyRuntimeSocketPath  string         `json:"haproxy_runtime_socket_path"`
 	HAProxyPIDPath            string         `json:"haproxy_pid_path"`
 	SingBoxConfigPath         string         `json:"sing_box_config_path"`
+	XrayRelayConfigPath       string         `json:"xray_relay_config_path"`
 	RoutingStatePath          string         `json:"routing_state_path"`
 	BypassStatePath           string         `json:"bypass_state_path"`
 	InterfaceStatePath        string         `json:"interface_state_path"`
@@ -53,6 +54,7 @@ func Default(dataDirectory string) Config {
 		HAProxyRuntimeSocketPath:  filepath.Join(dataDirectory, "haproxy-runtime.sock"),
 		HAProxyPIDPath:            filepath.Join(dataDirectory, "haproxy.pid"),
 		SingBoxConfigPath:         filepath.Join(dataDirectory, "sing-box.json"),
+		XrayRelayConfigPath:       filepath.Join(dataDirectory, "xray-relay.json"),
 		RoutingStatePath:          filepath.Join(dataDirectory, "routing.json"),
 		BypassStatePath:           filepath.Join(dataDirectory, "bypass.json"),
 		InterfaceStatePath:        filepath.Join(interfaceRuntime, "state.json"),
@@ -105,6 +107,7 @@ func (configuration Config) Validate() error {
 		"haproxy_runtime_socket_path": configuration.HAProxyRuntimeSocketPath,
 		"haproxy_pid_path":            configuration.HAProxyPIDPath,
 		"sing_box_config_path":        configuration.SingBoxConfigPath,
+		"xray_relay_config_path":      configuration.XrayRelayConfigPath,
 		"routing_state_path":          configuration.RoutingStatePath,
 		"bypass_state_path":           configuration.BypassStatePath,
 		"interface_state_path":        configuration.InterfaceStatePath,
@@ -114,7 +117,7 @@ func (configuration Config) Validate() error {
 			errs = append(errs, fmt.Errorf("%s must be absolute", name))
 		}
 	}
-	paths := []string{configuration.ControlSocketPath, configuration.OperationLockPath, configuration.HAProxyConfigPath, configuration.HAProxyRuntimeSocketPath, configuration.HAProxyPIDPath, configuration.SingBoxConfigPath, configuration.RoutingStatePath, configuration.BypassStatePath, configuration.InterfaceStatePath, configuration.InterfaceRuntimeDirectory}
+	paths := []string{configuration.ControlSocketPath, configuration.OperationLockPath, configuration.HAProxyConfigPath, configuration.HAProxyRuntimeSocketPath, configuration.HAProxyPIDPath, configuration.SingBoxConfigPath, configuration.XrayRelayConfigPath, configuration.RoutingStatePath, configuration.BypassStatePath, configuration.InterfaceStatePath, configuration.InterfaceRuntimeDirectory}
 	seenPaths := map[string]struct{}{}
 	for _, path := range paths {
 		cleaned := filepath.Clean(path)
@@ -164,6 +167,9 @@ func Load(path string) (Config, error) {
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return Config{}, fmt.Errorf("decode configuration: trailing data")
+	}
+	if configuration.XrayRelayConfigPath == "" && filepath.IsAbs(configuration.DataDirectory) {
+		configuration.XrayRelayConfigPath = filepath.Join(configuration.DataDirectory, "xray-relay.json")
 	}
 	if configuration.RoutingStatePath == "" && filepath.IsAbs(configuration.DataDirectory) {
 		configuration.RoutingStatePath = filepath.Join(configuration.DataDirectory, "routing.json")

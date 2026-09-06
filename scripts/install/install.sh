@@ -292,6 +292,7 @@ configure_http_mode
 install -o root -g root -m 0644 "${package_directory}/systemd/egressd.service" /etc/systemd/system/egressd.service
 install -o root -g root -m 0644 "${package_directory}/systemd/egress-web.service" /etc/systemd/system/egress-web.service
 install -o root -g root -m 0644 "${package_directory}/systemd/egress-manager-sing-box.service" /etc/systemd/system/egress-manager-sing-box.service
+install -o root -g root -m 0644 "${package_directory}/systemd/egress-manager-xray-relay.service" /etc/systemd/system/egress-manager-xray-relay.service
 install -o root -g root -m 0755 "${package_directory}/verify.sh" /usr/local/lib/egress-manager/verify.sh
 install -o root -g root -m 0644 "${package_directory}/RUNTIME_VERSIONS" /usr/local/lib/egress-manager/RUNTIME_VERSIONS
 
@@ -301,7 +302,7 @@ if [ "${skip_start}" = "1" ]; then
 fi
 
 systemctl daemon-reload
-systemctl enable egressd.service egress-web.service
+systemctl enable egressd.service egress-web.service egress-manager-xray-relay.service
 systemctl restart egressd.service
 systemctl restart egress-web.service
 

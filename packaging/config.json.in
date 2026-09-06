@@ -10,6 +10,7 @@
   "haproxy_runtime_socket_path": "/run/egress-manager/haproxy-runtime.sock",
   "haproxy_pid_path": "/run/egress-manager/haproxy.pid",
   "sing_box_config_path": "/var/lib/egress-manager/private/sing-box.json",
+  "xray_relay_config_path": "/var/lib/egress-manager/private/xray-relay.json",
   "routing_state_path": "/var/lib/egress-manager/private/routing.json",
   "bypass_state_path": "/var/lib/egress-manager/private/bypass.json",
   "interface_state_path": "/run/egress-manager/interface-outbounds/state.json",

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"regexp"
 	"strconv"
@@ -137,7 +138,7 @@ func ParseImport(input string) (ImportResult, error) {
 			return ImportResult{}, fmt.Errorf("XHTTP extra JSON is invalid")
 		}
 		var trailing any
-		if err := decoder.Decode(&trailing); err == nil {
+		if err := decoder.Decode(&trailing); err != io.EOF {
 			return ImportResult{}, fmt.Errorf("XHTTP extra JSON has trailing data")
 		}
 		if _, ok := extra.(map[string]any); !ok {
@@ -161,8 +162,8 @@ func ParseImport(input string) (ImportResult, error) {
 			"users":   []any{user},
 		}}},
 		"streamSettings": map[string]any{
-			"network":  "xhttp",
-			"security": "reality",
+			"network":       "xhttp",
+			"security":      "reality",
 			"xhttpSettings": xhttp,
 			"realitySettings": map[string]any{
 				"serverName":  sni,
@@ -174,14 +175,14 @@ func ParseImport(input string) (ImportResult, error) {
 	}
 	name := cleanName(parsed.Fragment, "VLESS XHTTP "+host)
 	outbound := domain.Outbound{
-		ID:           domain.ID(outboundID(name, host, uint16(portValue))),
-		Name:         name,
-		Adapter:      domain.OutboundAdapter("xray"),
-		Type:         domain.OutboundVLESS,
-		Server:       server,
-		Capabilities: domain.Capabilities{TCP: true, UDP: true},
-		Health:       domain.UnknownOutboundHealth(),
-		Enabled:      true,
+		ID:             domain.ID(outboundID(name, host, uint16(portValue))),
+		Name:           name,
+		Adapter:        domain.OutboundAdapterXray,
+		Type:           domain.OutboundVLESS,
+		Server:         server,
+		Capabilities:   domain.Capabilities{TCP: true, UDP: true},
+		Health:         domain.UnknownOutboundHealth(),
+		Enabled:        true,
 		SecretMetadata: []string{"public_key", "short_id", "uuid"},
 	}
 	document, err := json.Marshal(CredentialDocument{Version: credentialVersion, Outbound: configuration})

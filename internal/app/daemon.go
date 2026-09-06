@@ -32,6 +32,7 @@ import (
 	managedSingBox "github.com/egress-manager/egress-manager/internal/singbox"
 	"github.com/egress-manager/egress-manager/internal/system"
 	managedXray "github.com/egress-manager/egress-manager/internal/xray"
+	"github.com/egress-manager/egress-manager/internal/xrayrelay"
 )
 
 type DaemonOptions struct {
@@ -89,6 +90,7 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	haproxyRuntime := managedHAProxy.RuntimeClient{SocketPath: configuration.HAProxyRuntimeSocketPath, Dialer: managedHAProxy.NetDialer{}, Timeout: 2 * time.Second}
 	haproxyExecutor := managedHAProxy.Executor{Runner: runner, Journal: store, Runtime: haproxyRuntime, Protector: protector, ConfigPath: configuration.HAProxyConfigPath, PIDPath: configuration.HAProxyPIDPath}
 	singboxExecutor := managedSingBox.Executor{Runner: runner, Journal: store, Protector: protector, ConfigPath: configuration.SingBoxConfigPath}
+	xrayRelayExecutor := xrayrelay.Executor{Runner: runner, Journal: store, Protector: protector, ConfigPath: configuration.XrayRelayConfigPath}
 	interfaceExecutor := managedInterface.Executor{Runner: runner, Journal: store, Protector: protector, StatePath: configuration.InterfaceStatePath, RuntimeDirectory: configuration.InterfaceRuntimeDirectory}
 	routeExecutor := routeengine.Executor{Runner: runner, Journal: store, Protector: protector, SingBoxConfigPath: configuration.SingBoxConfigPath, RoutingStatePath: configuration.RoutingStatePath, BypassStatePath: configuration.BypassStatePath, InterfaceStatePath: configuration.InterfaceStatePath, InterfaceRuntimeDirectory: configuration.InterfaceRuntimeDirectory}
 	collector := inventory.Collector{Runner: runner, Files: inventory.OSFiles{}, Timeout: 2 * time.Second}
@@ -208,6 +210,7 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 		return reliability.Coordinator{Steps: []reliability.RecoveryStep{
 			{Component: "interface", Recover: interfaceExecutor.Recover},
 			{Component: "singbox", Recover: singboxExecutor.Recover},
+			{Component: "xray_relay", Recover: xrayRelayExecutor.Recover},
 			{Component: "haproxy", Recover: haproxyExecutor.Recover},
 			{Component: "xray", Recover: recoverXray},
 			{Component: "routing", Recover: routeExecutor.Recover},
@@ -374,6 +377,11 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 					return nil, err
 				}
 				component = "singbox"
+			case "xray_relay_apply":
+				if err := xrayRelayExecutor.RollbackCommitted(ctx, operation); err != nil {
+					return nil, err
+				}
+				component = "xray_relay"
 			case "interface_outbound_apply":
 				if err := interfaceExecutor.RollbackCommitted(ctx, operation); err != nil {
 					return nil, err
@@ -700,6 +708,154 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	}); err != nil {
 		return err
 	}
+	if err := server.Handle(ipc.OperationXrayRelayImport, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		var request xrayrelay.ImportRequest
+		if err := decodePayload(payload, &request); err != nil {
+			return nil, err
+		}
+		outboundMutex.Lock()
+		defer outboundMutex.Unlock()
+		parsed, err := xrayrelay.ParseImport(request.Input)
+		if err != nil {
+			return nil, err
+		}
+		stored, err := store.CreateOutbound(ctx, parsed.Outbound, parsed.CredentialDocument, time.Now().UTC())
+		if err != nil {
+			return nil, err
+		}
+		return xrayrelay.ImportResponse{Outbounds: []domain.Outbound{stored.Outbound}}, nil
+	}); err != nil {
+		return err
+	}
+	if err := server.Handle(ipc.OperationXrayRelayTest, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		var request xrayrelay.TestRequest
+		if err := decodePayload(payload, &request); err != nil {
+			return nil, err
+		}
+		outboundMutex.Lock()
+		defer outboundMutex.Unlock()
+		if (request.ID == "") == (request.Input == "") {
+			return nil, fmt.Errorf("exactly one stored Xray outbound ID or import input is required")
+		}
+		tester := xrayrelay.Tester{Runner: runner, Dialer: &net.Dialer{Timeout: 2 * time.Second}, Timeout: 10 * time.Second}
+		if request.ID != "" {
+			if request.ExpectedRevision < 1 {
+				return nil, fmt.Errorf("expected revision is required")
+			}
+			stored, err := store.Outbound(ctx, request.ID)
+			if err != nil {
+				return nil, err
+			}
+			if stored.Revision != request.ExpectedRevision {
+				return nil, database.ErrConflict
+			}
+			if stored.Outbound.Adapter != domain.OutboundAdapterXray {
+				return nil, fmt.Errorf("outbound does not use the Xray adapter")
+			}
+			credential, err := store.OutboundCredential(ctx, request.ID)
+			if err != nil {
+				return nil, err
+			}
+			health := tester.Test(ctx, stored.Outbound, credential)
+			stored.Outbound.Health = health
+			updated, err := store.UpdateOutbound(ctx, stored.Outbound, request.ExpectedRevision, nil, time.Now().UTC())
+			if err != nil {
+				return nil, err
+			}
+			return xrayrelay.TestResponse{Results: []xrayrelay.TestResult{{Outbound: updated.Outbound, Health: health}}}, nil
+		}
+		parsed, err := xrayrelay.ParseImport(request.Input)
+		if err != nil {
+			return nil, err
+		}
+		health := tester.Test(ctx, parsed.Outbound, parsed.CredentialDocument)
+		return xrayrelay.TestResponse{Results: []xrayrelay.TestResult{{Outbound: parsed.Outbound, Health: health}}}, nil
+	}); err != nil {
+		return err
+	}
+	loadRelayPlan := func(ctx context.Context) (xrayrelay.ExecutionPlan, error) {
+		storedRelays, err := store.ListRelays(ctx, "", xrayrelay.MaximumRelays+1)
+		if err != nil {
+			return xrayrelay.ExecutionPlan{}, err
+		}
+		if len(storedRelays) > xrayrelay.MaximumRelays {
+			return xrayrelay.ExecutionPlan{}, fmt.Errorf("relay desired state exceeds %d entries", xrayrelay.MaximumRelays)
+		}
+		relays := make([]domain.Relay, 0, len(storedRelays))
+		referenced := make(map[domain.ID]struct{})
+		for _, item := range storedRelays {
+			relays = append(relays, item.Relay)
+			if item.Relay.Enabled {
+				referenced[item.Relay.OutboundID] = struct{}{}
+			}
+		}
+		storedOutbounds, err := store.ListOutbounds(ctx, "", managedSingBox.MaximumOutbounds+1)
+		if err != nil {
+			return xrayrelay.ExecutionPlan{}, err
+		}
+		outbounds := make([]domain.Outbound, 0, len(storedOutbounds))
+		credentials := make(map[domain.ID][]byte)
+		for _, item := range storedOutbounds {
+			outbounds = append(outbounds, item.Outbound)
+			if _, needed := referenced[item.Outbound.ID]; needed {
+				document, credentialErr := store.OutboundCredential(ctx, item.Outbound.ID)
+				if credentialErr != nil {
+					return xrayrelay.ExecutionPlan{}, credentialErr
+				}
+				credentials[item.Outbound.ID] = document
+			}
+		}
+		host, err := collector.Collect(ctx)
+		if err != nil {
+			return xrayrelay.ExecutionPlan{}, err
+		}
+		protectedPorts := append([]uint16{configuration.ListenPort}, configuration.SSHPorts...)
+		for _, listener := range host.Listeners {
+			if strings.EqualFold(listener.Process, "sshd") && listener.Protocol == "tcp" && listener.Port != 0 && !containsPort(protectedPorts, listener.Port) {
+				protectedPorts = append(protectedPorts, listener.Port)
+			}
+		}
+		state, err := xrayrelay.InspectState(configuration.XrayRelayConfigPath)
+		if err != nil {
+			return xrayrelay.ExecutionPlan{}, err
+		}
+		return xrayrelay.BuildPlan(xrayrelay.Settings{ProtectedPorts: protectedPorts}, relays, outbounds, credentials, host.Listeners, state)
+	}
+	if err := server.Handle(ipc.OperationRelayPlan, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		if err := decodeEmptyPayload(payload); err != nil {
+			return nil, err
+		}
+		outboundMutex.Lock()
+		defer outboundMutex.Unlock()
+		plan, err := loadRelayPlan(ctx)
+		if err != nil {
+			return nil, err
+		}
+		return plan.Review, nil
+	}); err != nil {
+		return err
+	}
+	if err := server.Handle(ipc.OperationRelayApply, func(ctx context.Context, payload json.RawMessage) (any, error) {
+		var request xrayrelay.ApplyRequest
+		if err := decodePayload(payload, &request); err != nil {
+			return nil, err
+		}
+		outboundMutex.Lock()
+		defer outboundMutex.Unlock()
+		return mutate(ctx, request.TransactionID, "xray_relay", func() (any, error) {
+			plan, err := loadRelayPlan(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if request.ExpectedStateHash == "" || request.ExpectedCandidateHash == "" || plan.Review.StateHash != request.ExpectedStateHash || plan.Review.CandidateHash != request.ExpectedCandidateHash {
+				return nil, xrayrelay.ErrStateChanged
+			}
+			return xrayRelayExecutor.Execute(ctx, request.TransactionID, plan)
+		})
+	}); err != nil {
+		return err
+	}
+
 	if err := server.Handle(ipc.OperationInterfaceImport, func(ctx context.Context, payload json.RawMessage) (any, error) {
 		var request managedInterface.ImportRequest
 		if err := decodePayload(payload, &request); err != nil {

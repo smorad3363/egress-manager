@@ -92,7 +92,7 @@ func RunWeb(ctx context.Context, options WebOptions) error {
 	apiServer, err := api.NewServer(api.ServerConfig{
 		SessionCookieName: configuration.SessionCookieName,
 		SecureCookies:     true,
-	}, logger, authentication, sessions, control, store, store, store, store, store, health)
+	}, logger, authentication, sessions, control, store, store, store, store, store, store, health)
 	if err != nil {
 		return err
 	}

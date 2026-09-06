@@ -50,6 +50,10 @@ const (
 	OperationSingBoxTest      Operation = "singbox.test"
 	OperationSingBoxPlan      Operation = "singbox.plan"
 	OperationSingBoxApply     Operation = "singbox.apply"
+	OperationXrayRelayImport  Operation = "xrayrelay.import"
+	OperationXrayRelayTest    Operation = "xrayrelay.test"
+	OperationRelayPlan        Operation = "relay.plan"
+	OperationRelayApply       Operation = "relay.apply"
 	OperationRoutesPlan       Operation = "routes.plan"
 	OperationRoutesApply      Operation = "routes.apply"
 	OperationXrayDiscover     Operation = "xray.discover"
@@ -63,7 +67,7 @@ const (
 
 func (operation Operation) Validate() error {
 	switch operation {
-	case OperationHealth, OperationRecoveryStatus, OperationRecoveryRun, OperationRecoveryBypass, OperationRecoveryRollback, OperationInventory, OperationNATPlan, OperationNATApply, OperationNATCount, OperationHAProxyPlan, OperationHAProxyApply, OperationHAProxyStats, OperationSingBoxImport, OperationSingBoxTest, OperationSingBoxPlan, OperationSingBoxApply, OperationRoutesPlan, OperationRoutesApply, OperationXrayDiscover, OperationXrayPlan, OperationXrayApply, OperationInterfaceImport, OperationInterfaceTest, OperationInterfacePlan, OperationInterfaceApply:
+	case OperationHealth, OperationRecoveryStatus, OperationRecoveryRun, OperationRecoveryBypass, OperationRecoveryRollback, OperationInventory, OperationNATPlan, OperationNATApply, OperationNATCount, OperationHAProxyPlan, OperationHAProxyApply, OperationHAProxyStats, OperationSingBoxImport, OperationSingBoxTest, OperationSingBoxPlan, OperationSingBoxApply, OperationXrayRelayImport, OperationXrayRelayTest, OperationRelayPlan, OperationRelayApply, OperationRoutesPlan, OperationRoutesApply, OperationXrayDiscover, OperationXrayPlan, OperationXrayApply, OperationInterfaceImport, OperationInterfaceTest, OperationInterfacePlan, OperationInterfaceApply:
 		return nil
 	default:
 		return ErrUnknownAction
