@@ -8,6 +8,7 @@ import { Icon } from "./components/Icon";
 import { NetworkInventory } from "./components/NetworkInventory";
 import { OutboundsManager } from "./components/OutboundsManager";
 import { PortForwards } from "./components/PortForwards";
+import { RelaysManager } from "./components/RelaysManager";
 import { RoutesManager } from "./components/RoutesManager";
 import { XrayManager } from "./components/XrayManager";
 import { Button } from "./components/ui/Button";
@@ -17,6 +18,7 @@ import { LanguageSwitcher } from "./i18n";
 const navigation = [
   ["Dashboard", "dashboard"],
   ["Outbounds", "globe"],
+  ["Relays", "arrow"],
   ["Routes", "route"],
   ["Xray", "network"],
   ["Port Forward", "arrow"],
@@ -29,6 +31,7 @@ type PageName = (typeof navigation)[number][0];
 const searchAliases: Record<PageName, string[]> = {
   Dashboard: ["dashboard", "home", "overview", "داشبورد", "خانه", "وضعیت"],
   Outbounds: ["outbounds", "outbound", "proxy", "vpn", "خروجی", "خروجی‌ها", "پروکسی", "وی پی ان"],
+  Relays: ["relays", "relay", "listener", "port relay", "رله", "رله‌ها", "شنود", "انتقال خروجی"],
   Routes: ["routes", "route", "routing", "مسیر", "مسیرها", "مسیریابی"],
   Xray: ["xray", "ایکس ری", "ایکس‌ری", "marzban", "3x-ui"],
   "Port Forward": ["port forward", "nat", "forward", "انتقال پورت", "فوروارد", "پورت"],
@@ -49,6 +52,7 @@ function Dashboard() {
   const [newForwardRequest, setNewForwardRequest] = useState(0);
   const [newHAProxyRequest, setNewHAProxyRequest] = useState(0);
   const [newOutboundRequest, setNewOutboundRequest] = useState(0);
+  const [newRelayRequest, setNewRelayRequest] = useState(0);
   const [newRouteRequest, setNewRouteRequest] = useState(0);
   const searchRef = useRef<HTMLInputElement>(null);
   const reduceMotion = useReducedMotion();
@@ -77,6 +81,10 @@ function Dashboard() {
     setActive("Routes");
     setNewRouteRequest((value) => value + 1);
   };
+  const openRelayCreate = () => {
+    setActive("Relays");
+    setNewRelayRequest((value) => value + 1);
+  };
 
   const submitSearch = (event: FormEvent) => {
     event.preventDefault();
@@ -95,6 +103,7 @@ function Dashboard() {
     if (active === "Port Forward") return <Button variant="primary" onClick={() => setNewForwardRequest((value) => value + 1)}><Icon name="plus" />New forward</Button>;
     if (active === "HAProxy") return <Button variant="primary" onClick={() => setNewHAProxyRequest((value) => value + 1)}><Icon name="plus" />New frontend</Button>;
     if (active === "Outbounds") return <Button variant="primary" onClick={() => setNewOutboundRequest((value) => value + 1)}><Icon name="plus" />Import outbound</Button>;
+    if (active === "Relays") return <Button variant="primary" onClick={() => setNewRelayRequest((value) => value + 1)}><Icon name="plus" />New relay</Button>;
     if (active === "Routes") return <Button variant="primary" onClick={() => setNewRouteRequest((value) => value + 1)}><Icon name="plus" />New route</Button>;
     return null;
   })();
@@ -131,11 +140,12 @@ function Dashboard() {
       </header>
 
       <div className="content">
-        {active === "Dashboard" ? <DashboardOverview onOpenRoutes={() => setActive("Routes")} onCreateRoute={openRouteCreate} onOpenNetwork={() => setActive("Network")} /> :
+        {active === "Dashboard" ? <DashboardOverview onOpenRoutes={() => setActive("Routes")} onCreateRoute={openRouteCreate} onOpenRelays={() => setActive("Relays")} onCreateRelay={openRelayCreate} onOpenNetwork={() => setActive("Network")} /> :
           active === "Network" ? <NetworkInventory /> :
           active === "Port Forward" ? <PortForwards createRequest={newForwardRequest} /> :
           active === "HAProxy" ? <HAProxyManager createRequest={newHAProxyRequest} /> :
           active === "Outbounds" ? <OutboundsManager createRequest={newOutboundRequest} /> :
+          active === "Relays" ? <RelaysManager createRequest={newRelayRequest} /> :
           active === "Routes" ? <RoutesManager createRequest={newRouteRequest} /> :
           <XrayManager createRequest={0} />}
       </div>
