@@ -43,6 +43,10 @@ while [ "$#" -gt 0 ]; do
 done
 
 fail() { echo "install-secure.sh: $*" >&2; exit 1; }
+has_controlling_tty() {
+  (exec 3</dev/tty 4>/dev/tty) 2>/dev/null
+}
+
 [ "$(id -u)" -eq 0 ] || fail "run as root (use sudo)"
 [ "$(uname -s)" = "Linux" ] || fail "Linux is required"
 [ -r /etc/os-release ] || fail "/etc/os-release is unavailable"
@@ -263,7 +267,7 @@ panel_port="$(sed -n 's/^[[:space:]]*"listen_port":[[:space:]]*\([0-9][0-9]*\),*
 [ -n "${panel_port}" ] || fail "cannot read panel port"
 ready=0
 for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-  if systemctl is-active --quiet egressd.service && systemctl is-active --quiet egress-web.service && curl -kfsS --max-time 2 "https://127.0.0.1:${panel_port}/api/v1/health" >/dev/null; then
+  if systemctl is-active --quiet egressd.service && systemctl is-active --quiet egress-web.service && curl -kfsS --max-time 2 "https://127.0.0.1:${panel_port}/api/v1/health" >/dev/null 2>&1; then
     ready=1
     break
   fi
@@ -274,12 +278,12 @@ done
 prompt_admin=0
 if [ "${admin_mode}" = "prompt" ]; then
   prompt_admin=1
-elif [ "${admin_mode}" = "auto" ] && [ "${fresh_database}" = "1" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+elif [ "${admin_mode}" = "auto" ] && [ "${fresh_database}" = "1" ] && has_controlling_tty; then
   prompt_admin=1
 fi
 
 if [ "${prompt_admin}" = "1" ]; then
-  [ -r /dev/tty ] && [ -w /dev/tty ] || fail "an interactive terminal is required to provision the administrator"
+  has_controlling_tty || fail "an interactive terminal is required to provision the administrator"
   if [ "${admin_mode}" = "auto" ]; then
     printf 'Administrator username [%s]: ' "${admin_user}" >/dev/tty
     IFS= read -r entered_user </dev/tty
