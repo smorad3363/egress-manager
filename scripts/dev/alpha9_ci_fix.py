@@ -51,8 +51,8 @@ replace_once(
 # VLESS test server to match the client fixture.
 replace_once(
     "internal/xrayrelay/native_test.go",
-    '''\t\tbackendAccepts.Add(1)\n\t\tgo func() {\n\t\t\tdefer connection.Close()\n\t\t\t_, _ = io.Copy(connection, connection)\n\t\t}()''',
-    '''\t\tbackendAccepts.Add(1)\n\t\tgo func() {\n\t\t\tdefer connection.Close()\n\t\t\tbuffer := make([]byte, 32*1024)\n\t\t\tfor {\n\t\t\t\tn, readErr := connection.Read(buffer)\n\t\t\t\tif n > 0 {\n\t\t\t\t\tif _, writeErr := connection.Write(buffer[:n]); writeErr != nil {\n\t\t\t\t\t\treturn\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t\tif readErr != nil {\n\t\t\t\t\treturn\n\t\t\t\t}\n\t\t\t}\n\t\t}()''',
+    '''\t\t\tbackendAccepts.Add(1)\n\t\t\tgo func() {\n\t\t\t\tdefer connection.Close()\n\t\t\t\t_, _ = io.Copy(connection, connection)\n\t\t\t}()''',
+    '''\t\t\tbackendAccepts.Add(1)\n\t\t\tgo func() {\n\t\t\t\tdefer connection.Close()\n\t\t\t\tbuffer := make([]byte, 32*1024)\n\t\t\t\tfor {\n\t\t\t\t\tn, readErr := connection.Read(buffer)\n\t\t\t\t\tif n > 0 {\n\t\t\t\t\t\tif _, writeErr := connection.Write(buffer[:n]); writeErr != nil {\n\t\t\t\t\t\t\treturn\n\t\t\t\t\t\t}\n\t\t\t\t\t}\n\t\t\t\t\tif readErr != nil {\n\t\t\t\t\t\treturn\n\t\t\t\t\t}\n\t\t\t\t}\n\t\t\t}()''',
 )
 replace_once(
     "internal/xrayrelay/native_test.go",
