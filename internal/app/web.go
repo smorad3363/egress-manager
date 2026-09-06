@@ -7,6 +7,10 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/egress-manager/egress-manager/internal/api"
@@ -18,9 +22,12 @@ import (
 	"github.com/egress-manager/egress-manager/internal/secrets"
 )
 
+const defaultWebAssetsPath = "/usr/local/lib/egress-manager/web"
+
 type WebOptions struct {
 	ConfigPath string
 	KeyPath    string
+	AssetsPath string
 	Logger     *slog.Logger
 }
 
@@ -89,9 +96,17 @@ func RunWeb(ctx context.Context, options WebOptions) error {
 	if err != nil {
 		return err
 	}
+	assetsPath := options.AssetsPath
+	if assetsPath == "" {
+		assetsPath = defaultWebAssetsPath
+	}
+	panel, err := panelHandler(apiServer.Handler(), assetsPath)
+	if err != nil {
+		return err
+	}
 	httpServer := &http.Server{
 		Addr:              net.JoinHostPort(configuration.ListenAddress, fmt.Sprintf("%d", configuration.ListenPort)),
-		Handler:           apiServer.Handler(),
+		Handler:           api.SecurityHeaders(panel),
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
@@ -127,4 +142,48 @@ func RunWeb(ctx context.Context, options WebOptions) error {
 		}
 		return nil
 	}
+}
+
+func panelHandler(apiHandler http.Handler, assetsPath string) (http.Handler, error) {
+	if apiHandler == nil {
+		return nil, fmt.Errorf("panel API handler is required")
+	}
+	root, err := filepath.Abs(assetsPath)
+	if err != nil {
+		return nil, fmt.Errorf("resolve web assets path: %w", err)
+	}
+	indexPath := filepath.Join(root, "index.html")
+	info, err := os.Stat(indexPath)
+	if err != nil || !info.Mode().IsRegular() {
+		if err == nil {
+			err = fmt.Errorf("not a regular file")
+		}
+		return nil, fmt.Errorf("web assets are incomplete at %s: %w", indexPath, err)
+	}
+	files := http.FileServer(http.Dir(root))
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/api" || strings.HasPrefix(request.URL.Path, "/api/") {
+			apiHandler.ServeHTTP(writer, request)
+			return
+		}
+		if request.Method != http.MethodGet && request.Method != http.MethodHead {
+			writer.Header().Set("Allow", "GET, HEAD")
+			http.Error(writer, "Method not allowed.", http.StatusMethodNotAllowed)
+			return
+		}
+
+		cleanPath := path.Clean("/" + request.URL.Path)
+		candidate := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(cleanPath, "/")))
+		if candidateInfo, statErr := os.Stat(candidate); statErr == nil && (candidateInfo.Mode().IsRegular() || candidateInfo.IsDir()) {
+			files.ServeHTTP(writer, request)
+			return
+		}
+
+		fallback := request.Clone(request.Context())
+		fallbackURL := *request.URL
+		fallbackURL.Path = "/"
+		fallbackURL.RawPath = ""
+		fallback.URL = &fallbackURL
+		files.ServeHTTP(writer, fallback)
+	}), nil
 }
