@@ -1,6 +1,7 @@
 package xrayrelay
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/netip"
 	"strings"
@@ -82,21 +83,70 @@ func TestBuildPlanRejectsOverlappingDesiredListeners(t *testing.T) {
 	}
 }
 
-func TestBuildPlanRequiresEnabledXrayOutbound(t *testing.T) {
+func TestBuildPlanRequiresPresentEnabledCapableXrayOutbound(t *testing.T) {
 	parsed, err := ParseImport(syntheticVLESSURI)
 	if err != nil {
 		t.Fatal(err)
 	}
 	state, _ := ParseState(nil, false)
 	relay := domain.Relay{ID: "relay", Name: "Relay", ListenAddress: "0.0.0.0", ListenPort: 6111, Network: domain.RelayTCP, Destination: domain.Endpoint{Host: "91.107.220.12", Port: 6111}, OutboundID: parsed.Outbound.ID, Enabled: true}
+	credentials := map[domain.ID][]byte{parsed.Outbound.ID: parsed.CredentialDocument}
+	if _, err := BuildPlan(Settings{}, []domain.Relay{relay}, nil, credentials, nil, state); err == nil || !strings.Contains(err.Error(), "missing or disabled") {
+		t.Fatalf("missing outbound error = %v", err)
+	}
 	disabled := parsed.Outbound
 	disabled.Enabled = false
-	if _, err := BuildPlan(Settings{}, []domain.Relay{relay}, []domain.Outbound{disabled}, map[domain.ID][]byte{parsed.Outbound.ID: parsed.CredentialDocument}, nil, state); err == nil {
+	if _, err := BuildPlan(Settings{}, []domain.Relay{relay}, []domain.Outbound{disabled}, credentials, nil, state); err == nil {
 		t.Fatal("disabled outbound was accepted")
 	}
 	wrong := parsed.Outbound
 	wrong.Adapter = domain.OutboundAdapterSingBox
-	if _, err := BuildPlan(Settings{}, []domain.Relay{relay}, []domain.Outbound{wrong}, map[domain.ID][]byte{parsed.Outbound.ID: parsed.CredentialDocument}, nil, state); err == nil {
+	if _, err := BuildPlan(Settings{}, []domain.Relay{relay}, []domain.Outbound{wrong}, credentials, nil, state); err == nil {
 		t.Fatal("wrong adapter outbound was accepted")
+	}
+	udpRelay := relay
+	udpRelay.Network = domain.RelayUDP
+	tcpOnly := parsed.Outbound
+	tcpOnly.Capabilities.UDP = false
+	if _, err := BuildPlan(Settings{}, []domain.Relay{udpRelay}, []domain.Outbound{tcpOnly}, credentials, nil, state); err == nil || !strings.Contains(err.Error(), "capability") {
+		t.Fatalf("capability mismatch error = %v", err)
+	}
+}
+
+func TestBuildPlanIsDeterministicAcrossInputOrder(t *testing.T) {
+	first, err := ParseImport(syntheticVLESSURI)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second := first.Outbound
+	second.ID = "second_xray"
+	second.Name = "Second Xray"
+	second.Server = domain.Endpoint{Host: "example.net", Port: 2026}
+	var secondDocument CredentialDocument
+	if err := json.Unmarshal(first.CredentialDocument, &secondDocument); err != nil {
+		t.Fatal(err)
+	}
+	settings := secondDocument.Outbound["settings"].(map[string]any)
+	vnext := settings["vnext"].([]any)
+	vnext[0].(map[string]any)["address"] = second.Server.Host
+	vnext[0].(map[string]any)["port"] = second.Server.Port
+	secondCredential, err := json.Marshal(secondDocument)
+	if err != nil {
+		t.Fatal(err)
+	}
+	left := domain.Relay{ID: "alpha", Name: "Alpha", ListenAddress: "127.0.0.1", ListenPort: 6111, Network: domain.RelayTCP, Destination: domain.Endpoint{Host: "192.0.2.10", Port: 22}, OutboundID: first.Outbound.ID, Enabled: true}
+	right := domain.Relay{ID: "beta", Name: "Beta", ListenAddress: "127.0.0.1", ListenPort: 6112, Network: domain.RelayTCP, Destination: domain.Endpoint{Host: "192.0.2.11", Port: 22}, OutboundID: second.ID, Enabled: true}
+	state, _ := ParseState(nil, false)
+	credentials := map[domain.ID][]byte{first.Outbound.ID: first.CredentialDocument, second.ID: secondCredential}
+	forward, err := BuildPlan(Settings{}, []domain.Relay{left, right}, []domain.Outbound{first.Outbound, second}, credentials, nil, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reversed, err := BuildPlan(Settings{}, []domain.Relay{right, left}, []domain.Outbound{second, first.Outbound}, credentials, nil, state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if forward.Review.CandidateHash != reversed.Review.CandidateHash || !bytes.Equal(forward.Candidate(), reversed.Candidate()) {
+		t.Fatalf("candidate depends on input order:\nforward=%s\nreversed=%s", forward.Candidate(), reversed.Candidate())
 	}
 }
