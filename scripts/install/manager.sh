@@ -16,20 +16,27 @@ value() {
 
 panel_port() { value listen_port; }
 panel_address() { value listen_address; }
+tls_enabled() { [ -n "$(value tls_certificate_path)" ] && [ -n "$(value tls_private_key_path)" ]; }
 
 public_ip() {
+  if [ -r /etc/egress-manager/tls/ip-address ]; then
+    sed -n '1p' /etc/egress-manager/tls/ip-address
+    return
+  fi
   ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i=1;i<=NF;i++) if ($i=="src") {print $(i+1); exit}}'
 }
 
 show_url() {
   port="$(panel_port)"
   addr="$(panel_address)"
+  scheme="http"
+  tls_enabled && scheme="https"
   if [ "${addr}" = "0.0.0.0" ] || [ "${addr}" = "::" ]; then
     ipaddr="$(public_ip || true)"
     [ -n "${ipaddr}" ] || ipaddr="SERVER_IP"
-    echo "Panel: http://${ipaddr}:${port}/login"
+    echo "Panel: ${scheme}://${ipaddr}:${port}/login"
   else
-    echo "Panel: http://${addr}:${port}/login"
+    echo "Panel: ${scheme}://${addr}:${port}/login"
   fi
 }
 
@@ -64,13 +71,8 @@ set_insecure_http() {
   rm -f "${tmp}"
 }
 
-reset_services() {
-  systemctl reset-failed egressd.service egress-web.service >/dev/null 2>&1 || true
-}
-
-reset_web() {
-  systemctl reset-failed egress-web.service >/dev/null 2>&1 || true
-}
+reset_services() { systemctl reset-failed egressd.service egress-web.service >/dev/null 2>&1 || true; }
+reset_web() { systemctl reset-failed egress-web.service >/dev/null 2>&1 || true; }
 
 case "${1:-menu}" in
   menu)
@@ -83,7 +85,7 @@ case "${1:-menu}" in
       echo "4) Start"
       echo "5) Stop"
       echo "6) Logs"
-      echo "7) Expose panel on HTTP (0.0.0.0)"
+      echo "7) Expose panel on HTTPS (0.0.0.0)"
       echo "8) Restrict panel to localhost"
       echo "9) Change panel port"
       echo "10) Provision/reset administrator"
@@ -114,35 +116,25 @@ case "${1:-menu}" in
     systemctl --no-pager --full status egressd.service egress-web.service || true
     show_url
     ;;
-  url)
-    show_url
-    ;;
+  url) show_url ;;
   start)
-    need_root "$@"
-    reset_services
-    systemctl start egressd.service egress-web.service
-    show_url
+    need_root "$@"; reset_services; systemctl start egressd.service egress-web.service; show_url
     ;;
   stop)
-    need_root "$@"
-    systemctl stop egressd.service egress-web.service
+    need_root "$@"; systemctl stop egressd.service egress-web.service
     ;;
   restart)
-    need_root "$@"
-    reset_services
-    systemctl restart egressd.service egress-web.service
-    show_url
+    need_root "$@"; reset_services; systemctl restart egressd.service egress-web.service; show_url
     ;;
-  logs)
-    journalctl -u egressd.service -u egress-web.service -n 100 --no-pager
-    ;;
+  logs) journalctl -u egressd.service -u egress-web.service -n 100 --no-pager ;;
   expose)
     need_root "$@"
+    tls_enabled || { echo "TLS is not configured. Re-run the secure installer before exposing the panel." >&2; exit 1; }
     set_json_string listen_address 0.0.0.0
-    set_insecure_http true
+    set_insecure_http false
     reset_web
     systemctl restart egress-web.service
-    echo "Public HTTP mode enabled. Login credentials and session traffic are NOT encrypted."
+    echo "Public HTTPS mode enabled."
     show_url
     ;;
   local)
@@ -177,8 +169,7 @@ case "${1:-menu}" in
     unset password
     ;;
   verify)
-    need_root "$@"
-    "$verify"
+    need_root "$@"; "$verify"
     ;;
   firewall-open)
     need_root "$@"
@@ -196,8 +187,5 @@ case "${1:-menu}" in
 Usage: egress-manager [menu|status|url|start|stop|restart|logs|expose|local|port PORT|admin USER|verify|firewall-open]
 EOF
     ;;
-  *)
-    echo "Unknown command: $1" >&2
-    exit 2
-    ;;
+  *) echo "Unknown command: $1" >&2; exit 2 ;;
 esac
