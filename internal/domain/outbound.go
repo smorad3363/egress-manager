@@ -43,10 +43,11 @@ type OutboundAdapter string
 const (
 	OutboundAdapterSingBox   OutboundAdapter = "sing-box"
 	OutboundAdapterInterface OutboundAdapter = "interface"
+	OutboundAdapterXray      OutboundAdapter = "xray"
 )
 
 func (adapter OutboundAdapter) Validate() error {
-	if adapter != OutboundAdapterSingBox && adapter != OutboundAdapterInterface {
+	if adapter != OutboundAdapterSingBox && adapter != OutboundAdapterInterface && adapter != OutboundAdapterXray {
 		return fmt.Errorf("unsupported outbound adapter %q", adapter)
 	}
 	return nil
@@ -200,6 +201,10 @@ func (outbound Outbound) Validate() error {
 	case OutboundAdapterInterface:
 		if outbound.Type != OutboundWireGuard && outbound.Type != OutboundOpenVPN {
 			adapterTypeError = fmt.Errorf("interface adapter supports only wireguard and openvpn outbounds")
+		}
+	case OutboundAdapterXray:
+		if outbound.Type != OutboundVLESS {
+			adapterTypeError = fmt.Errorf("xray adapter currently supports only vless outbounds")
 		}
 	}
 
