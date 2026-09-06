@@ -9,9 +9,9 @@ active_spec: specs/011-reliability-recovery/spec.md
 active_task: ubuntu-installer-release
 status: in_progress
 
-last_green_ref: 55efb82f6c8d91300e1157c57cd4a49c84d0a4ff
+last_green_ref: 7112349ea02cec14d83add39de78be1b4319c499
 
-next_action: tag v0.1.0-alpha.2 and verify the GitHub release publishes Ubuntu-22.04-built checksum-verified amd64 and arm64 archives
+next_action: run and record the disposable Linux VM real-reboot gate in docs/recovery/FAILURE_INJECTION.md; the public Ubuntu installer and v0.1.0-alpha.2 release are green
 
 dirty_work_expected: false
 
@@ -25,6 +25,8 @@ tests:
     - docker run --rm --privileged --volume <fresh-probes>:/current:ro --env EGRESS_*_PROBE=/current/<probe> egress-manager-network-lab
     - C:/Program Files/Git/usr/bin/sh.exe -n scripts/install/install.sh scripts/install/verify.sh scripts/release/build-linux.sh
     - GitHub Actions CI run 34021589050: backend, frontend, network lab, and Ubuntu 22.04/24.04/26.04 installation jobs passed
+    - GitHub Actions CI run 34021830671: release commit backend, frontend, network lab, and Ubuntu 22.04/24.04/26.04 installation jobs passed
+    - GitHub Actions Release run 34021832932: Ubuntu-22.04-built amd64 and arm64 archives and SHA-256 files published
 
 network_transaction:
   status: none
@@ -37,6 +39,7 @@ blockers:
   - A real disposable Linux VM reboot gate requires an external VM runner or prepared test host; this workstation exposes no QEMU, Vagrant, Multipass, VMware runner, or non-Docker WSL distribution.
 
 recent_decisions:
+  - Public alpha v0.1.0-alpha.2 is the supported installation release; its installer and release artifacts are pinned by tag and verified by SHA-256 before extraction.
   - Release binaries build on Ubuntu 22.04 so their glibc baseline remains compatible with Ubuntu 22.04, 24.04, and 26.04; arm64 uses the matching cross libc headers.
   - The namespace lab disables inherited reverse-path filtering explicitly so disallowed-source packets reach the owned nftables source-drop rule consistently on hosted runners.
   - The first public installer supports systemd-based Ubuntu 22.04, 24.04, and 26.04 on amd64 and arm64; unsupported distributions fail closed.
