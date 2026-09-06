@@ -2,24 +2,24 @@
 set -eu
 
 repository="smorad3363/egress-manager"
-version="${EGRESS_VERSION:-v0.1.0-alpha.2}"
-artifact_file="${EGRESS_ARTIFACT_FILE:-}"
-skip_dependencies="${EGRESS_SKIP_DEPENDENCIES:-0}"
+version="${EGRESS_VERSION:-v0.1.0-alpha.3}"
+bundle_root="${EGRESS_BUNDLE_ROOT:-}"
 skip_start="${EGRESS_SKIP_START:-0}"
-sing_box_version="1.13.20"
 
 usage() {
-  cat <<'EOF'
-Usage: install.sh [--version TAG] [--artifact FILE] [--skip-start]
+  cat <<'EOF_USAGE'
+Usage: install.sh [--version TAG] [--bundle-root DIR] [--skip-start]
 
-Installs Egress Manager on Ubuntu 22.04, 24.04, or 26.04 (amd64/arm64).
-EOF
+Online mode downloads one complete release bundle for this Ubuntu version and architecture.
+Offline mode runs from an extracted bundle and performs no external network access.
+Supported hosts: Ubuntu 22.04, 24.04, and 26.04 on amd64 or arm64 with systemd.
+EOF_USAGE
 }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --version) [ "$#" -ge 2 ] || { usage >&2; exit 2; }; version="$2"; shift 2 ;;
-    --artifact) [ "$#" -ge 2 ] || { usage >&2; exit 2; }; artifact_file="$2"; shift 2 ;;
+    --bundle-root) [ "$#" -ge 2 ] || { usage >&2; exit 2; }; bundle_root="$2"; shift 2 ;;
     --skip-start) skip_start=1; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "install.sh: unknown argument: $1" >&2; usage >&2; exit 2 ;;
@@ -37,19 +37,13 @@ fail() {
 . /etc/os-release
 [ "${ID:-}" = "ubuntu" ] || fail "supported distributions: Ubuntu 22.04, 24.04, 26.04"
 case "${VERSION_ID:-}" in
-  22.04|24.04|26.04) ;;
+  22.04|24.04|26.04) ubuntu_version="${VERSION_ID}" ;;
   *) fail "unsupported Ubuntu release: ${VERSION_ID:-unknown}" ;;
 esac
 
 case "$(uname -m)" in
-  x86_64|amd64)
-    architecture="amd64"
-    sing_box_sha256="646bc01bf128c32a12eb50d8690e387bba7504da7b1d65c704bd53916e38595a"
-    ;;
-  aarch64|arm64)
-    architecture="arm64"
-    sing_box_sha256="7f8187b1d1d30258cd4fa70892eaa232649f8f28b294078eeac719579e14cf42"
-    ;;
+  x86_64|amd64) architecture="amd64" ;;
+  aarch64|arm64) architecture="arm64" ;;
   *) fail "supported architectures: amd64, arm64" ;;
 esac
 
@@ -59,65 +53,106 @@ done
 
 if [ "${skip_start}" != "1" ]; then
   command -v systemctl >/dev/null 2>&1 || fail "systemd is required"
-  [ "$(ps -p 1 -o comm= 2>/dev/null | tr -d ' ')" = "systemd" ] || fail "systemd must be PID 1"
+  init_comm=""
+  IFS= read -r init_comm < /proc/1/comm || true
+  [ "${init_comm}" = "systemd" ] || fail "systemd must be PID 1"
 fi
+
+script_directory=""
+case "$0" in
+  /*|*/*) script_directory="$(CDPATH= cd -- "$(dirname -- "$0")" 2>/dev/null && pwd || true)" ;;
+esac
+if [ -z "${bundle_root}" ] && [ -n "${script_directory}" ] && [ -d "${script_directory}/package" ] && [ -d "${script_directory}/debs" ]; then
+  bundle_root="${script_directory}"
+fi
+
+if [ -z "${bundle_root}" ]; then
+  command -v curl >/dev/null 2>&1 || fail "curl is required for online bootstrap"
+  command -v sha256sum >/dev/null 2>&1 || fail "sha256sum is required for online bootstrap"
+  if ! command -v python3 >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends python3-minimal ca-certificates
+  fi
+
+  temporary_directory="$(mktemp -d)"
+  cleanup_bootstrap() { rm -rf -- "${temporary_directory}"; }
+  trap cleanup_bootstrap EXIT HUP INT TERM
+  bundle_name="egress-manager-offline-ubuntu${ubuntu_version}-${architecture}"
+  release_base="https://github.com/${repository}/releases/download/${version}"
+  archive="${temporary_directory}/${bundle_name}.zip"
+  checksum="${archive}.sha256"
+  echo "Downloading Egress Manager ${version} full bundle for Ubuntu ${ubuntu_version} ${architecture}..."
+  curl --fail --location --silent --show-error --retry 3 --output "${archive}" "${release_base}/${bundle_name}.zip"
+  curl --fail --location --silent --show-error --retry 3 --output "${checksum}" "${release_base}/${bundle_name}.zip.sha256"
+  expected="$(awk '{print $1}' "${checksum}")"
+  actual="$(sha256sum "${archive}" | awk '{print $1}')"
+  [ -n "${expected}" ] && [ "${expected}" = "${actual}" ] || fail "release bundle checksum mismatch"
+  python3 -m zipfile -e "${archive}" "${temporary_directory}/extracted"
+  extracted_root="${temporary_directory}/extracted/${bundle_name}"
+  [ -x "${extracted_root}/install.sh" ] || fail "release bundle is incomplete"
+  if [ "${skip_start}" = "1" ]; then
+    sh "${extracted_root}/install.sh" --bundle-root "${extracted_root}" --skip-start
+  else
+    sh "${extracted_root}/install.sh" --bundle-root "${extracted_root}"
+  fi
+  exit $?
+fi
+
+bundle_root="$(CDPATH= cd -- "${bundle_root}" 2>/dev/null && pwd)" || fail "bundle root does not exist"
+[ -f "${bundle_root}/UBUNTU_VERSION" ] || fail "offline bundle has no UBUNTU_VERSION"
+[ -f "${bundle_root}/ARCHITECTURE" ] || fail "offline bundle has no ARCHITECTURE"
+[ -f "${bundle_root}/VERSION" ] || fail "offline bundle has no VERSION"
+[ -f "${bundle_root}/MANIFEST.sha256" ] || fail "offline bundle has no MANIFEST.sha256"
+[ "$(sed -n '1p' "${bundle_root}/UBUNTU_VERSION")" = "${ubuntu_version}" ] || fail "offline bundle is for a different Ubuntu release"
+[ "$(sed -n '1p' "${bundle_root}/ARCHITECTURE")" = "${architecture}" ] || fail "offline bundle is for a different architecture"
+installed_version="$(sed -n '1p' "${bundle_root}/VERSION")"
+[ -n "${installed_version}" ] || fail "offline bundle has no version"
+
+(
+  cd "${bundle_root}"
+  sha256sum --check --status MANIFEST.sha256
+) || fail "offline bundle manifest verification failed"
+
+package_directory="${bundle_root}/package"
+for file in \
+  bin/egressd bin/egress-web bin/egressctl bin/sing-box bin/xray \
+  config.json.in verify.sh VERSION RUNTIME_VERSIONS web/index.html \
+  systemd/egressd.service systemd/egress-web.service systemd/egress-manager-sing-box.service; do
+  [ -f "${package_directory}/${file}" ] || fail "release bundle is incomplete: ${file}"
+done
+[ "$(sed -n '1p' "${package_directory}/VERSION")" = "${installed_version}" ] || fail "package and bundle versions differ"
+
+command -v apt-get >/dev/null 2>&1 || fail "apt-get is required on the base Ubuntu installation"
+command -v dpkg >/dev/null 2>&1 || fail "dpkg is required on the base Ubuntu installation"
+set -- "${bundle_root}"/debs/*.deb
+[ -f "$1" ] || fail "offline dependency set is empty"
+export DEBIAN_FRONTEND=noninteractive
+apt-get \
+  -o Dir::Etc::sourcelist=/dev/null \
+  -o Dir::Etc::sourceparts=- \
+  -o APT::Get::List-Cleanup=0 \
+  install -y --no-install-recommends "$@"
+
+for command in curl tar gzip sha256sum install getent useradd groupadd sed od awk ss shuf tr ps grep readlink sort paste find nft iptables ip haproxy wg openvpn; do
+  command -v "${command}" >/dev/null 2>&1 || fail "required command missing after offline dependency install: ${command}"
+done
 
 if [ -e /usr/local/bin/egressctl ] && { [ ! -L /usr/local/bin/egressctl ] || [ "$(readlink /usr/local/bin/egressctl)" != "/usr/local/lib/egress-manager/bin/egressctl" ]; }; then
   fail "/usr/local/bin/egressctl already exists and is not owned by Egress Manager"
 fi
 
-for protected_path in /etc/egress-manager /etc/egress-manager/config.json /etc/egress-manager/ipc.key /var/lib/egress-manager /var/lib/egress-manager/private /var/lib/egress-manager/database /usr/local/lib/egress-manager; do
+for protected_path in \
+  /etc/egress-manager /etc/egress-manager/config.json /etc/egress-manager/ipc.key \
+  /var/lib/egress-manager /var/lib/egress-manager/private /var/lib/egress-manager/database \
+  /usr/local/lib/egress-manager /usr/local/lib/egress-manager/bin /usr/local/lib/egress-manager/web \
+  /usr/local/lib/egress-manager/share /usr/local/lib/egress-manager/share/xray; do
   [ ! -L "${protected_path}" ] || fail "refusing symbolic link at protected path: ${protected_path}"
 done
 
 if [ -e /etc/egress-manager/config.json ]; then
   grep -q '"database_path":[[:space:]]*"/var/lib/egress-manager/database/egress-manager.db"' /etc/egress-manager/config.json || fail "existing configuration uses a custom database path; migrate it before upgrading"
 fi
-
-if [ "${skip_dependencies}" != "1" ]; then
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update
-  apt-get install -y --no-install-recommends ca-certificates curl tar gzip coreutils iproute2 nftables iptables haproxy wireguard-tools openvpn
-fi
-
-for command in curl tar sha256sum install getent useradd groupadd sed od awk ss shuf tr ps grep readlink sort paste nft iptables ip haproxy wg openvpn; do
-  command -v "${command}" >/dev/null 2>&1 || fail "required command missing: ${command}"
-done
-
-temporary_directory="$(mktemp -d)"
-cleanup() { rm -rf -- "${temporary_directory}"; }
-trap cleanup EXIT HUP INT TERM
-
-if [ -n "${artifact_file}" ]; then
-  [ -f "${artifact_file}" ] || fail "artifact does not exist: ${artifact_file}"
-  cp "${artifact_file}" "${temporary_directory}/package.tar.gz"
-else
-  release_base="https://github.com/${repository}/releases/download/${version}"
-  artifact_name="egress-manager-linux-${architecture}.tar.gz"
-  curl --fail --location --silent --show-error --retry 3 --output "${temporary_directory}/package.tar.gz" "${release_base}/${artifact_name}"
-  curl --fail --location --silent --show-error --retry 3 --output "${temporary_directory}/package.sha256" "${release_base}/${artifact_name}.sha256"
-  expected="$(awk '{print $1}' "${temporary_directory}/package.sha256")"
-  actual="$(sha256sum "${temporary_directory}/package.tar.gz" | awk '{print $1}')"
-  [ "${expected}" = "${actual}" ] || fail "release artifact checksum mismatch"
-fi
-
-tar -xzf "${temporary_directory}/package.tar.gz" -C "${temporary_directory}"
-package_directory="${temporary_directory}/egress-manager-linux-${architecture}"
-for file in bin/egressd bin/egress-web bin/egressctl config.json.in verify.sh VERSION systemd/egressd.service systemd/egress-web.service systemd/egress-manager-sing-box.service; do
-  [ -f "${package_directory}/${file}" ] || fail "release artifact is incomplete: ${file}"
-done
-installed_version="$(sed -n '1p' "${package_directory}/VERSION")"
-[ -n "${installed_version}" ] || fail "release artifact has no version"
-if [ -z "${artifact_file}" ] && [ "${installed_version}" != "${version}" ]; then
-  fail "release artifact version mismatch: expected ${version}, got ${installed_version}"
-fi
-
-sing_box_archive="sing-box-${sing_box_version}-linux-${architecture}.tar.gz"
-curl --fail --location --silent --show-error --retry 3 --output "${temporary_directory}/${sing_box_archive}" "https://github.com/SagerNet/sing-box/releases/download/v${sing_box_version}/${sing_box_archive}"
-printf '%s  %s\n' "${sing_box_sha256}" "${temporary_directory}/${sing_box_archive}" | sha256sum --check --status || fail "sing-box checksum mismatch"
-tar -xzf "${temporary_directory}/${sing_box_archive}" -C "${temporary_directory}"
-sing_box_binary="${temporary_directory}/sing-box-${sing_box_version}-linux-${architecture}/sing-box"
-[ -f "${sing_box_binary}" ] || fail "sing-box archive is incomplete"
 
 if ! getent group egress-manager >/dev/null 2>&1; then
   groupadd --system egress-manager
@@ -128,16 +163,31 @@ fi
 [ "$(id -u egress-web)" != "0" ] || fail "egress-web must not use UID 0"
 [ "$(getent group egress-manager | awk -F: '{print $3}')" != "0" ] || fail "egress-manager must not use GID 0"
 
-install -d -o root -g root -m 0755 /usr/local/lib/egress-manager /usr/local/lib/egress-manager/bin
-install -o root -g root -m 0755 "${package_directory}/bin/egressd" /usr/local/lib/egress-manager/bin/egressd
-install -o root -g root -m 0755 "${package_directory}/bin/egress-web" /usr/local/lib/egress-manager/bin/egress-web
-install -o root -g root -m 0755 "${package_directory}/bin/egressctl" /usr/local/lib/egress-manager/bin/egressctl
-install -o root -g root -m 0755 "${sing_box_binary}" /usr/local/lib/egress-manager/bin/sing-box
+install -d -o root -g root -m 0755 /usr/local/lib/egress-manager /usr/local/lib/egress-manager/bin /usr/local/lib/egress-manager/share /usr/local/lib/egress-manager/share/xray
+for command in egressd egress-web egressctl sing-box xray; do
+  install -o root -g root -m 0755 "${package_directory}/bin/${command}" "/usr/local/lib/egress-manager/bin/${command}"
+done
+for asset in geoip.dat geosite.dat; do
+  if [ -f "${package_directory}/share/xray/${asset}" ]; then
+    install -o root -g root -m 0644 "${package_directory}/share/xray/${asset}" "/usr/local/lib/egress-manager/share/xray/${asset}"
+  fi
+done
 /usr/local/lib/egress-manager/bin/egressd --version >/dev/null
 /usr/local/lib/egress-manager/bin/egress-web --version >/dev/null
 /usr/local/lib/egress-manager/bin/egressctl --version >/dev/null
 /usr/local/lib/egress-manager/bin/sing-box version >/dev/null
+/usr/local/lib/egress-manager/bin/xray version >/dev/null
 ln -sfn /usr/local/lib/egress-manager/bin/egressctl /usr/local/bin/egressctl
+
+web_stage="/usr/local/lib/egress-manager/web.new.$$"
+rm -rf -- "${web_stage}"
+install -d -o root -g root -m 0755 "${web_stage}"
+cp -R "${package_directory}/web/." "${web_stage}/"
+find "${web_stage}" -type d -exec chmod 0755 {} \;
+find "${web_stage}" -type f -exec chmod 0644 {} \;
+chown -R root:root "${web_stage}"
+rm -rf -- /usr/local/lib/egress-manager/web
+mv "${web_stage}" /usr/local/lib/egress-manager/web
 
 install -d -o root -g egress-manager -m 0750 /etc/egress-manager
 install -d -o root -g egress-manager -m 0750 /var/lib/egress-manager
@@ -150,6 +200,10 @@ if [ ! -e /etc/egress-manager/ipc.key ]; then
 fi
 chown root:egress-manager /etc/egress-manager/ipc.key
 chmod 0640 /etc/egress-manager/ipc.key
+
+temporary_directory="$(mktemp -d)"
+cleanup_install() { rm -rf -- "${temporary_directory}"; }
+trap cleanup_install EXIT HUP INT TERM
 
 if [ ! -e /etc/egress-manager/config.json ]; then
   panel_port=""
@@ -172,9 +226,10 @@ install -o root -g root -m 0644 "${package_directory}/systemd/egressd.service" /
 install -o root -g root -m 0644 "${package_directory}/systemd/egress-web.service" /etc/systemd/system/egress-web.service
 install -o root -g root -m 0644 "${package_directory}/systemd/egress-manager-sing-box.service" /etc/systemd/system/egress-manager-sing-box.service
 install -o root -g root -m 0755 "${package_directory}/verify.sh" /usr/local/lib/egress-manager/verify.sh
+install -o root -g root -m 0644 "${package_directory}/RUNTIME_VERSIONS" /usr/local/lib/egress-manager/RUNTIME_VERSIONS
 
 if [ "${skip_start}" = "1" ]; then
-  echo "Egress Manager files installed; service start skipped."
+  printf 'Egress Manager %s files installed; service start skipped.\n' "${installed_version}"
   exit 0
 fi
 
@@ -199,8 +254,9 @@ if [ "${ready}" != "1" ]; then
   fail "services did not become healthy"
 fi
 
-/usr/local/lib/egress-manager/bin/egressctl status --config /etc/egress-manager/config.json --ipc-key /etc/egress-manager/ipc.key
+/usr/local/lib/egress-manager/verify.sh
 
 printf 'Installed Egress Manager %s.\n' "${installed_version}"
-printf 'Local API: http://127.0.0.1:%s\n' "${panel_port}"
-printf 'Next: provision an administrator using scripts/install/README.md.\n'
+printf 'Panel (local only): http://127.0.0.1:%s/\n' "${panel_port}"
+printf 'Login: http://127.0.0.1:%s/login\n' "${panel_port}"
+printf 'Xray is bundled for Egress Manager validation/integration and is not enabled as a standalone system service.\n'
