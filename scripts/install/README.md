@@ -16,10 +16,10 @@ Supported hosts: Ubuntu 22.04, 24.04, and 26.04 on amd64 or arm64 with systemd.
 The secure bootstrap downloads one complete release bundle for the detected Ubuntu release and CPU architecture. The bundle contains the prebuilt browser panel, Egress Manager binaries, the Bash management utility, pinned sing-box, Xray and lego binaries, the complete Python 3 runtime/standard library used by installer and manager tooling, and the Ubuntu package dependency closure used by the offline installer.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.7/scripts/install/install-secure.sh | sudo sh -s -- --version v0.1.0-alpha.7
+curl -fsSL https://raw.githubusercontent.com/smorad3363/egress-manager/v0.1.0-alpha.8/scripts/install/install-secure.sh | sudo sh -s -- --version v0.1.0-alpha.8
 ```
 
-The Alpha.7 installer is observable by default. It prints named stages such as preflight, bundle download, checksum verification, extraction, runtime installation, server-IP detection, TLS issuance, service startup, health verification, administrator provisioning, and completion. Large downloads use curl's visible progress bar. The complete combined install log is stored at `/var/log/egress-manager/install-*.log`. If a command fails, the installer identifies the active stage, prints the log path, and emits the last 60 log lines before exiting nonzero.
+Alpha.8 keeps the Alpha.7 observable installer behavior. It prints named stages such as preflight, bundle download, checksum verification, extraction, runtime installation, server-IP detection, TLS issuance, service startup, health verification, administrator provisioning, and completion. Large downloads use curl's visible progress bar. The complete combined install log is stored at `/var/log/egress-manager/install-*.log`. If a command fails, the installer identifies the active stage, prints the log path, and emits the last 60 log lines before exiting nonzero.
 
 Node.js, npm, and pnpm are release-build dependencies only. They are deliberately not installed on the target gateway because the React application is compiled before the release bundle is produced.
 
@@ -28,6 +28,12 @@ The secure installer exposes the panel directly on `0.0.0.0` using HTTPS and the
 On a fresh interactive installation the installer prompts for an administrator username, password, and password confirmation after HTTPS becomes healthy. Password input is read from `/dev/tty`, so the prompt works when the bootstrap itself is executed through `curl | sh`. Use `--skip-admin` for unattended installation or `--admin-user USER` to force an administrator prompt with a preset username.
 
 Existing configuration, IPC key, administrator database, TLS material, and runtime state are retained on repeat installs.
+
+## Browser panel languages
+
+Alpha.8 adds English and Persian to the browser panel. The language selector is available on the login screen and in the main top bar. Persian mode uses RTL layout, keeps technical values such as IP addresses, paths, JSON, and commands left-to-right, and saves the selected language in the browser.
+
+Operator-facing Persian text favors plain-language outcomes over implementation terms. Unfinished Firewall, Logs, and Settings browser pages now say clearly that the browser control is not available instead of showing unrelated Dashboard actions.
 
 ## Package-safety invariant
 
@@ -54,7 +60,7 @@ sudo egress-manager restart
 sudo egress-manager logs
 sudo egress-manager admin operator
 sudo egress-manager update
-sudo egress-manager update v0.1.0-alpha.7
+sudo egress-manager update v0.1.0-alpha.8
 sudo egress-manager config
 sudo egress-manager config-show
 sudo egress-manager config-get listen_port
@@ -108,7 +114,7 @@ egress-manager-offline-ubuntu22.04-amd64.zip
 egress-manager-offline-ubuntu22.04-amd64.zip.sha256
 ```
 
-Alpha.7 checksum sidecars contain only the archive basename, so verification works directly from the directory containing both files:
+Alpha.7 and later checksum sidecars contain only the archive basename, so verification works directly from the directory containing both files:
 
 ```sh
 sha256sum -c egress-manager-offline-ubuntu22.04-amd64.zip.sha256
