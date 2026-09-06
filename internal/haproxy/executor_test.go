@@ -1,6 +1,7 @@
 package haproxy
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/egress-manager/egress-manager/internal/database"
 	"github.com/egress-manager/egress-manager/internal/domain"
+	"github.com/egress-manager/egress-manager/internal/secrets"
 	"github.com/egress-manager/egress-manager/internal/system"
 )
 
@@ -77,6 +79,15 @@ func haproxyTestStore(t *testing.T) *database.Store {
 	return database.NewStore(connection)
 }
 
+func haproxyTestProtector(t *testing.T) *secrets.Protector {
+	t.Helper()
+	protector, err := secrets.NewProtector([32]byte{7, 6, 5, 4}, bytes.NewReader(bytes.Repeat([]byte{3}, 8192)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return protector
+}
+
 func executorTestPlan(t *testing.T, content []byte, exists bool) Plan {
 	t.Helper()
 	frontends, backends := testHAProxyDesired()
@@ -100,7 +111,7 @@ func TestExecutorValidatesInstallsReloadsVerifiesAndCommits(t *testing.T) {
 	runner := &haproxyRunner{t: t, steps: []haproxyRunnerStep{{name: "haproxy", contains: []string{"-c -f "}}, {name: "haproxy", contains: []string{"-D -W", "-f " + configPath, "-p " + pidPath}}}}
 	runtime := &switchRuntime{}
 	store := haproxyTestStore(t)
-	response, err := (Executor{Runner: runner, Journal: store, Runtime: runtime, ConfigPath: configPath, PIDPath: pidPath}).Execute(context.Background(), "haproxy_success", `{}`, plan)
+	response, err := (Executor{Runner: runner, Journal: store, Runtime: runtime, Protector: haproxyTestProtector(t), ConfigPath: configPath, PIDPath: pidPath}).Execute(context.Background(), "haproxy_success", `{}`, plan)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +142,7 @@ func TestExecutorNativeValidationFailureDoesNotInstall(t *testing.T) {
 	plan := executorTestPlan(t, nil, false)
 	runner := &haproxyRunner{t: t, steps: []haproxyRunnerStep{{name: "haproxy", contains: []string{"-c -f "}, err: errors.New("invalid config")}}}
 	store := haproxyTestStore(t)
-	_, err := (Executor{Runner: runner, Journal: store, Runtime: &switchRuntime{}, ConfigPath: configPath, PIDPath: pidPath}).Execute(context.Background(), "haproxy_invalid", `{}`, plan)
+	_, err := (Executor{Runner: runner, Journal: store, Runtime: &switchRuntime{}, Protector: haproxyTestProtector(t), ConfigPath: configPath, PIDPath: pidPath}).Execute(context.Background(), "haproxy_invalid", `{}`, plan)
 	if err == nil || !strings.Contains(err.Error(), "invalid config") {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -170,7 +181,7 @@ func TestExecutorVerificationFailureRestoresPreviousConfig(t *testing.T) {
 		{name: "haproxy", contains: []string{"-sf 41"}, after: func() { runtime.unhealthy = false }},
 	}}
 	store := haproxyTestStore(t)
-	executor := Executor{Runner: runner, Journal: store, Runtime: runtime, ConfigPath: configPath, PIDPath: pidPath, Timeout: time.Millisecond}
+	executor := Executor{Runner: runner, Journal: store, Runtime: runtime, Protector: haproxyTestProtector(t), ConfigPath: configPath, PIDPath: pidPath, Timeout: time.Millisecond}
 	if _, err := executor.Execute(context.Background(), "haproxy_rollback", `{}`, newPlan); err == nil || !strings.Contains(err.Error(), "runtime unavailable") {
 		t.Fatalf("Execute() error = %v", err)
 	}

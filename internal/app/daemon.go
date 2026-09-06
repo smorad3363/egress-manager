@@ -87,7 +87,7 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 	xrayDiscoverer := managedXray.Discoverer{Runner: runner, Files: managedXray.OSFileSystem{}, Timeout: 2 * time.Second}
 	executor := nat.Executor{Runner: runner, Journal: store, Verifier: nat.SystemVerifier{Runner: runner}}
 	haproxyRuntime := managedHAProxy.RuntimeClient{SocketPath: configuration.HAProxyRuntimeSocketPath, Dialer: managedHAProxy.NetDialer{}, Timeout: 2 * time.Second}
-	haproxyExecutor := managedHAProxy.Executor{Runner: runner, Journal: store, Runtime: haproxyRuntime, ConfigPath: configuration.HAProxyConfigPath, PIDPath: configuration.HAProxyPIDPath}
+	haproxyExecutor := managedHAProxy.Executor{Runner: runner, Journal: store, Runtime: haproxyRuntime, Protector: protector, ConfigPath: configuration.HAProxyConfigPath, PIDPath: configuration.HAProxyPIDPath}
 	singboxExecutor := managedSingBox.Executor{Runner: runner, Journal: store, Protector: protector, ConfigPath: configuration.SingBoxConfigPath}
 	interfaceExecutor := managedInterface.Executor{Runner: runner, Journal: store, Protector: protector, StatePath: configuration.InterfaceStatePath, RuntimeDirectory: configuration.InterfaceRuntimeDirectory}
 	routeExecutor := routeengine.Executor{Runner: runner, Journal: store, Protector: protector, SingBoxConfigPath: configuration.SingBoxConfigPath, RoutingStatePath: configuration.RoutingStatePath, BypassStatePath: configuration.BypassStatePath, InterfaceStatePath: configuration.InterfaceStatePath, InterfaceRuntimeDirectory: configuration.InterfaceRuntimeDirectory}
@@ -393,6 +393,11 @@ func RunDaemon(ctx context.Context, options DaemonOptions) error {
 					return nil, err
 				}
 				component = "xray"
+			case "haproxy_apply":
+				if err := haproxyExecutor.RollbackCommitted(ctx, operation); err != nil {
+					return nil, err
+				}
+				component = "haproxy"
 			default:
 				return nil, reliability.NoRollbackAvailableError{}
 			}

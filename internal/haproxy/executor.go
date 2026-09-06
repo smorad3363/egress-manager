@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/egress-manager/egress-manager/internal/domain"
+	"github.com/egress-manager/egress-manager/internal/secrets"
 	"github.com/egress-manager/egress-manager/internal/system"
 )
 
@@ -27,10 +28,16 @@ type Runtime interface {
 	Snapshot(context.Context) (RuntimeSnapshot, error)
 }
 
+type JournalProtector interface {
+	Seal(string, []byte) (secrets.Envelope, error)
+	Open(string, secrets.Envelope) ([]byte, error)
+}
+
 type Executor struct {
 	Runner     system.Runner
 	Journal    Journal
 	Runtime    Runtime
+	Protector  JournalProtector
 	ConfigPath string
 	PIDPath    string
 	Timeout    time.Duration
@@ -52,6 +59,9 @@ func (executor Executor) Execute(ctx context.Context, id domain.ID, requestedCha
 	if err := executor.validate(); err != nil {
 		return ApplyResponse{}, err
 	}
+	if executor.Protector == nil {
+		return ApplyResponse{}, fmt.Errorf("HAProxy journal protector is required")
+	}
 	if err := validateExecutablePlan(plan); err != nil {
 		return ApplyResponse{}, err
 	}
@@ -70,8 +80,16 @@ func (executor Executor) Execute(ctx context.Context, id domain.ID, requestedCha
 	if err != nil {
 		return ApplyResponse{}, fmt.Errorf("encode HAProxy snapshot: %w", err)
 	}
+	protectedSnapshot, err := executor.protectJournal(id, "snapshot", snapshotJSON)
+	if err != nil {
+		return ApplyResponse{}, err
+	}
+	protectedCandidate, err := executor.protectJournal(id, "candidate", []byte(plan.Candidate))
+	if err != nil {
+		return ApplyResponse{}, err
+	}
 	now := executor.now()
-	operation := domain.Transaction{ID: id, Operation: "haproxy_apply", State: domain.TransactionPrepared, RequestedChange: requestedChange, PreviousSnapshot: string(snapshotJSON), CandidateConfig: plan.Candidate, CreatedAt: now, UpdatedAt: now}
+	operation := domain.Transaction{ID: id, Operation: "haproxy_apply", State: domain.TransactionPrepared, RequestedChange: requestedChange, PreviousSnapshot: protectedSnapshot, CandidateConfig: protectedCandidate, CreatedAt: now, UpdatedAt: now}
 	if err := executor.Journal.CreateOperation(ctx, operation); err != nil {
 		return ApplyResponse{}, fmt.Errorf("journal prepared HAProxy operation: %w", err)
 	}
@@ -129,12 +147,8 @@ func (executor Executor) Recover(ctx context.Context) error {
 		if operation.Operation != "haproxy_apply" {
 			continue
 		}
-		var snapshot recoverySnapshot
-		if err := json.Unmarshal([]byte(operation.PreviousSnapshot), &snapshot); err != nil {
-			recoveryErrors = append(recoveryErrors, err)
-			continue
-		}
-		if _, err := ParseState(snapshot.Content, snapshot.Exists); err != nil {
+		snapshot, err := executor.openRecoverySnapshot(operation)
+		if err != nil {
 			recoveryErrors = append(recoveryErrors, err)
 			continue
 		}
@@ -156,6 +170,55 @@ func (executor Executor) Recover(ctx context.Context) error {
 		}
 	}
 	return errors.Join(recoveryErrors...)
+}
+
+func (executor Executor) protectJournal(id domain.ID, purpose string, plaintext []byte) (string, error) {
+	envelope, err := executor.Protector.Seal(haproxyJournalContext(id, purpose), plaintext)
+	if err != nil {
+		return "", fmt.Errorf("protect HAProxy journal %s: %w", purpose, err)
+	}
+	encoded, err := json.Marshal(envelope)
+	if err != nil {
+		return "", fmt.Errorf("encode protected HAProxy journal %s: %w", purpose, err)
+	}
+	return string(encoded), nil
+}
+
+func (executor Executor) openRecoverySnapshot(operation domain.Transaction) (recoverySnapshot, error) {
+	var envelope secrets.Envelope
+	if err := json.Unmarshal([]byte(operation.PreviousSnapshot), &envelope); err == nil && len(envelope.Nonce) != 0 && len(envelope.Ciphertext) != 0 {
+		return executor.openProtectedSnapshot(operation, envelope)
+	}
+	var snapshot recoverySnapshot
+	if err := json.Unmarshal([]byte(operation.PreviousSnapshot), &snapshot); err != nil {
+		return recoverySnapshot{}, fmt.Errorf("decode legacy HAProxy recovery snapshot")
+	}
+	if _, err := ParseState(snapshot.Content, snapshot.Exists); err != nil {
+		return recoverySnapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func (executor Executor) openProtectedSnapshot(operation domain.Transaction, envelope secrets.Envelope) (recoverySnapshot, error) {
+	if executor.Protector == nil {
+		return recoverySnapshot{}, fmt.Errorf("HAProxy journal protector is required")
+	}
+	plaintext, err := executor.Protector.Open(haproxyJournalContext(operation.ID, "snapshot"), envelope)
+	if err != nil {
+		return recoverySnapshot{}, fmt.Errorf("authenticate protected HAProxy recovery snapshot: %w", err)
+	}
+	var snapshot recoverySnapshot
+	if err := json.Unmarshal(plaintext, &snapshot); err != nil {
+		return recoverySnapshot{}, fmt.Errorf("decode protected HAProxy recovery snapshot")
+	}
+	if _, err := ParseState(snapshot.Content, snapshot.Exists); err != nil {
+		return recoverySnapshot{}, err
+	}
+	return snapshot, nil
+}
+
+func haproxyJournalContext(id domain.ID, purpose string) string {
+	return "haproxy/" + string(id) + "/" + purpose + "/v1"
 }
 
 func (executor Executor) failWithRollback(ctx context.Context, operation domain.Transaction, previous recoverySnapshot, from domain.TransactionState, detail string, cause error) error {

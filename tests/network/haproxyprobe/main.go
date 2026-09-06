@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/egress-manager/egress-manager/internal/domain"
 	managed "github.com/egress-manager/egress-manager/internal/haproxy"
+	"github.com/egress-manager/egress-manager/internal/secrets"
 	"github.com/egress-manager/egress-manager/internal/system"
 )
 
@@ -61,7 +63,12 @@ func main() {
 		return
 	}
 	journal := &memoryJournal{}
-	response, err := (managed.Executor{Runner: system.ExecRunner{}, Journal: journal, Runtime: runtimeClient(), ConfigPath: configPath, PIDPath: pidPath}).Execute(context.Background(), "haproxy_lab", `{}`, plan)
+	protector, err := secrets.NewProtector([32]byte{1}, rand.Reader)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	response, err := (managed.Executor{Runner: system.ExecRunner{}, Journal: journal, Runtime: runtimeClient(), Protector: protector, ConfigPath: configPath, PIDPath: pidPath}).Execute(context.Background(), "haproxy_lab", `{}`, plan)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

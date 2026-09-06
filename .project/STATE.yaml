@@ -11,7 +11,7 @@ status: in_progress
 
 last_green_ref: HEAD
 
-next_action: protect new HAProxy and NAT journal snapshots with authenticated envelopes, preserve safe legacy crash recovery, and add exact manual rollback preconditions before making those formats eligible
+next_action: protect new nftables and iptables NAT journal snapshots with authenticated envelopes, preserve safe legacy crash recovery, and add exact manual rollback preconditions before making those formats eligible
 
 dirty_work_expected: false
 
@@ -127,9 +127,11 @@ recent_decisions:
   - Manual rollback reuses the original committed transaction as its audit record through COMMITTED to ROLLING_BACK to ROLLED_BACK; failed restores remain unfinished for recovery retry.
   - Only the newest committed operation is considered; unsupported formats are not skipped. Route-engine apply and bypass are the first eligible authenticated formats.
   - Sing-box, native-interface, and writable-Xray rollback authenticate snapshot and candidate and require exact current owned/runtime evidence; Xray also requires unchanged foreign confdir state.
+  - New HAProxy transactions authenticate both snapshot and candidate; manual rollback additionally requires exact current owned configuration, healthy Runtime API state, and native validation of the prior configuration.
 
 touched_areas:
   - authenticated sing-box rollback
   - authenticated native-interface rollback
   - authenticated writable-Xray rollback
   - rollback dispatcher
+  - authenticated HAProxy rollback
