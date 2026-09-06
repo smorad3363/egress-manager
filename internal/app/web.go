@@ -96,17 +96,26 @@ func RunWeb(ctx context.Context, options WebOptions) error {
 	if err != nil {
 		return err
 	}
+
+	handler := apiServer.Handler()
 	assetsPath := options.AssetsPath
 	if assetsPath == "" {
 		assetsPath = defaultWebAssetsPath
+		if _, statErr := os.Stat(filepath.Join(assetsPath, "index.html")); os.IsNotExist(statErr) {
+			assetsPath = ""
+		}
 	}
-	panel, err := panelHandler(apiServer.Handler(), assetsPath)
-	if err != nil {
-		return err
+	if assetsPath != "" {
+		panel, panelErr := panelHandler(handler, assetsPath)
+		if panelErr != nil {
+			return panelErr
+		}
+		handler = api.SecurityHeaders(panel)
 	}
+
 	httpServer := &http.Server{
 		Addr:              net.JoinHostPort(configuration.ListenAddress, fmt.Sprintf("%d", configuration.ListenPort)),
-		Handler:           api.SecurityHeaders(panel),
+		Handler:           handler,
 		ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout:       15 * time.Second,
 		WriteTimeout:      30 * time.Second,
