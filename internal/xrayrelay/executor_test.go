@@ -193,7 +193,7 @@ func TestExecutorRestartFailureRollsBackInitialApply(t *testing.T) {
 		t.Fatalf("candidate remains after rollback: %v", statErr)
 	}
 	operation, _ := store.Operation(context.Background(), "relay_rollback")
-	if operation.State != domain.TransactionRolledBack || operation.FailureDetail != "restart_failed" {
+	if operation.State != domain.TransactionRolledBack || operation.FailureDetail != "service_transition_failed" {
 		t.Fatalf("operation = %#v", operation)
 	}
 }
