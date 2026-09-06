@@ -5,8 +5,6 @@ on:
     branches:
       - feat/listener-egress-relay-alpha9
     paths:
-      - scripts/dev/alpha9_backend_patch.py
-      - scripts/dev/alpha9_backend_fix1.py
       - scripts/dev/alpha9_ui_fix.py
       - .github/workflows/alpha9-implementation.yml
   workflow_dispatch:
@@ -23,32 +21,18 @@ jobs:
         with:
           ref: feat/listener-egress-relay-alpha9
           fetch-depth: 0
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.27.1'
-          cache: true
-      - name: Apply deterministic integration patches
-        run: |
-          python3 scripts/dev/alpha9_backend_patch.py
-          python3 scripts/dev/alpha9_backend_fix1.py
-          python3 scripts/dev/alpha9_ui_fix.py
-      - name: Format
-        run: gofmt -w internal/domain/relay.go internal/domain/relay_test.go internal/database/relay.go internal/database/database_test.go internal/database/relay_test.go internal/xrayrelay internal/api/relays.go internal/api/control.go internal/api/server.go internal/api/outbounds.go internal/api/server_test.go internal/app/daemon.go internal/app/web.go internal/app/app_test.go internal/config/config.go internal/ipc/protocol.go
-      - name: Verify Go
-        run: |
-          git diff --check
-          go test ./...
-          go vet ./...
-      - name: Verify installer syntax
-        run: sh -n scripts/install/install.sh scripts/install/install-secure.sh
-      - name: Commit generated integration
+      - name: Apply remaining UI regression patch
+        run: python3 scripts/dev/alpha9_ui_fix.py
+      - name: Verify patch cleanliness
+        run: git diff --check
+      - name: Commit generated UI regression fix
         run: |
           if git diff --quiet; then
-            echo 'No integration changes to commit.'
+            echo 'No UI changes to commit.'
             exit 0
           fi
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add internal packaging scripts/install web/tests/design-system.spec.ts
-          git commit -m 'Finalize Alpha.9 relay integration [alpha9-generated]'
+          git add web/tests/design-system.spec.ts
+          git commit -m 'Update shell regression coverage for relays [alpha9-generated]'
           git push origin HEAD:feat/listener-egress-relay-alpha9
