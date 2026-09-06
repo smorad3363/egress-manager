@@ -107,6 +107,28 @@ jobs:
           bundle="egress-manager-offline-ubuntu${ubuntu}-amd64"
           test "$(awk 'NR==1 {print $2}' "dist/${bundle}.zip.sha256")" = "${bundle}.zip"
           (cd dist && sha256sum -c "${bundle}.zip.sha256")
+      - name: Create foreign proxy-panel sentinels
+        run: |
+          sudo install -d -m 0755 /etc/xray /var/lib/marzban /usr/local/x-ui/bin
+          printf '%s\n' '{"marker":"foreign-standalone-xray"}' | sudo tee /etc/xray/config.json >/dev/null
+          printf '%s\n' '{"marker":"foreign-marzban"}' | sudo tee /var/lib/marzban/xray_config.json >/dev/null
+          printf '%s\n' '{"marker":"foreign-3x-ui"}' | sudo tee /usr/local/x-ui/bin/config.json >/dev/null
+          for service in xray marzban x-ui; do
+            sudo tee "/etc/systemd/system/${service}.service" >/dev/null <<EOF
+          [Unit]
+          Description=Foreign proxy panel sentinel ${service}
+          [Service]
+          Type=simple
+          ExecStart=/usr/bin/sleep 3600
+          Restart=no
+          EOF
+          done
+          sudo systemctl daemon-reload
+          sudo systemctl start xray.service marzban.service x-ui.service
+          sudo sha256sum /etc/xray/config.json /var/lib/marzban/xray_config.json /usr/local/x-ui/bin/config.json > /tmp/foreign-proxy-files.sha256
+          for service in xray marzban x-ui; do
+            printf '%s=%s\n' "${service}" "$(systemctl show --property=MainPID --value "${service}.service")"
+          done > /tmp/foreign-proxy-pids.before
       - name: Snapshot installed host packages
         run: |
           dpkg-query -W -f='${binary:Package}\t${db:Status-Status}\n' \
@@ -128,6 +150,14 @@ jobs:
           sudo sh "/tmp/egress-offline-ci/${bundle}/install.sh" \
             --bundle-root "/tmp/egress-offline-ci/${bundle}" \
             --self-signed --ip "${ipaddr}"
+      - name: Verify foreign proxy panels stayed untouched
+        run: |
+          sudo sha256sum -c /tmp/foreign-proxy-files.sha256
+          for service in xray marzban x-ui; do
+            systemctl is-active --quiet "${service}.service"
+            printf '%s=%s\n' "${service}" "$(systemctl show --property=MainPID --value "${service}.service")"
+          done > /tmp/foreign-proxy-pids.after
+          diff -u /tmp/foreign-proxy-pids.before /tmp/foreign-proxy-pids.after
       - name: Verify installer removed no host packages
         run: |
           python3 -c 'import json, zipfile, ipaddress, tempfile'
@@ -155,6 +185,8 @@ jobs:
           test -x /usr/local/lib/egress-manager/manager.sh
           test -L /usr/local/bin/egress-manager
           test -f /usr/local/lib/egress-manager/web/index.html
+          test -s /usr/local/lib/egress-manager/VERSION
+          test "$(sed -n '1p' /usr/local/lib/egress-manager/VERSION)" = "ci"
           sudo grep -q '"listen_address": "0.0.0.0"' /etc/egress-manager/config.json
           sudo grep -q '"allow_insecure_http": false' /etc/egress-manager/config.json
           sudo grep -q '"xray_relay_config_path": "/var/lib/egress-manager/private/xray-relay.json"' /etc/egress-manager/config.json
@@ -207,6 +239,13 @@ jobs:
           sudo sh "/tmp/egress-offline-ci/${bundle}/install.sh" \
             --bundle-root "/tmp/egress-offline-ci/${bundle}" \
             --self-signed --ip "${ipaddr}"
+          test "$(sed -n '1p' /usr/local/lib/egress-manager/VERSION)" = "ci"
+          sudo sha256sum -c /tmp/foreign-proxy-files.sha256
+          for service in xray marzban x-ui; do
+            systemctl is-active --quiet "${service}.service"
+            printf '%s=%s\n' "${service}" "$(systemctl show --property=MainPID --value "${service}.service")"
+          done > /tmp/foreign-proxy-pids.repeat
+          diff -u /tmp/foreign-proxy-pids.before /tmp/foreign-proxy-pids.repeat
           port="$(sudo sed -n 's/^[[:space:]]*"listen_port":[[:space:]]*\([0-9][0-9]*\),*$/\1/p' /etc/egress-manager/config.json)"
           curl -k --fail --silent --show-error \
             -c /tmp/egress-cookies-after-upgrade \
