@@ -1,0 +1,49 @@
+name: Alpha.9 relay integration
+
+on:
+  push:
+    branches:
+      - feat/listener-egress-relay-alpha9
+    paths:
+      - scripts/dev/alpha9_backend_patch.py
+      - .github/workflows/alpha9-implementation.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    if: ${{ !contains(github.event.head_commit.message || '', '[alpha9-generated]') }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feat/listener-egress-relay-alpha9
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.1'
+          cache: true
+      - name: Apply deterministic integration patch
+        run: python3 scripts/dev/alpha9_backend_patch.py
+      - name: Format
+        run: gofmt -w internal/domain/relay.go internal/domain/relay_test.go internal/database/relay.go internal/xrayrelay internal/api/relays.go internal/api/control.go internal/api/server.go internal/api/outbounds.go internal/app/daemon.go internal/app/web.go internal/config/config.go internal/ipc/protocol.go
+      - name: Verify Go
+        run: |
+          git diff --check
+          go test ./...
+          go vet ./...
+      - name: Verify installer syntax
+        run: sh -n scripts/install/install.sh
+      - name: Commit generated integration
+        run: |
+          if git diff --quiet; then
+            echo 'No integration changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add internal packaging scripts/install
+          git commit -m 'Integrate Xray listener relay backend [alpha9-generated]'
+          git push origin HEAD:feat/listener-egress-relay-alpha9
