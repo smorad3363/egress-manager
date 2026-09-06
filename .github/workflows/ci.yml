@@ -48,27 +48,62 @@ jobs:
       matrix:
         os: [ubuntu-22.04, ubuntu-24.04, ubuntu-26.04]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v6
         with:
           go-version: "1.27.1"
           cache: true
-      - name: Build installer artifact
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.25.0
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24.19.0
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: Install package build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends unzip zip
+      - name: Build browser panel
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Build installer package
         env:
           VERSION: ci
           COMMIT: ${{ github.sha }}
+          GOARCH: amd64
         run: sh scripts/release/build-linux.sh
-      - name: Install and start services
-        run: sudo env EGRESS_ARTIFACT_FILE="${{ github.workspace }}/dist/egress-manager-linux-amd64.tar.gz" sh scripts/install/install.sh
-      - name: Verify service boundary and health
+      - name: Build matching offline bundle
+        env:
+          VERSION: ci
+        run: |
+          target="${{ matrix.os }}"
+          ubuntu="${target#ubuntu-}"
+          UBUNTU_VERSION="${ubuntu}" ARCHITECTURE=amd64 sh scripts/release/build-offline-bundle.sh
+      - name: Install only from extracted bundle
+        run: |
+          target="${{ matrix.os }}"
+          ubuntu="${target#ubuntu-}"
+          bundle="egress-manager-offline-ubuntu${ubuntu}-amd64"
+          rm -rf /tmp/egress-offline-ci
+          mkdir -p /tmp/egress-offline-ci
+          python3 -m zipfile -e "dist/${bundle}.zip" /tmp/egress-offline-ci
+          sudo sh "/tmp/egress-offline-ci/${bundle}/install.sh"
+      - name: Verify service boundary, bundled runtimes, UI, and health
         run: |
           sudo /usr/local/lib/egress-manager/verify.sh
           test "$(systemctl show egress-web.service --property=User --value)" = "egress-web"
           test "$(sudo stat -c '%a:%U:%G' /var/lib/egress-manager/private)" = "700:root:root"
           test "$(sudo stat -c '%a:%U:%G' /var/lib/egress-manager/database)" = "770:root:egress-manager"
           test "$(sudo stat -c '%a:%U:%G' /var/lib/egress-manager/database/egress-manager.db)" = "660:root:egress-manager"
+          test -x /usr/local/lib/egress-manager/bin/sing-box
+          test -x /usr/local/lib/egress-manager/bin/xray
+          test -f /usr/local/lib/egress-manager/web/index.html
           sudo systemd-analyze verify /etc/systemd/system/egressd.service /etc/systemd/system/egress-web.service /etc/systemd/system/egress-manager-sing-box.service
 
   network-lab:
