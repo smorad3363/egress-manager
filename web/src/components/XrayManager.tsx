@@ -32,7 +32,7 @@ type LoadState =
   | { status: "loading" }
   | { status: "ready"; outbounds: StoredOutbound[]; relays: StoredRelay[] };
 
-export function XrayManager({ createRequest: _createRequest }: { createRequest: number }) {
+export function XrayManager({ createRequest }: { createRequest: number }) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
 
   const load = useCallback(async () => {
@@ -54,6 +54,7 @@ export function XrayManager({ createRequest: _createRequest }: { createRequest: 
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { if (createRequest > 0) void load(); }, [createRequest, load]);
 
   if (state.status === "loading") {
     return <section><Heading /><div className="forward-loading"><Skeleton /><Skeleton /><Skeleton /></div></section>;
