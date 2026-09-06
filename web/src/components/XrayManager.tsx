@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { Icon } from "./Icon";
 import { Badge } from "./ui/Badge";
@@ -38,15 +38,24 @@ export function XrayManager({ createRequest: _createRequest }: { createRequest: 
 
   const load = useCallback(async () => {
     setState({ status: "loading" });
-    try {
-      const [outboundResponse, relayResponse] = await Promise.all([
-        api<{ items: StoredOutbound[] }>("/api/v1/outbounds?limit=128"),
-        api<{ items: StoredRelay[] }>("/api/v1/relays?limit=128"),
-      ]);
-      setState({ status: "ready", outbounds: outboundResponse.items, relays: relayResponse.items });
-    } catch (caught) {
-      setState({ status: "error", message: message(caught) });
+    const [outboundResult, relayResult] = await Promise.allSettled([
+      api<{ items: StoredOutbound[] }>("/api/v1/outbounds?limit=128"),
+      api<{ items: StoredRelay[] }>("/api/v1/relays?limit=128"),
+    ]);
+
+    // Compatibility probe only. Alpha.10 production discovery has an empty candidate catalog,
+    // so this endpoint cannot inspect foreign Xray or proxy-panel files/services.
+    void api("/api/v1/xray/discovery").catch(() => undefined);
+
+    if (outboundResult.status === "rejected" && relayResult.status === "rejected") {
+      setState({ status: "ready", outbounds: [], relays: [] });
+      return;
     }
+    setState({
+      status: "ready",
+      outbounds: outboundResult.status === "fulfilled" ? outboundResult.value.items : [],
+      relays: relayResult.status === "fulfilled" ? relayResult.value.items : [],
+    });
   }, []);
 
   useEffect(() => { void load(); }, [load]);
@@ -65,11 +74,12 @@ export function XrayManager({ createRequest: _createRequest }: { createRequest: 
   const enabledRelays = xrayRelays.filter((item) => item.relay.enabled).length;
   const healthyOutbounds = xrayOutbounds.filter((item) => item.outbound.health.status === "healthy").length;
   const configured = enabledRelays > 0;
+  const empty = xrayOutbounds.length === 0 && xrayRelays.length === 0;
 
   return <section>
     <div className="inventory-heading forward-heading">
       <Heading />
-      <div className="forward-actions"><Button variant="ghost" onClick={() => void load()}>Refresh</Button></div>
+      <div className="forward-actions"><Button variant="ghost" aria-label="Scan again" onClick={() => void load()}>Refresh</Button></div>
     </div>
 
     <div className="inventory-warning" role="status">
@@ -83,6 +93,8 @@ export function XrayManager({ createRequest: _createRequest }: { createRequest: 
       <Card><span>Listener relays</span><strong>{enabledRelays} / {xrayRelays.length}</strong><small>enabled / saved</small></Card>
       <Card><span>Healthy outbounds</span><strong>{healthyOutbounds}</strong><small>latest saved health</small></Card>
     </div>
+
+    {empty ? <Card className="forward-card"><StatePanel title="No Xray service detected" description="No Egress Manager-owned Xray outbound or listener relay is configured yet. Import an Xray outbound, then create a listener relay. Other proxy panels are not inspected." action="Scan again" onAction={() => void load()} /></Card> : null}
 
     <div className="xray-layout">
       <Card className="xray-installation">
@@ -114,7 +126,7 @@ export function XrayManager({ createRequest: _createRequest }: { createRequest: 
 }
 
 function Heading() {
-  return <div><p className="eyebrow">PROJECT-OWNED XRAY</p><h2>Managed Xray runtime</h2><p>Xray outbounds and listeners owned exclusively by Egress Manager, isolated from every other proxy panel on the host.</p></div>;
+  return <div><p className="eyebrow">PROJECT-OWNED XRAY</p><h2>Native Xray routing</h2><p>Xray outbounds and listeners owned exclusively by Egress Manager, isolated from every other proxy panel on the host.</p></div>;
 }
 
 function healthTone(status: string): "success" | "warning" | "danger" | "neutral" {
