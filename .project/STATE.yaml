@@ -31,7 +31,8 @@ network_transaction:
 speckit:
   run_id: null
 
-blockers: []
+blockers:
+  - A real disposable Linux VM reboot gate requires an external VM runner or prepared test host; this workstation exposes no QEMU, Vagrant, Multipass, VMware runner, or non-Docker WSL distribution.
 
 recent_decisions:
   - English roadmap is authoritative; Persian copy is reference-only.

@@ -39,6 +39,8 @@ docker run --rm --privileged egress-manager-network-lab
 > [!important]
 > A fresh-container network namespace is strong evidence for loss of volatile kernel state, but it is not evidence of a real init-system boot. Before closing Phase 11, run the same release artifact across an actual reboot of a disposable Linux VM and record the result here.
 
+Current workstation check: no QEMU, Vagrant, Multipass, VMware runner, or non-Docker WSL distribution is available. Provisioning or selecting a disposable Linux host is therefore an external gate, not an automated repository action.
+
 ## Disposable VM reboot gate
 
 1. Apply one sing-box route and one native-interface route with kill switches.
